@@ -19,3 +19,17 @@ cd server
 go test ./...
 go run ./cmd/server
 ```
+
+### Core Schema
+
+The first PostgreSQL migration lives in [migrations/20260423183000_core_schema.sql](migrations/20260423183000_core_schema.sql).
+
+It creates the tenant-aware foundation tables:
+
+- tenants
+- roles
+- users
+- groups
+- policies
+- devices
+- device_groups
