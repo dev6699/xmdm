@@ -5,6 +5,7 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
+Snapshot last updated: 2026-04-23
 
 ### M0 - Foundation
 
@@ -27,7 +28,7 @@ Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checkli
 | M1-02 RBAC | ☑ |
 | M1-03 Core Schema | ☑ |
 | M1-04 Core CRUD | ☑ |
-| M1-05 Migration Tooling | ☐ |
+| M1-05 Migration Tooling | ☑ |
 | M1-06 Audit Capture | ☐ |
 | M1-07 Admin E2E | ☐ |
 | M1-08 Plugin Isolation | ☐ |

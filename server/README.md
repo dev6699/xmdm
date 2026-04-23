@@ -33,3 +33,9 @@ It creates the tenant-aware foundation tables:
 - policies
 - devices
 - device_groups
+
+### Migration Tooling
+
+The local bootstrap migrator lives in [../infra/migrate.sh](../infra/migrate.sh).
+
+It applies the SQL files in [migrations/](migrations/) once, records applied files in `schema_migrations`, and seeds the single active tenant row required by the single-tenant v1 model.

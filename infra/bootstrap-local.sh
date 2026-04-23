@@ -4,6 +4,7 @@ set -eu
 cd "$(dirname "$0")"
 
 docker compose up -d
+./migrate.sh
 
 cat <<'EOF'
 Local stack is starting.

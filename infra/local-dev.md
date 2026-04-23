@@ -14,6 +14,7 @@ Bring up the supporting services first:
 ```sh
 cd infra
 docker compose up -d
+./migrate.sh
 ```
 
 The local stack provides:
@@ -25,9 +26,10 @@ The local stack provides:
 ## Bootstrap Flow
 
 1. Start the local stack.
-2. Run the server with the local configuration file.
-3. Point the Android agent at the local server URL.
-4. Enroll a device and verify sync.
+2. Apply the database migrations and seed data.
+3. Run the server with the local configuration file.
+4. Point the Android agent at the local server URL.
+5. Enroll a device and verify sync.
 
 ## Notes
 
