@@ -3,6 +3,7 @@
 ## Deployment Model
 
 The first supported deployment is single-tenant self-hosted.
+The runtime does not expose multi-tenant SaaS workflows in v1.
 
 Recommended baseline:
 

@@ -63,6 +63,7 @@ The product is a control plane, not a general-purpose endpoint management suite.
 
 ### Deployment
 
+- Single-tenant first in v1.
 - Support Docker Compose as the baseline self-hosted deployment.
 - Allow Kubernetes and systemd wrappers later, but do not optimize for them first.
 
