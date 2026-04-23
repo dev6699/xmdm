@@ -245,11 +245,11 @@ Owner roles used below:
 
 ## Milestone M4 - Content Delivery
 
-### M4-01 App Catalog
+### M4-01 App Management
 
 - Owner: `BE`
 - Depends on: M1-04
-- Task: implement app catalog and version upload.
+- Task: implement app management and version upload.
 - Done when: apps and versions can be created and published.
 
 ### M4-02 File Storage

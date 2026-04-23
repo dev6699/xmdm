@@ -54,7 +54,7 @@ Exit criteria:
 
 ## Phase 3 - Content Delivery
 
-- App catalog
+- App management
 - App version uploads
 - File delivery
 - Certificate delivery

@@ -21,7 +21,7 @@
 | Policy | Runtime device policy | `id`, `tenant_id`, `name`, `version`, `kiosk_mode`, `restrictions_json` |
 | App | Logical app record | `id`, `tenant_id`, `package_name`, `name`, `status` |
 | AppVersion | Immutable package version | `id`, `app_id`, `version_name`, `version_code`, `artifact_id`, `checksum` |
-| FileAsset | Immutable file record | `id`, `tenant_id`, `name`, `artifact_id`, `checksum`, `mime_type` |
+| File | Immutable file record | `id`, `tenant_id`, `name`, `artifact_id`, `checksum`, `mime_type` |
 | Certificate | Managed cert bundle | `id`, `tenant_id`, `name`, `artifact_id`, `checksum` |
 | Command | Admin-issued action | `id`, `tenant_id`, `device_id`, `type`, `payload_json`, `status` |
 | PushMessage | Delivery unit | `id`, `tenant_id`, `device_id`, `type`, `payload_json`, `status` |

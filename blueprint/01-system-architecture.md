@@ -114,7 +114,7 @@ flowchart TD
 - Enrollment service
 - Device inventory service
 - Configuration service
-- App catalog and version service
+- App management and version service
 - File service
 - Certificate service
 - Push service

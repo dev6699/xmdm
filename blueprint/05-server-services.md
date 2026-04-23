@@ -12,7 +12,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 - `internal/auth` for admin sessions and tokens
 - `internal/device` for device inventory and sync
 - `internal/policy` for policy resolution
-- `internal/apps` for app catalog and versions
+- `internal/apps` for app management and versions
 - `internal/files` for file and certificate handling
 - `internal/push` for command fan-out and device notifications
 - `internal/plugins` for plugin registration and plugin settings

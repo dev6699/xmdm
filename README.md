@@ -2,13 +2,6 @@
 
 This repository is the working home for XMDM.
 
-Current saved state:
-
-- Blueprint is written and grouped under [blueprint/README.md](blueprint/README.md)
-- Reference repos `hmdm-android/` and `hmdm-server/` are excluded from Git and treated as read-only references
-- M0-01 Repository Layout was completed on 2026-04-23 and freezes `app/`, `server/`, `contracts/`, `infra/`, and `docs/`
-- Implementation code for XMDM has not started beyond the layout and documentation scaffold
-
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
@@ -18,7 +11,7 @@ Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checkli
 | Item | State |
 | --- | --- |
 | M0-01 Repository Layout | ☑ |
-| M0-02 Glossary And Naming | ☐ |
+| M0-02 Glossary And Naming | ☑ |
 | M0-03 API Versioning Rules | ☐ |
 | M0-04 Stack Selection | ☐ |
 | M0-05 CI Skeleton | ☐ |
@@ -68,7 +61,7 @@ Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checkli
 
 | Item | State |
 | --- | --- |
-| M4-01 App Catalog | ☐ |
+| M4-01 App Management | ☐ |
 | M4-02 File Storage | ☐ |
 | M4-03 Certificates | ☐ |
 | M4-04 Checksum Verification | ☐ |

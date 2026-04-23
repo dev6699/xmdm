@@ -127,16 +127,18 @@ The product is a control plane, not a general-purpose endpoint management suite.
 
 ## Glossary
 
-- **Admin**: a human operator using the web console.
+- **Tenant**: the account boundary. XMDM starts with one tenant but keeps the schema tenant-aware.
 - **Device**: one managed Android endpoint.
 - **Enrollment**: binding a device to the control plane and issuing device credentials.
-- **Policy profile**: the set of rules applied to a device at sync time.
-- **App catalog**: the managed set of application metadata and versions.
-- **File asset**: any managed binary or document distributed to a device.
+- **Policy**: the set of rules applied to a device at sync time.
+- **App**: the managed application record and its versions.
+- **File**: any managed binary or document distributed to a device.
 - **Command**: an admin-approved remote action.
-- **Plugin**: an optional module that extends behavior or UI.
-- **Tenant**: the account boundary. XMDM starts with one tenant but keeps the schema tenant-aware.
 - **Artifact**: any binary payload that must be downloaded and verified.
+- **Plugin**: an optional module that extends behavior or UI.
+- **Admin**: a human operator using the web console.
+
+Use these nouns consistently across the blueprint and contracts. Prefer singular names for entity types and keep compound phrases as modifiers around the canonical noun, for example `policy snapshot`, `app version`, and `file delivery`.
 
 ## Success Criteria
 
