@@ -8,17 +8,17 @@ Recommended baseline:
 
 - Go server binary
 - PostgreSQL
-- Object storage backend
+- S3-compatible object storage backend
 - MQTT broker or embedded MQTT endpoint
 - Reverse proxy with TLS termination
 
 ## Local Development
 
-- Run PostgreSQL locally or in Docker.
+- Run PostgreSQL, object storage, and MQTT through Docker Compose.
 - Run the Go server with a local config file.
 - Point the Android agent at the local server URL.
 - Use a physical device or emulator that can be device-owner provisioned.
-- Keep local object storage and MQ credentials isolated from production values.
+- Keep local object storage and MQTT credentials isolated from production values.
 
 ## Build Flow
 

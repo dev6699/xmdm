@@ -15,7 +15,7 @@ Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checkli
 | M0-03 API Versioning Rules | ☑ |
 | M0-04 Stack Selection | ☑ |
 | M0-05 CI Skeleton | ☑ |
-| M0-06 Local Dev Setup | ☐ |
+| M0-06 Local Dev Setup | ☑ |
 | M0-07 Deployment Model | ☐ |
 | M0-08 Threat Model | ☐ |
 
