@@ -6,6 +6,19 @@ The Go backend is the authoritative source for auth, policies, device inventory,
 
 The server must be able to start, serve admin requests, and accept device sync even if some optional plugins are unavailable.
 
+## Server Stack
+
+- Go as the primary implementation language.
+- `net/http` for the base HTTP server.
+- `chi` for request routing and middleware.
+- `html/template` for the server-rendered admin console.
+- `pgx` for PostgreSQL access.
+- `sqlc` for typed data access code.
+- `goose` for schema migrations.
+- `slog` for structured logging.
+- Docker Compose for the first supported runtime and local developer environment.
+- `encoding/json` for contract payloads.
+
 ## Backend Packages
 
 - `cmd/server` for the HTTP entrypoint

@@ -13,7 +13,7 @@ Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checkli
 | M0-01 Repository Layout | ☑ |
 | M0-02 Glossary And Naming | ☑ |
 | M0-03 API Versioning Rules | ☑ |
-| M0-04 Stack Selection | ☐ |
+| M0-04 Stack Selection | ☑ |
 | M0-05 CI Skeleton | ☐ |
 | M0-06 Local Dev Setup | ☐ |
 | M0-07 Deployment Model | ☐ |

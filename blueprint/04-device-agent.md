@@ -15,7 +15,9 @@ The agent owns device-side state. The server owns policy truth. The device never
 - Room for local persistence.
 - DataStore for bootstrap and preferences.
 - Retrofit and OkHttp for HTTP APIs.
+- Eclipse Paho for MQTT transport.
 - Foreground service for MQTT when needed.
+- AndroidX for lifecycle, workers, and persistence integration.
 
 ## Agent Modules
 

@@ -43,6 +43,40 @@ flowchart TD
 - The product risk is in behavior and contracts, not distributed systems complexity.
 - A modular monolith with explicit package boundaries is easier to ship, test, and operate.
 
+## Stack Selection
+
+### Android Agent Stack
+
+- Kotlin on the Android Gradle Plugin build system.
+- AndroidX for launcher UI, lifecycle, background work, and persistence.
+- XML layouts with ViewBinding for the launcher and recovery UI.
+- Coroutines and Flow for async work and state propagation.
+- WorkManager for retries and periodic background jobs.
+- Room for structured local persistence.
+- DataStore for bootstrap payloads, preferences, and lightweight device state.
+- Retrofit and OkHttp for HTTP APIs.
+- Eclipse Paho for MQTT transport.
+
+### Go Control Plane Stack
+
+- Go for the HTTP API, admin console, workers, and maintenance jobs.
+- `net/http` as the base server runtime.
+- `chi` for routing and middleware.
+- `html/template` for server-rendered admin pages.
+- `pgx` for PostgreSQL access.
+- `sqlc` for typed query generation.
+- `goose` for database migrations.
+- `slog` for structured logging.
+- Docker Compose for the first supported deployment and local environment.
+
+### Rejected Stack Alternatives
+
+- Jetpack Compose for the launcher UI: rejected because the initial agent UI is intentionally XML and ViewBinding based.
+- Ktor for the Go control plane: rejected because the server stack is Go, not Kotlin.
+- GORM or handwritten ad hoc SQL only: rejected because the schema needs typed queries and repeatable migrations.
+- A SPA-first admin console: rejected because the console must ship as server-rendered HTML first.
+- A Java servlet backend: rejected because the control plane is being rebuilt in Go.
+
 ## Server Boundaries
 
 ### Web Console

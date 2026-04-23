@@ -24,14 +24,15 @@ Recommended baseline:
 
 ### Server
 
-- Compile the Go services.
+- Build the Go services with the repository module graph.
 - Run migrations before starting the server.
+- Use Docker Compose to stand up PostgreSQL, object storage, and MQTT for local runs.
 - Generate any static web assets required by the admin console.
 - Verify the health endpoints before testing the agent.
 
 ### Android Agent
 
-- Build the Kotlin app with the Android toolchain.
+- Build the Kotlin app with the Android Gradle Plugin toolchain.
 - Install to a provisionable device or emulator.
 - Verify enrollment and sync against the development server.
 - Validate that bootstrap values survive app restart and reboot.
