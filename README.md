@@ -6,7 +6,8 @@ Current saved state:
 
 - Blueprint is written and grouped under [blueprint/README.md](blueprint/README.md)
 - Reference repos `hmdm-android/` and `hmdm-server/` are excluded from Git and treated as read-only references
-- Implementation code for XMDM has not started in this repository yet
+- M0-01 Repository Layout was completed on 2026-04-23 and freezes `app/`, `server/`, `contracts/`, `infra/`, and `docs/`
+- Implementation code for XMDM has not started beyond the layout and documentation scaffold
 
 ## Roadmap Snapshot
 
@@ -16,7 +17,7 @@ Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checkli
 
 | Item | State |
 | --- | --- |
-| M0-01 Repository Layout | ☐ |
+| M0-01 Repository Layout | ☑ |
 | M0-02 Glossary And Naming | ☐ |
 | M0-03 API Versioning Rules | ☐ |
 | M0-04 Stack Selection | ☐ |
@@ -127,3 +128,13 @@ Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checkli
 8. [blueprint/07-operations.md](blueprint/07-operations.md)
 9. [blueprint/08-migration-plan.md](blueprint/08-migration-plan.md)
 10. [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
+
+## Repo Layout
+
+The repository is organized into a small set of top-level homes that mirror the blueprint boundaries:
+
+- `app/` for the Android agent implementation
+- `server/` for the Go control plane, API, workers, and admin console
+- `contracts/` for API contracts, payload definitions, and generated interface artifacts
+- `infra/` for deployment, local environment, and operational automation
+- `docs/` for repo-specific documentation, runbooks, and release-support material
