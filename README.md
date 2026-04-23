@@ -31,7 +31,7 @@ Snapshot last updated: 2026-04-23
 | M1-05 Migration Tooling | ☑ |
 | M1-06 Audit Capture | ☑ |
 | M1-07 Admin E2E | ☑ |
-| M1-08 Plugin Isolation | ☐ |
+| M1-08 Plugin Isolation | ☑ |
 
 ### M2 - Enrollment And Sync
 

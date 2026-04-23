@@ -9,6 +9,7 @@ import (
 	"xmdm/server/internal/admin"
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/plugins"
 )
 
 func main() {
@@ -20,7 +21,8 @@ func main() {
 	svc := auth.NewService(username, password, sessionTTL)
 	store := admin.NewStore()
 	auditStore := audit.NewStore()
-	mux := newMux(svc, store, auditStore)
+	pluginManager := plugins.Disabled()
+	mux := newMux(svc, store, auditStore, pluginManager)
 
 	log.Printf("xmdm server listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -28,7 +30,7 @@ func main() {
 	}
 }
 
-func newMux(svc *auth.Service, store *admin.Store, auditStore *audit.Store) http.Handler {
+func newMux(svc *auth.Service, store *admin.Store, auditStore *audit.Store, pluginManager *plugins.Manager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -93,6 +95,7 @@ func newMux(svc *auth.Service, store *admin.Store, auditStore *audit.Store) http
 	})
 
 	registerCRUD(mux, svc, store, auditStore, "tenant-1")
+	pluginManager.Register(mux)
 	return mux
 }
 

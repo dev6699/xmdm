@@ -11,6 +11,7 @@ import (
 	"xmdm/server/internal/admin"
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/plugins"
 )
 
 func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
@@ -18,7 +19,7 @@ func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
 	now := time.Now()
 	svc.SetNow(func() time.Time { return now })
 
-	mux := newMux(svc, admin.NewStore(), audit.NewStore())
+	mux := newMux(svc, admin.NewStore(), audit.NewStore(), plugins.Disabled())
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/devices", nil)
 	res := httptest.NewRecorder()
@@ -62,7 +63,7 @@ func TestAdminDevicesRouteAllowsPermission(t *testing.T) {
 		t.Fatalf("login failed: %v", err)
 	}
 
-	mux := newMux(svc, admin.NewStore(), audit.NewStore())
+	mux := newMux(svc, admin.NewStore(), audit.NewStore(), plugins.Disabled())
 	req := httptest.NewRequest(http.MethodGet, "/admin/devices", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res := httptest.NewRecorder()
@@ -78,7 +79,7 @@ func TestCoreCrudLifecycle(t *testing.T) {
 	svc.SetNow(func() time.Time { return now })
 	store := admin.NewStore()
 	auditStore := audit.NewStore()
-	mux := newMux(svc, store, auditStore)
+	mux := newMux(svc, store, auditStore, plugins.Disabled())
 
 	session, err := svc.Login("admin", "secret")
 	if err != nil {
@@ -128,5 +129,26 @@ func TestCoreCrudLifecycle(t *testing.T) {
 	}
 	if events[0].Action != "create" || events[len(events)-1].Action != "retire" {
 		t.Fatalf("unexpected audit actions: first=%s last=%s", events[0].Action, events[len(events)-1].Action)
+	}
+}
+
+func TestPluginIsolationDoesNotExposeOptionalRoutes(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Minute)
+	now := time.Now()
+	svc.SetNow(func() time.Time { return now })
+
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+
+	mux := newMux(svc, admin.NewStore(), audit.NewStore(), plugins.Disabled())
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/plugins", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("expected optional plugin route to be absent, got %d", res.Code)
 	}
 }

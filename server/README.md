@@ -51,3 +51,9 @@ The current backend slice verifies this behavior through the server tests before
 The admin end-to-end test runs the login, CRUD, logout, and audit flow through the HTTP handler stack without a socket listener.
 
 It exercises the same entrypoints that the roadmap uses for the clean-install verification checkpoint.
+
+### Plugin Isolation
+
+Optional plugin routes are registered through an explicit manager object.
+
+The default server wiring keeps that manager disabled, so core admin routes continue to work even when no plugins are enabled.

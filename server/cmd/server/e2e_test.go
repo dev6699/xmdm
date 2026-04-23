@@ -15,6 +15,7 @@ import (
 	"xmdm/server/internal/admin"
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/plugins"
 )
 
 func TestAdminE2E(t *testing.T) {
@@ -24,7 +25,7 @@ func TestAdminE2E(t *testing.T) {
 
 	store := admin.NewStore()
 	auditStore := audit.NewStore()
-	handler := newMux(svc, store, auditStore)
+	handler := newMux(svc, store, auditStore, plugins.Disabled())
 	client := newE2EClient(t, handler)
 	baseURL := "http://xmdm.local"
 
