@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"xmdm/server/internal/admin"
+	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
 )
 
@@ -17,7 +18,7 @@ func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
 	now := time.Now()
 	svc.SetNow(func() time.Time { return now })
 
-	mux := newMux(svc, admin.NewStore())
+	mux := newMux(svc, admin.NewStore(), audit.NewStore())
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/devices", nil)
 	res := httptest.NewRecorder()
@@ -61,7 +62,7 @@ func TestAdminDevicesRouteAllowsPermission(t *testing.T) {
 		t.Fatalf("login failed: %v", err)
 	}
 
-	mux := newMux(svc, admin.NewStore())
+	mux := newMux(svc, admin.NewStore(), audit.NewStore())
 	req := httptest.NewRequest(http.MethodGet, "/admin/devices", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res := httptest.NewRecorder()
@@ -76,7 +77,8 @@ func TestCoreCrudLifecycle(t *testing.T) {
 	now := time.Now()
 	svc.SetNow(func() time.Time { return now })
 	store := admin.NewStore()
-	mux := newMux(svc, store)
+	auditStore := audit.NewStore()
+	mux := newMux(svc, store, auditStore)
 
 	session, err := svc.Login("admin", "secret")
 	if err != nil {
@@ -118,5 +120,13 @@ func TestCoreCrudLifecycle(t *testing.T) {
 		if res.Code != http.StatusOK {
 			t.Fatalf("%s retire failed: %d", kind, res.Code)
 		}
+	}
+
+	events := auditStore.List("tenant-1")
+	if len(events) != 15 {
+		t.Fatalf("expected 15 audit events, got %d", len(events))
+	}
+	if events[0].Action != "create" || events[len(events)-1].Action != "retire" {
+		t.Fatalf("unexpected audit actions: first=%s last=%s", events[0].Action, events[len(events)-1].Action)
 	}
 }

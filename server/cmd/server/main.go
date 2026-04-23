@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"xmdm/server/internal/admin"
+	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
 )
 
@@ -18,7 +19,8 @@ func main() {
 
 	svc := auth.NewService(username, password, sessionTTL)
 	store := admin.NewStore()
-	mux := newMux(svc, store)
+	auditStore := audit.NewStore()
+	mux := newMux(svc, store, auditStore)
 
 	log.Printf("xmdm server listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -26,7 +28,7 @@ func main() {
 	}
 }
 
-func newMux(svc *auth.Service, store *admin.Store) http.Handler {
+func newMux(svc *auth.Service, store *admin.Store, auditStore *audit.Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -90,7 +92,7 @@ func newMux(svc *auth.Service, store *admin.Store) http.Handler {
 		_, _ = w.Write([]byte(`{"user":"` + session.Username + `"}`))
 	})
 
-	registerCRUD(mux, svc, store, "tenant-1")
+	registerCRUD(mux, svc, store, auditStore, "tenant-1")
 	return mux
 }
 

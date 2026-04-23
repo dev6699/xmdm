@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"xmdm/server/internal/admin"
+	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
 )
 
@@ -28,7 +29,7 @@ type crudPayload struct {
 	Extra map[string]any `json:"extra"`
 }
 
-func registerCRUD(mux *http.ServeMux, svc *auth.Service, store *admin.Store, tenantID string) {
+func registerCRUD(mux *http.ServeMux, svc *auth.Service, store *admin.Store, auditStore *audit.Store, tenantID string) {
 	for _, spec := range adminCRUD {
 		spec := spec
 		mux.HandleFunc("/admin/"+spec.Kind, func(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +55,9 @@ func registerCRUD(mux *http.ServeMux, svc *auth.Service, store *admin.Store, ten
 					http.Error(w, "invalid json", http.StatusBadRequest)
 					return
 				}
-				writeJSON(w, store.Create(spec.Kind, tenantID, payload.Name, payload.Extra))
+				rec := store.Create(spec.Kind, tenantID, payload.Name, payload.Extra)
+				auditStore.Record(tenantID, session.Username, "create", spec.Kind, rec.ID, map[string]any{"name": rec.Name})
+				writeJSON(w, rec)
 			default:
 				w.WriteHeader(http.StatusMethodNotAllowed)
 			}
@@ -87,6 +90,7 @@ func registerCRUD(mux *http.ServeMux, svc *auth.Service, store *admin.Store, ten
 					http.NotFound(w, r)
 					return
 				}
+				auditStore.Record(tenantID, session.Username, "update", spec.Kind, rec.ID, map[string]any{"name": rec.Name})
 				writeJSON(w, rec)
 			case http.MethodDelete:
 				if !auth.HasPermission(session.Permissions, spec.WritePerm) {
@@ -98,6 +102,7 @@ func registerCRUD(mux *http.ServeMux, svc *auth.Service, store *admin.Store, ten
 					http.NotFound(w, r)
 					return
 				}
+				auditStore.Record(tenantID, session.Username, "retire", spec.Kind, rec.ID, map[string]any{"status": rec.Status})
 				writeJSON(w, rec)
 			default:
 				w.WriteHeader(http.StatusMethodNotAllowed)
