@@ -4,7 +4,10 @@
 
 - Version all external endpoints under `/api/v1`.
 - Keep public, device, and admin APIs separate.
-- Return machine-readable error objects with stable error codes.
+- Additive changes stay within `/api/v1`.
+- Breaking contract changes require `/api/v2`.
+- Return machine-readable error objects with a stable top-level `error` object.
+- The error object must include `code`, `message`, and `details`.
 - Sign all device config payloads.
 - Use JSON for request and response bodies unless file transfer is required.
 - Make mutation endpoints idempotent when repeat submission is possible.
@@ -134,6 +137,11 @@
   }
 }
 ```
+
+- `error.code` is a stable machine-readable string.
+- `error.message` is a human-readable summary safe to show to operators.
+- `error.details` carries field-level or request-specific context when available.
+- Success responses do not wrap payloads in an `error` object.
 
 ### Enrollment Response
 
