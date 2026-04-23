@@ -45,3 +45,9 @@ It applies the SQL files in [migrations/](migrations/) once, records applied fil
 Admin create, update, and retire operations append immutable audit events in the in-memory audit store for now.
 
 The current backend slice verifies this behavior through the server tests before the database-backed audit table lands.
+
+### Admin E2E
+
+The admin end-to-end test runs the login, CRUD, logout, and audit flow through the HTTP handler stack without a socket listener.
+
+It exercises the same entrypoints that the roadmap uses for the clean-install verification checkpoint.
