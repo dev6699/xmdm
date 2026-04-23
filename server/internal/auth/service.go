@@ -14,15 +14,17 @@ const SessionCookieName = "xmdm_session"
 var ErrInvalidCredentials = errors.New("invalid credentials")
 
 type Session struct {
-	ID        string
-	Username  string
-	ExpiresAt time.Time
+	ID          string
+	Username    string
+	Permissions []Permission
+	ExpiresAt   time.Time
 }
 
 type Service struct {
-	username  string
-	password  string
+	username   string
+	password   string
 	sessionTTL time.Duration
+	permissions []Permission
 
 	mu       sync.Mutex
 	sessions map[string]Session
@@ -30,12 +32,17 @@ type Service struct {
 }
 
 func NewService(username, password string, sessionTTL time.Duration) *Service {
+	return NewServiceWithPermissions(username, password, sessionTTL, AllPermissions())
+}
+
+func NewServiceWithPermissions(username, password string, sessionTTL time.Duration, permissions []Permission) *Service {
 	return &Service{
-		username:   username,
-		password:   password,
-		sessionTTL: sessionTTL,
-		sessions:   make(map[string]Session),
-		now:        time.Now,
+		username:    username,
+		password:    password,
+		sessionTTL:  sessionTTL,
+		permissions: append([]Permission(nil), permissions...),
+		sessions:    make(map[string]Session),
+		now:         time.Now,
 	}
 }
 
@@ -47,9 +54,10 @@ func (s *Service) Login(username, password string) (Session, error) {
 		return Session{}, ErrInvalidCredentials
 	}
 	session := Session{
-		ID:        newSessionID(),
-		Username:  username,
-		ExpiresAt: s.now().Add(s.sessionTTL),
+		ID:          newSessionID(),
+		Username:    username,
+		Permissions: append([]Permission(nil), s.permissions...),
+		ExpiresAt:   s.now().Add(s.sessionTTL),
 	}
 	s.mu.Lock()
 	s.sessions[session.ID] = session
@@ -77,6 +85,17 @@ func (s *Service) Logout(sessionID string) {
 	s.mu.Lock()
 	delete(s.sessions, sessionID)
 	s.mu.Unlock()
+}
+
+func (s *Service) Authorize(sessionID string, permission Permission) (*Session, bool) {
+	session, ok := s.Authenticate(sessionID)
+	if !ok {
+		return nil, false
+	}
+	if !HasPermission(session.Permissions, permission) {
+		return nil, false
+	}
+	return session, true
 }
 
 func (s *Service) SetNow(now func() time.Time) {

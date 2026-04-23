@@ -40,3 +40,21 @@ func TestLoginRejectsInvalidCredentials(t *testing.T) {
 		t.Fatalf("expected invalid credentials")
 	}
 }
+
+func TestAuthorizeChecksPermissions(t *testing.T) {
+	svc := NewServiceWithPermissions("admin", "secret", time.Minute, []Permission{PermissionAdminRead})
+	now := time.Now()
+	svc.SetNow(func() time.Time { return now })
+
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+
+	if _, ok := svc.Authorize(session.ID, PermissionAdminRead); !ok {
+		t.Fatalf("expected admin.read permission")
+	}
+	if _, ok := svc.Authorize(session.ID, PermissionDevicesWrite); ok {
+		t.Fatalf("did not expect devices.write permission")
+	}
+}
