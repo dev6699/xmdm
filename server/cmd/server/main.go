@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"xmdm/server/internal/admin"
 	"xmdm/server/internal/auth"
 )
 
@@ -16,7 +17,8 @@ func main() {
 	sessionTTL := envDuration("XMDM_SESSION_TTL", 24*time.Hour)
 
 	svc := auth.NewService(username, password, sessionTTL)
-	mux := newMux(svc)
+	store := admin.NewStore()
+	mux := newMux(svc, store)
 
 	log.Printf("xmdm server listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -24,7 +26,7 @@ func main() {
 	}
 }
 
-func newMux(svc *auth.Service) http.Handler {
+func newMux(svc *auth.Service, store *admin.Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -88,23 +90,7 @@ func newMux(svc *auth.Service) http.Handler {
 		_, _ = w.Write([]byte(`{"user":"` + session.Username + `"}`))
 	})
 
-	mux.HandleFunc("/admin/devices", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		session, authed := sessionFromRequest(r, svc)
-		if !authed {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if !auth.HasPermission(session.Permissions, auth.PermissionDevicesRead) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"devices":[]}`))
-	})
+	registerCRUD(mux, svc, store, "tenant-1")
 	return mux
 }
 

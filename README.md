@@ -26,7 +26,7 @@ Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checkli
 | M1-01 Admin Auth | ☑ |
 | M1-02 RBAC | ☑ |
 | M1-03 Core Schema | ☑ |
-| M1-04 Core CRUD | ☐ |
+| M1-04 Core CRUD | ☑ |
 | M1-05 Migration Tooling | ☐ |
 | M1-06 Audit Capture | ☐ |
 | M1-07 Admin E2E | ☐ |
