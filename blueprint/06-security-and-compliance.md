@@ -8,6 +8,43 @@
 - Signed or checksum-verified content.
 - Full auditability for admin actions and command dispatch.
 
+## Threat Model
+
+### Assumptions
+
+- The control plane is reachable from untrusted networks.
+- The admin console is accessed by authenticated operators, but operator accounts can still be phished or misused.
+- A managed device may be stolen, rooted, offline, or partially compromised.
+- MQTT, object storage, and database infrastructure are trusted only when authenticated and authorized by the server.
+- Optional plugins are part of the trusted computing base only after explicit enablement and review.
+
+### Trust Boundaries
+
+- Browser session to admin console.
+- Public enrollment and device sync endpoints.
+- Device credential boundary after enrollment.
+- Plugin execution boundary inside the Go server.
+- Object storage access boundary for downloadable artifacts.
+- MQTT broker boundary for command delivery and polling fallback.
+
+### Primary Attack Paths
+
+- Unauthorized admin login or session hijack leading to policy or command abuse.
+- Enrollment replay or token theft leading to rogue device binding.
+- Device impersonation using stolen or reused secrets.
+- Artifact tampering or checksum bypass causing malicious installs.
+- Command forgery or stale command replay against a device.
+- Plugin overreach into data or actions outside its intended scope.
+- Stale config application after policy changes or device reconnect.
+
+### Risk Priorities
+
+- Authentication and session compromise on the admin side.
+- Enrollment replay and device impersonation on the device side.
+- Artifact integrity and download authorization.
+- Command authenticity, acknowledgment, and expiry handling.
+- Plugin privilege boundaries and isolation.
+
 ## Authentication Model
 
 ### Admin
