@@ -58,9 +58,9 @@ Note: `M2-07 Enrollment E2E` and `M2-08 Reconnect E2E` are complete on the enrol
 | M3-04 Retry Logic | ☑ |
 | M3-05 Recovery UI | ☑ |
 | M3-06 Reboot Survival | ☑ |
-| M3-07 Polling Fallback | ☐ |
+| M3-07 Polling Fallback | ☑ |
 
-Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeeds, `M3-02 Local Persistence` has a DataStore-backed state store plus unit coverage and now survives a physical-device reboot check, `M3-03 Bootstrap Parsing` now accepts and persists canonical or fallback bootstrap JSON, the Android app now flows from bootstrap into enrollment so the device secret and initial signed config snapshot are fetched from the backend, `M3-04 Retry Logic` adds a contract-driven config sync engine with retry and signature verification, `M3-05 Recovery UI` surfaces bootstrap and enrollment failures with a device-owner entry point, and `M3-06 Reboot Survival` now has a physical-device reboot verification with the persisted state file checksum unchanged and the launcher UI restoring bootstrap, identity, and policy cache after reboot.
+Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeeds, `M3-02 Local Persistence` has a DataStore-backed state store plus unit coverage and now survives a physical-device reboot check, `M3-03 Bootstrap Parsing` now accepts and persists canonical or fallback bootstrap JSON, the Android app now flows from bootstrap into enrollment so the device secret and initial signed config snapshot are fetched from the backend, `M3-04 Retry Logic` adds a contract-driven config sync engine with retry and signature verification, `M3-05 Recovery UI` surfaces bootstrap and enrollment failures with a device-owner entry point, `M3-06 Reboot Survival` now has a physical-device reboot verification with the persisted state file checksum unchanged and the launcher UI restoring bootstrap, identity, and policy cache after reboot, and `M3-07 Polling Fallback` is verified by the sync engine falling back from the primary polling path to the secondary server URL when the primary path is unavailable.
 
 ### M4 - Content Delivery
 

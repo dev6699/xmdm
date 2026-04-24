@@ -8,6 +8,7 @@ import com.xmdm.launcher.state.AgentStateStore
 import com.xmdm.launcher.state.BootstrapState
 import com.xmdm.launcher.state.DeviceIdentityState
 import com.xmdm.launcher.state.PolicyCacheState
+import kotlinx.coroutines.CancellationException
 import java.time.Clock
 
 data class ConfigFetchRequest(
@@ -31,14 +32,7 @@ class ConfigSyncEngine(
 ) {
     suspend fun sync(bootstrap: BootstrapState, identity: DeviceIdentityState): PolicyCacheState {
         val rawSnapshot = retrying(policy = retryPolicy, sleeper = sleeper ?: CoroutineSleeper) { _ ->
-            fetcher.fetch(
-                ConfigFetchRequest(
-                    serverUrl = bootstrap.serverUrl,
-                    serverProject = bootstrap.serverProject,
-                    deviceId = identity.deviceId,
-                    deviceSecret = identity.deviceSecret,
-                ),
-            )
+            fetchSnapshot(bootstrap, identity)
         }
         val verified = verifier.verify(rawSnapshot, identity.deviceSecret)
         val version = verified.get("version")?.takeIf { !it.isJsonNull }?.asString?.toLongOrNull()
@@ -50,5 +44,36 @@ class ConfigSyncEngine(
         )
         stateStore.savePolicyCache(cached)
         return cached
+    }
+
+    private suspend fun fetchSnapshot(bootstrap: BootstrapState, identity: DeviceIdentityState): String {
+        val serverUrls = buildList {
+            add(bootstrap.serverUrl)
+            bootstrap.secondaryServerUrl
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() && it != bootstrap.serverUrl }
+                ?.let { add(it) }
+        }
+
+        var lastFailure: Throwable? = null
+        for (serverUrl in serverUrls) {
+            try {
+                return fetcher.fetch(
+                    ConfigFetchRequest(
+                        serverUrl = serverUrl,
+                        serverProject = bootstrap.serverProject,
+                        deviceId = identity.deviceId,
+                        deviceSecret = identity.deviceSecret,
+                    ),
+                )
+            } catch (failure: Throwable) {
+                if (failure is CancellationException) {
+                    throw failure
+                }
+                lastFailure = failure
+            }
+        }
+
+        throw lastFailure ?: error("config snapshot fetch failed without a recorded error")
     }
 }

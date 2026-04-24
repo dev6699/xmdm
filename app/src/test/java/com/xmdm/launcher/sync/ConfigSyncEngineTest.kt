@@ -111,6 +111,90 @@ class ConfigSyncEngineTest {
         scope.cancel()
     }
 
+    @Test
+    fun fallsBackToSecondaryServerUrlWhenPrimaryFetchPathIsUnavailable() = runTest {
+        val file = createTempFile("config-sync-fallback", ".preferences_pb")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val store = AgentStateStore(
+            PreferenceDataStoreFactory.create(
+                scope = scope,
+                produceFile = { file },
+            ),
+        )
+        val sleeps = mutableListOf<Long>()
+        val verifier = ConfigSnapshotVerifier()
+        val unsigned = """
+            {
+              "version":"7",
+              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "policy":{"bootstrapExtras":{"customer":"Acme"}},
+              "apps":[],
+              "files":[],
+              "certificates":[],
+              "commands":[]
+            }
+        """.trimIndent()
+        val signed = """
+            {
+              "version":"7",
+              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "policy":{"bootstrapExtras":{"customer":"Acme"}},
+              "apps":[],
+              "files":[],
+              "certificates":[],
+              "commands":[],
+              "signature":"${verifier.sign(unsigned, "secret-abc")}"
+            }
+        """.trimIndent()
+        val requests = mutableListOf<String>()
+
+        val engine = ConfigSyncEngine(
+            stateStore = store,
+            fetcher = object : ConfigSnapshotFetcher {
+                override suspend fun fetch(request: ConfigFetchRequest): String {
+                    requests += request.serverUrl
+                    return when (request.serverUrl) {
+                        "https://mdm-primary.example" -> error("primary polling path unavailable")
+                        "https://mdm-secondary.example" -> signed
+                        else -> error("unexpected server url: ${request.serverUrl}")
+                    }
+                }
+            },
+            verifier = verifier,
+            clock = Clock.fixed(Instant.ofEpochMilli(123456789L), ZoneOffset.UTC),
+            retryPolicy = RetryPolicy(maxAttempts = 2, initialDelayMs = 10, maxDelayMs = 100),
+            sleeper = object : Sleeper {
+                override suspend fun sleep(durationMs: Long) {
+                    sleeps += durationMs
+                }
+            },
+        )
+
+        val result = engine.sync(
+            BootstrapState(
+                serverUrl = "https://mdm-primary.example",
+                secondaryServerUrl = "https://mdm-secondary.example",
+                serverProject = "rest",
+                enrollmentToken = "enroll-token",
+                deviceId = null,
+                deviceIdUse = null,
+                bootstrapExtrasJson = """{"customer":"Acme"}""",
+            ),
+            DeviceIdentityState(
+                deviceId = "device-123",
+                deviceIdUse = "serial",
+                deviceSecret = "secret-abc",
+            ),
+        )
+
+        assertEquals(listOf("https://mdm-primary.example", "https://mdm-secondary.example"), requests)
+        assertEquals(7L, result.version)
+        assertEquals(123456789L, result.lastSyncAtEpochMillis)
+        assertTrue(store.state.first().hasPolicyCache)
+        assertEquals(emptyList<Long>(), sleeps)
+        scope.cancel()
+    }
+
     @Test(expected = IllegalStateException::class)
     fun doesNotPersistInvalidSnapshot() = runTest {
         val file = createTempFile("config-sync-invalid", ".preferences_pb")
