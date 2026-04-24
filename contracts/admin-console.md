@@ -366,6 +366,7 @@ Response body:
 
 - `artifactId` is optional.
 - `publish` marks the new version as published when `true`; otherwise it stays uploaded.
+- If `artifactId` is provided, the referenced artifact checksum must match `checksum`.
 - Response body:
 
 ```json
@@ -438,6 +439,7 @@ Response body:
   - `mimeType` `string`
   - `file` `binary`
 
+- `checksum` must match the SHA-256 digest of the uploaded bytes encoded as base64url without padding.
 - The server streams the uploaded `file` part into configured object storage and persists both the logical file record and the backing artifact metadata.
 - The server also accepts the JSON metadata-only shape for internal registration flows, but multipart upload is the primary path.
 - Response body:
@@ -546,6 +548,7 @@ Response body:
   - `mimeType` `string`
   - `file` `binary`
 
+- `checksum` must match the SHA-256 digest of the uploaded bytes encoded as base64url without padding.
 - The server streams the uploaded `file` part into configured object storage and persists both the logical certificate record and the backing artifact metadata.
 - The server also accepts the JSON metadata-only shape for internal registration flows, but multipart upload is the primary path.
 - Response body:

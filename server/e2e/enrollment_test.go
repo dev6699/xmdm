@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	v1 "xmdm/server/internal/api/v1"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
@@ -27,6 +28,7 @@ func TestEnrollmentE2E(t *testing.T) {
 	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled(), newTestArtifactStore(t)))
 	client := newE2EClient(t, handler)
 	baseURL := "http://xmdm.local"
+	deviceID := "device-" + uuid.NewString()
 
 	login(client, t, baseURL, "admin", "secret")
 
@@ -38,7 +40,7 @@ func TestEnrollmentE2E(t *testing.T) {
 
 	bound := postJSON(t, client, baseURL+"/api/v1/enrollment", `{
 		"enrollmentToken":"`+token+`",
-		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"},
+		"deviceIdentityPolicy":{"deviceId":"`+deviceID+`","deviceIdUse":"serial"},
 		"bootstrapExtras":{"customer":"Acme"}
 	}`)
 	deviceSecret, _ := bound["deviceSecret"].(string)
@@ -53,7 +55,7 @@ func TestEnrollmentE2E(t *testing.T) {
 	}
 
 	reqBody := strings.NewReader(`{"heartbeat":{"online":true}}`)
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/devices/device-123/telemetry", reqBody)
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/devices/"+deviceID+"/telemetry", reqBody)
 	if err != nil {
 		t.Fatalf("build telemetry request: %v", err)
 	}
@@ -79,7 +81,7 @@ func TestEnrollmentE2E(t *testing.T) {
 	devices := getJSONList(t, client, baseURL+"/api/v1/devices")
 	found := false
 	for _, item := range devices {
-		if item["name"] == "device-123" {
+		if item["name"] == deviceID {
 			found = true
 			if item["status"] != device.StatusActive {
 				t.Fatalf("expected active status after telemetry, got %#v", item["status"])
@@ -98,6 +100,6 @@ func TestEnrollmentE2E(t *testing.T) {
 	}
 	assertStatus(t, client, http.MethodPost, baseURL+"/api/v1/enrollment", `{
 		"enrollmentToken":"`+dupSecret+`",
-		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"}
+		"deviceIdentityPolicy":{"deviceId":"`+deviceID+`","deviceIdUse":"serial"}
 	}`, http.StatusConflict)
 }

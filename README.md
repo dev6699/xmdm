@@ -69,13 +69,13 @@ Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeed
 | M4-01 App Management | ☑ |
 | M4-02 File Storage | ☑ |
 | M4-03 Certificates | ☑ |
-| M4-04 Checksum Verification | ☐ |
+| M4-04 Checksum Verification | ☑ |
 | M4-05 App Install Flow | ☐ |
 | M4-06 File Download Flow | ☐ |
 | M4-07 Content E2E | ☐ |
 | M4-08 Artifact Cleanup | ☐ |
 
-Note: `M4-01 App Management` is complete with app CRUD plus immutable version upload and publish support, `M4-02 File Storage` is complete with multipart file upload plus artifact metadata persistence, and `M4-03 Certificates` is complete with certificate upload/distribution and signed config inclusion for active certificates.
+Note: `M4-01 App Management` is complete with app CRUD plus immutable version upload and publish support, `M4-02 File Storage` is complete with multipart file upload plus artifact metadata persistence, `M4-03 Certificates` is complete with certificate upload/distribution and signed config inclusion for active certificates, and `M4-04 Checksum Verification` is complete with server-side content digest validation for file, certificate, and referenced app artifacts plus an Android-side artifact checksum verifier.
 
 ### M5 - Push And Commands
 

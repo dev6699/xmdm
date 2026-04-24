@@ -194,6 +194,21 @@ func (s *Store) CreateVersion(ctx context.Context, tenantID, appID string, req a
 	var artifactID any
 	if req.ArtifactID != nil {
 		artifactID = *req.ArtifactID
+		var storedChecksum string
+		if err := tx.QueryRow(ctx,
+			`SELECT checksum
+			 FROM artifacts
+			 WHERE tenant_id = $1 AND id = $2`,
+			tenantID, *req.ArtifactID,
+		).Scan(&storedChecksum); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return apps.Version{}, httpx.ErrNotFound
+			}
+			return apps.Version{}, err
+		}
+		if storedChecksum != req.Checksum {
+			return apps.Version{}, httpx.ErrInvalidInput
+		}
 	}
 
 	row := tx.QueryRow(ctx,

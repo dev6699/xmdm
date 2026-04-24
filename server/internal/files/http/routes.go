@@ -11,6 +11,7 @@ import (
 	"xmdm/server/internal/artifacts"
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/checksum"
 	"xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
 )
@@ -49,6 +50,11 @@ func Register(mux httpx.Router, svc *auth.Service, store files.Repository, artif
 				return
 			}
 			if len(content) > 0 {
+				actualChecksum := checksum.SHA256Base64URL(content)
+				if actualChecksum != payload.Checksum {
+					http.Error(w, "invalid input", http.StatusBadRequest)
+					return
+				}
 				if err := artifactStore.Put(r.Context(), payload.StorageKey, bytes.NewReader(content), payload.MimeType, int64(len(content))); err != nil {
 					if err == httpx.ErrInvalidInput {
 						http.Error(w, "invalid input", http.StatusBadRequest)

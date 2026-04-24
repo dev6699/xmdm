@@ -23,6 +23,7 @@ import (
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
 	certificatesspg "xmdm/server/internal/certificates/postgres"
+	"xmdm/server/internal/checksum"
 	device "xmdm/server/internal/device"
 	devicepg "xmdm/server/internal/device/postgres"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
@@ -91,11 +92,11 @@ func TestAdminE2E(t *testing.T) {
 		}
 
 		if kind == "apps" {
+			versionChecksum := checksum.SHA256Base64URL(bytes.Repeat([]byte("v"), 64))
 			version := postJSON(t, client, baseURL+"/api/v1/apps/"+id+"/versions", `{
 				"versionName":"1.0.0",
 				"versionCode":100,
-				"artifactId":"artifact-1",
-				"checksum":"sha256-abc",
+				"checksum":"`+versionChecksum+`",
 				"publish":true
 			}`)
 			if version["status"] != "published" {
@@ -119,10 +120,11 @@ func TestAdminE2E(t *testing.T) {
 		}
 	}
 
+	fileChecksum := checksum.SHA256Base64URL(bytes.Repeat([]byte("x"), 1024))
 	fileCreated := postMultipartFile(t, client, baseURL+"/api/v1/files", map[string]string{
 		"name":       "launcher.apk",
 		"storageKey": "artifacts/launcher.apk",
-		"checksum":   "sha256-file-abc",
+		"checksum":   fileChecksum,
 		"sizeBytes":  "1024",
 		"mimeType":   "application/vnd.android.package-archive",
 	}, "file", "launcher.apk", bytes.Repeat([]byte("x"), 1024))
@@ -148,10 +150,33 @@ func TestAdminE2E(t *testing.T) {
 		t.Fatalf("file retire returned status %v", fileRetired["status"])
 	}
 
+	checksumApp := postJSON(t, client, baseURL+"/api/v1/apps", `{"packageName":"com.example.checksum","name":"checksum-app"}`)
+	checksumAppID, _ := checksumApp["id"].(string)
+	if checksumAppID == "" {
+		t.Fatalf("checksum app create returned empty id")
+	}
+	appArtifact, _ := fileCreated["artifact"].(map[string]any)
+	appArtifactID, _ := appArtifact["id"].(string)
+	if appArtifactID == "" {
+		t.Fatalf("file artifact returned empty id")
+	}
+	versionByArtifact := postJSON(t, client, baseURL+"/api/v1/apps/"+checksumAppID+"/versions", `{
+		"versionName":"2.0.0",
+		"versionCode":200,
+		"artifactId":"`+appArtifactID+`",
+		"checksum":"`+fileChecksum+`",
+		"publish":false
+	}`)
+	if versionByArtifact["status"] != "uploaded" {
+		t.Fatalf("app version with artifact returned status %v", versionByArtifact["status"])
+	}
+	_ = deleteJSON(t, client, baseURL+"/api/v1/apps/"+checksumAppID)
+
+	certChecksum := checksum.SHA256Base64URL(bytes.Repeat([]byte("c"), 512))
 	certCreated := postMultipartFile(t, client, baseURL+"/api/v1/certificates", map[string]string{
 		"name":       "wifi-root-ca.pem",
 		"storageKey": "artifacts/wifi-root-ca.pem",
-		"checksum":   "sha256-cert-abc",
+		"checksum":   certChecksum,
 		"sizeBytes":  "512",
 		"mimeType":   "application/x-pem-file",
 	}, "file", "wifi-root-ca.pem", bytes.Repeat([]byte("c"), 512))
@@ -182,8 +207,8 @@ func TestAdminE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("audit list failed: %v", err)
 	}
-	if len(events) != 23 {
-		t.Fatalf("expected 23 audit events, got %d", len(events))
+	if len(events) != 26 {
+		t.Fatalf("expected 26 audit events, got %d", len(events))
 	}
 	if events[0].Action != "create" || events[len(events)-1].Action != "retire" {
 		t.Fatalf("unexpected audit actions: first=%s last=%s", events[0].Action, events[len(events)-1].Action)
