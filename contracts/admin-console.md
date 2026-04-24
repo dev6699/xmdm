@@ -4,19 +4,20 @@ This document defines the admin console HTTP surface in `server/cmd/server`.
 
 Path prefix:
 
-- The live versioned admin API surface lives under `/api/v1/admin/...`
+- The live versioned admin session surface lives under `/api/v1/admin/...`
+- The live versioned admin resource surface lives under `/api/v1/...`
 - The same contract can be mounted under `/admin/...` by the console wrapper
 - Both surfaces preserve the same semantics and payload shapes
 
 ## Session Routes
 
-### `GET /admin/login`
+### `GET /api/v1/admin/login`
 
 - Request: none
 - Response: `200 text/html`
 - Body: login form HTML
 
-### `POST /admin/login`
+### `POST /api/v1/admin/login`
 
 - Request: `application/x-www-form-urlencoded`
 - Fields:
@@ -25,19 +26,19 @@ Path prefix:
 - Success response: `303 See Other`
 - Headers:
   - `Set-Cookie: session=<session-id>; HttpOnly; Path=/`
-  - `Location: /admin/me`
+  - `Location: /api/v1/admin/me`
 - Errors:
   - `400` invalid form
   - `401` invalid credentials
 
-### `POST /admin/logout`
+### `POST /api/v1/admin/logout`
 
 - Request: none
 - Success response: `204 No Content`
 - Headers:
   - `Set-Cookie: session=; Max-Age=-1; HttpOnly; Path=/`
 
-### `GET /admin/me`
+### `GET /api/v1/admin/me`
 
 - Request:
   - session cookie required
@@ -49,7 +50,7 @@ Path prefix:
 
 ## Users
 
-### `GET /admin/users`
+### `GET /api/v1/users`
 
 - Permission: `admin.read`
 - Success response: `200 application/json`
@@ -69,7 +70,7 @@ Path prefix:
 ]
 ```
 
-### `POST /admin/users`
+### `POST /api/v1/users`
 
 - Permission: `admin.write`
 - Request body:
@@ -96,7 +97,7 @@ Response body:
 }
 ```
 
-### `PATCH /admin/users/{id}`
+### `PATCH /api/v1/users/{id}`
 
 - Permission: `admin.write`
 - Request body:
@@ -123,7 +124,7 @@ Response body:
 }
 ```
 
-### `DELETE /admin/users/{id}`
+### `DELETE /api/v1/users/{id}`
 
 - Permission: `admin.write`
 - Response body:
@@ -142,7 +143,7 @@ Response body:
 
 ## Roles
 
-### `GET /admin/roles`
+### `GET /api/v1/roles`
 
 - Permission: `admin.read`
 - Success response: `200 application/json`
@@ -162,7 +163,7 @@ Response body:
 ]
 ```
 
-### `POST /admin/roles`
+### `POST /api/v1/roles`
 
 - Permission: `admin.write`
 - Request body:
@@ -188,7 +189,7 @@ Response body:
 }
 ```
 
-### `PATCH /admin/roles/{id}`
+### `PATCH /api/v1/roles/{id}`
 
 - Permission: `admin.write`
 - Request body:
@@ -214,7 +215,7 @@ Response body:
 }
 ```
 
-### `DELETE /admin/roles/{id}`
+### `DELETE /api/v1/roles/{id}`
 
 - Permission: `admin.write`
 - Response body:
@@ -233,7 +234,7 @@ Response body:
 
 ## Groups
 
-### `GET /admin/groups`
+### `GET /api/v1/groups`
 
 - Permission: `admin.read`
 - Success response: `200 application/json`
@@ -252,7 +253,7 @@ Response body:
 ]
 ```
 
-### `POST /admin/groups`
+### `POST /api/v1/groups`
 
 - Permission: `admin.write`
 - Request body:
@@ -276,7 +277,7 @@ Response body:
 }
 ```
 
-### `PATCH /admin/groups/{id}`
+### `PATCH /api/v1/groups/{id}`
 
 - Permission: `admin.write`
 - Request body:
@@ -300,7 +301,7 @@ Response body:
 }
 ```
 
-### `DELETE /admin/groups/{id}`
+### `DELETE /api/v1/groups/{id}`
 
 - Permission: `admin.write`
 - Response body:
@@ -318,7 +319,7 @@ Response body:
 
 ## Policies
 
-### `GET /admin/policies`
+### `GET /api/v1/policies`
 
 - Permission: `admin.read`
 - Success response: `200 application/json`
@@ -340,7 +341,7 @@ Response body:
 ]
 ```
 
-### `POST /admin/policies`
+### `POST /api/v1/policies`
 
 - Permission: `admin.write`
 - Request body:
@@ -370,7 +371,7 @@ Response body:
 }
 ```
 
-### `PATCH /admin/policies/{id}`
+### `PATCH /api/v1/policies/{id}`
 
 - Permission: `admin.write`
 - Request body:
@@ -400,7 +401,7 @@ Response body:
 }
 ```
 
-### `DELETE /admin/policies/{id}`
+### `DELETE /api/v1/policies/{id}`
 
 - Permission: `admin.write`
 - Response body:
@@ -421,7 +422,7 @@ Response body:
 
 ## Devices
 
-### `GET /admin/devices`
+### `GET /api/v1/devices`
 
 - Permission: `devices.read`
 - Success response: `200 application/json`
@@ -441,7 +442,7 @@ Response body:
 ]
 ```
 
-### `POST /admin/devices`
+### `POST /api/v1/devices`
 
 - Permission: `devices.write`
 - Request body:
@@ -470,7 +471,7 @@ Response body:
 }
 ```
 
-### `PATCH /admin/devices/{id}`
+### `PATCH /api/v1/devices/{id}`
 
 - Permission: `devices.write`
 - Request body:
@@ -499,7 +500,7 @@ Response body:
 }
 ```
 
-### `DELETE /admin/devices/{id}`
+### `DELETE /api/v1/devices/{id}`
 
 - Permission: `devices.write`
 - Response body:

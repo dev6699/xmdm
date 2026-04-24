@@ -7,3 +7,4 @@ This directory is reserved for API definitions, payload schemas, generated clien
 Current documents:
 
 - [admin-console.md](admin-console.md) for the admin console route contract and payload shapes.
+- [enrollment.md](enrollment.md) for the enrollment feature route contract and payload shapes.

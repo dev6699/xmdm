@@ -47,7 +47,7 @@ func TestAdminE2E(t *testing.T) {
 	assertStatus(t, client, http.MethodGet, baseURL+"/api/v1/admin/me", "", http.StatusOK)
 
 	for _, kind := range []string{"users", "roles", "groups", "policies", "devices"} {
-		created := postJSON(t, client, baseURL+"/api/v1/admin/"+kind, crudCreateBody(kind))
+		created := postJSON(t, client, baseURL+"/api/v1/"+kind, crudCreateBody(kind))
 		id, _ := created["id"].(string)
 		if id == "" {
 			t.Fatalf("%s create returned empty id", kind)
@@ -63,7 +63,7 @@ func TestAdminE2E(t *testing.T) {
 			t.Fatalf("%s create returned status %v", kind, created["status"])
 		}
 
-		listed := getJSONList(t, client, baseURL+"/api/v1/admin/"+kind)
+		listed := getJSONList(t, client, baseURL+"/api/v1/"+kind)
 		found := false
 		for _, item := range listed {
 			if item["id"] == id {
@@ -75,7 +75,7 @@ func TestAdminE2E(t *testing.T) {
 			t.Fatalf("%s list did not include created item", kind)
 		}
 
-		updated := patchJSON(t, client, baseURL+"/api/v1/admin/"+kind+"/"+id, crudUpdateBody(kind))
+		updated := patchJSON(t, client, baseURL+"/api/v1/"+kind+"/"+id, crudUpdateBody(kind))
 		if kind == "users" {
 			if updated["email"] != "users-two@example.com" {
 				t.Fatalf("%s update returned email %v", kind, updated["email"])
@@ -84,7 +84,7 @@ func TestAdminE2E(t *testing.T) {
 			t.Fatalf("%s update returned name %v", kind, updated["name"])
 		}
 
-		retired := deleteJSON(t, client, baseURL+"/api/v1/admin/"+kind+"/"+id)
+		retired := deleteJSON(t, client, baseURL+"/api/v1/"+kind+"/"+id)
 		if retired["status"] != "retired" {
 			t.Fatalf("%s retire returned status %v", kind, retired["status"])
 		}

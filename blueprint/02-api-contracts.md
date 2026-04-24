@@ -41,8 +41,10 @@
 
 ### QR Payload
 
-- Produces the JSON payload used to generate the enrollment QR code.
-- The QR payload carries the server URL, enrollment token, device identity policy, and bootstrap extras.
+- Produces the Android managed-provisioning QR code image and the canonical JSON payload used to generate it.
+- The QR payload carries the device admin component, APK download URL and checksum, and the admin extras bundle used by the launcher.
+- The feature surface lives under `/api/v1/enrollment/qr` for PNG output and `/api/v1/enrollment/qr/json` for the raw payload.
+- See the canonical payload shape below for the exact JSON object.
 
 ### Device Config Sync
 
@@ -73,9 +75,10 @@
 
 - The admin console manages users, roles, groups, policies, devices, and the operational admin workflow.
 - The console contract and payload shapes live in [../contracts/admin-console.md](../contracts/admin-console.md).
-- The live versioned admin surface uses `/api/v1/admin/...`.
+- The live versioned admin session surface uses `/api/v1/admin/...`.
+- The live versioned admin resource surface uses `/api/v1/...`.
 - The console wrapper can still mount the same contract under `/admin/...` when needed.
-- All `/api/v1/admin/...` endpoints should follow the versioning and error rules below.
+- All `/api/v1/admin/...` and `/api/v1/...` admin endpoints should follow the versioning and error rules below.
 
 ## Canonical Payload Shapes
 
@@ -138,6 +141,25 @@
 }
 ```
 
+### QR Enrollment Payload
+
+```json
+{
+  "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.xmdm.launcher/.AdminReceiver",
+  "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://cdn.example/launcher.apk",
+  "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "base64sha256",
+  "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
+  "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
+    "com.xmdm.BASE_URL": "https://mdm.example",
+    "com.xmdm.SERVER_PROJECT": "rest",
+    "com.xmdm.ENROLLMENT_TOKEN": "token",
+    "com.xmdm.DEVICE_ID_USE": "serial",
+    "com.xmdm.CUSTOMER": "Acme",
+    "com.xmdm.GROUP": "field"
+  }
+}
+```
+
 ## Contract Decisions
 
 - Enrollment returns the initial device secret, not a long-lived admin token.
@@ -147,6 +169,7 @@
 - Admin APIs never reuse device authentication headers.
 - Device sync must tolerate empty command lists without treating that as an error.
 - Download URLs are server-authorized and short-lived when object storage is exposed directly.
+- Enrollment QR generation returns a PNG QR image; `/api/v1/enrollment/qr/json` returns the canonical Android provisioning payload for clients that need the raw JSON.
 
 ## Response Rules
 

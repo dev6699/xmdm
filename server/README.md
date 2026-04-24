@@ -10,7 +10,7 @@ The admin console provides a session-based admin auth flow:
 - `POST /api/v1/admin/login` creates a session cookie
 - `POST /api/v1/admin/logout` clears the session cookie
 - `GET /api/v1/admin/me` verifies the active session
-- `GET /api/v1/admin/devices` exercises a permission-gated admin route
+- `GET /api/v1/devices` exercises a permission-gated admin route
 
 Run it with:
 

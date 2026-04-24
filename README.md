@@ -5,7 +5,7 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-04-23
+Snapshot last updated: 2026-04-24
 
 ### M0 - Foundation
 
@@ -37,7 +37,7 @@ Snapshot last updated: 2026-04-23
 
 | Item | State |
 | --- | --- |
-| M2-01 QR Enrollment | ☐ |
+| M2-01 QR Enrollment | ☑ |
 | M2-02 Enrollment Tokens | ☐ |
 | M2-03 Device Secret | ☐ |
 | M2-04 Signed Config | ☐ |

@@ -36,7 +36,7 @@ func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
 		devicepg.New(pool),
 	), auditpg.NewDBStore(pool), plugins.Disabled())
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/devices", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusUnauthorized {
@@ -59,7 +59,7 @@ func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
 		t.Fatalf("expected login redirect, got %d", loginRes.Code)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/devices", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res = httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
@@ -87,7 +87,7 @@ func TestAdminDevicesRouteAllowsPermission(t *testing.T) {
 		policypg.New(pool),
 		devicepg.New(pool),
 	), auditpg.NewDBStore(pool), plugins.Disabled())
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/devices", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
@@ -119,7 +119,7 @@ func TestCoreCrudLifecycle(t *testing.T) {
 
 	for _, kind := range []string{"users", "roles", "groups", "policies", "devices"} {
 		createBody := crudCreateBody(kind)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/"+kind, strings.NewReader(createBody))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/"+kind, strings.NewReader(createBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 		res := httptest.NewRecorder()
@@ -136,7 +136,7 @@ func TestCoreCrudLifecycle(t *testing.T) {
 			t.Fatalf("%s create returned empty id", kind)
 		}
 
-		req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/"+kind, nil)
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/"+kind, nil)
 		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 		res = httptest.NewRecorder()
 		mux.ServeHTTP(res, req)
@@ -158,7 +158,7 @@ func TestCoreCrudLifecycle(t *testing.T) {
 			t.Fatalf("%s list did not include created item", kind)
 		}
 
-		req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/"+kind+"/"+id, strings.NewReader(crudUpdateBody(kind)))
+		req = httptest.NewRequest(http.MethodPatch, "/api/v1/"+kind+"/"+id, strings.NewReader(crudUpdateBody(kind)))
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 		res = httptest.NewRecorder()
@@ -167,7 +167,7 @@ func TestCoreCrudLifecycle(t *testing.T) {
 			t.Fatalf("%s update failed: %d", kind, res.Code)
 		}
 
-		req = httptest.NewRequest(http.MethodDelete, "/api/v1/admin/"+kind+"/"+id, nil)
+		req = httptest.NewRequest(http.MethodDelete, "/api/v1/"+kind+"/"+id, nil)
 		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 		res = httptest.NewRecorder()
 		mux.ServeHTTP(res, req)
