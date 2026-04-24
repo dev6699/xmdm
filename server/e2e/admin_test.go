@@ -22,6 +22,7 @@ import (
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
+	certificatesspg "xmdm/server/internal/certificates/postgres"
 	device "xmdm/server/internal/device"
 	devicepg "xmdm/server/internal/device/postgres"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
@@ -147,12 +148,42 @@ func TestAdminE2E(t *testing.T) {
 		t.Fatalf("file retire returned status %v", fileRetired["status"])
 	}
 
+	certCreated := postMultipartFile(t, client, baseURL+"/api/v1/certificates", map[string]string{
+		"name":       "wifi-root-ca.pem",
+		"storageKey": "artifacts/wifi-root-ca.pem",
+		"checksum":   "sha256-cert-abc",
+		"sizeBytes":  "512",
+		"mimeType":   "application/x-pem-file",
+	}, "file", "wifi-root-ca.pem", bytes.Repeat([]byte("c"), 512))
+	if certCreated["name"] != "wifi-root-ca.pem" {
+		t.Fatalf("certificate create returned name %v", certCreated["name"])
+	}
+	if certCreated["artifact"] == nil {
+		t.Fatalf("expected artifact details in certificate response: %#v", certCreated)
+	}
+	defer func() { _ = artifactStore.Delete(context.Background(), "artifacts/wifi-root-ca.pem") }()
+	certificates := getJSONList(t, client, baseURL+"/api/v1/certificates")
+	if len(certificates) != 1 {
+		t.Fatalf("expected one certificate, got %d", len(certificates))
+	}
+	if certificates[0]["artifact"] == nil {
+		t.Fatalf("expected artifact details in certificate list: %#v", certificates[0])
+	}
+	certID, _ := certCreated["id"].(string)
+	if certID == "" {
+		t.Fatalf("certificate create returned empty id")
+	}
+	certRetired := deleteJSON(t, client, baseURL+"/api/v1/certificates/"+certID)
+	if certRetired["status"] != "retired" {
+		t.Fatalf("certificate retire returned status %v", certRetired["status"])
+	}
+
 	events, err := auditStore.List(context.Background(), bootstrap.SeedTenantID)
 	if err != nil {
 		t.Fatalf("audit list failed: %v", err)
 	}
-	if len(events) != 21 {
-		t.Fatalf("expected 21 audit events, got %d", len(events))
+	if len(events) != 23 {
+		t.Fatalf("expected 23 audit events, got %d", len(events))
 	}
 	if events[0].Action != "create" || events[len(events)-1].Action != "retire" {
 		t.Fatalf("unexpected audit actions: first=%s last=%s", events[0].Action, events[len(events)-1].Action)
@@ -339,6 +370,7 @@ func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins
 		Identity:      identitypg.New(pool),
 		Apps:          appspg.New(pool),
 		Files:         filespg.New(pool),
+		Certificates:  certificatesspg.New(pool),
 		Groups:        grouppg.New(pool),
 		Policies:      policypg.New(pool),
 		Devices:       devicepg.New(pool),

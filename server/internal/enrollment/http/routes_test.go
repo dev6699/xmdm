@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/certificates"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
@@ -24,7 +25,7 @@ func TestRegisterQRPng(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -61,7 +62,7 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -129,7 +130,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/qr/json", bytes.NewBufferString(`{"serverUrl":"not-a-url","deviceAdminPackageDownloadLocation":"https://cdn.example/launcher.apk","deviceAdminPackageChecksum":"abc123"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -151,7 +152,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res = httptest.NewRecorder()
 	mux = http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, "tenant-1")
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad request, got %d", res.Code)
@@ -192,7 +193,7 @@ func TestRegisterTokenLifecycleRoutes(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens", bytes.NewBufferString(`{"ttlSeconds":3600}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -245,7 +246,20 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, &fakeCertificateStore{
+		active: []certificates.Certificate{
+			{
+				RecordBase: certificates.RecordBase{
+					ID:       "cert-1",
+					TenantID: "tenant-1",
+					Status:   certificates.StatusActive,
+				},
+				Name:       "wifi-root-ca",
+				ArtifactID: "artifact-1",
+				Checksum:   "sha256-cert-abc",
+			},
+		},
+	}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
@@ -276,15 +290,39 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
 	}
-	var config enrollment.ConfigSnapshot
-	if err := json.Unmarshal(rawConfigJSON, &config); err != nil {
+	var typedConfig struct {
+		Version      string                     `json:"version"`
+		Device       map[string]any             `json:"device"`
+		Policy       map[string]any             `json:"policy"`
+		Apps         []any                      `json:"apps"`
+		Files        []any                      `json:"files"`
+		Certificates []certificates.Certificate `json:"certificates"`
+		Commands     []any                      `json:"commands"`
+		Signature    string                     `json:"signature"`
+	}
+	if err := json.Unmarshal(rawConfigJSON, &typedConfig); err != nil {
 		t.Fatalf("decode config snapshot: %v", err)
+	}
+	config := enrollment.ConfigSnapshot{
+		Version:   typedConfig.Version,
+		Device:    typedConfig.Device,
+		Policy:    typedConfig.Policy,
+		Apps:      typedConfig.Apps,
+		Files:     typedConfig.Files,
+		Commands:  typedConfig.Commands,
+		Signature: typedConfig.Signature,
+	}
+	for _, cert := range typedConfig.Certificates {
+		config.Certificates = append(config.Certificates, cert)
 	}
 	if config.Version != "1" {
 		t.Fatalf("unexpected config version: %q", config.Version)
 	}
 	if err := enrollment.VerifyConfigSnapshot(config, "device-secret"); err != nil {
 		t.Fatalf("verify config snapshot: %v", err)
+	}
+	if len(config.Certificates) != 1 {
+		t.Fatalf("expected one certificate in config, got %d", len(config.Certificates))
 	}
 }
 
@@ -306,6 +344,10 @@ type fakeEnrollmentStore struct {
 	bindTenant     string
 	bindToken      string
 	bindDeviceID   string
+}
+
+type fakeCertificateStore struct {
+	active []certificates.Certificate
 }
 
 func (s *fakeEnrollmentStore) IssueToken(ctx context.Context, tenantID string, expiresAt time.Time) (enrollment.IssuedToken, error) {
@@ -341,4 +383,20 @@ func (s *fakeEnrollmentStore) RevokeToken(_ context.Context, tenantID, id string
 
 func (s *fakeEnrollmentStore) ExpireTokens(context.Context, time.Time) (int64, error) {
 	return 0, nil
+}
+
+func (s *fakeCertificateStore) ListCertificates(context.Context, string) ([]certificates.Certificate, error) {
+	return append([]certificates.Certificate(nil), s.active...), nil
+}
+
+func (s *fakeCertificateStore) ListActiveCertificates(context.Context, string) ([]certificates.Certificate, error) {
+	return append([]certificates.Certificate(nil), s.active...), nil
+}
+
+func (s *fakeCertificateStore) CreateCertificate(context.Context, string, certificates.CertificateUpsert) (certificates.Certificate, error) {
+	return certificates.Certificate{}, nil
+}
+
+func (s *fakeCertificateStore) RetireCertificate(context.Context, string, string) (certificates.Certificate, error) {
+	return certificates.Certificate{}, nil
 }

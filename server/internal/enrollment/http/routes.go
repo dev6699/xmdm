@@ -2,6 +2,7 @@ package enrollmenthttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/certificates"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 )
@@ -57,7 +59,7 @@ type EnrollmentRequest struct {
 	BootstrapExtras      map[string]any       `json:"bootstrapExtras"`
 }
 
-func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, tenantID string) {
+func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, certStore certificates.Repository, tenantID string) {
 	enrollmentMux := httpx.WithPrefix(mux, "/enrollment")
 
 	enrollmentMux.HandleFunc("", func(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +82,12 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 			writeEnrollmentError(w, err)
 			return
 		}
-		config := enrollment.NewBootstrapConfigSnapshot(req.DeviceIdentityPolicy.DeviceID, req.DeviceIdentityPolicy.DeviceIDUse, req.BootstrapExtras)
+		certs, err := listActiveCertificates(r.Context(), certStore, tenantID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		config := enrollment.NewBootstrapConfigSnapshot(req.DeviceIdentityPolicy.DeviceID, req.DeviceIdentityPolicy.DeviceIDUse, req.BootstrapExtras, certs)
 		signed, err := enrollment.SignConfigSnapshot(config, bound.DeviceSecret)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -482,4 +489,19 @@ func writeJSON(w http.ResponseWriter, value any) {
 	enc := json.NewEncoder(&buf)
 	_ = enc.Encode(value)
 	_, _ = w.Write(bytes.TrimSpace(buf.Bytes()))
+}
+
+func listActiveCertificates(ctx context.Context, store certificates.Repository, tenantID string) ([]any, error) {
+	if store == nil {
+		return []any{}, nil
+	}
+	items, err := store.ListActiveCertificates(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, item)
+	}
+	return out, nil
 }

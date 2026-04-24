@@ -9,6 +9,8 @@ import (
 	"xmdm/server/internal/artifacts"
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/certificates"
+	certificatehttp "xmdm/server/internal/certificates/http"
 	"xmdm/server/internal/device"
 	devicehttp "xmdm/server/internal/device/http"
 	"xmdm/server/internal/enrollment"
@@ -31,6 +33,7 @@ type Dependencies struct {
 	Identity      identity.Repository
 	Apps          apps.Repository
 	Files         files.Repository
+	Certificates  certificates.Repository
 	Artifacts     artifacts.Store
 	Groups        group.Repository
 	Policies      policy.Repository
@@ -46,11 +49,12 @@ type Dependencies struct {
 func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
-	enrollmenthttp.Register(apiMux, svc, deps.Enrollment, deps.TenantID)
+	enrollmenthttp.Register(apiMux, svc, deps.Enrollment, deps.Certificates, deps.TenantID)
 	telemetryhttp.Register(apiMux, deps.Telemetry, deps.TenantID)
 	adminhttp.Register(apiMux, svc, deps.PluginManager)
 	apphttp.Register(apiMux, svc, deps.Apps, deps.Audit, deps.TenantID)
 	filehttp.Register(apiMux, svc, deps.Files, deps.Artifacts, deps.Audit, deps.TenantID)
+	certificatehttp.Register(apiMux, svc, deps.Certificates, deps.Artifacts, deps.Audit, deps.TenantID)
 	identityhttp.Register(apiMux, svc, deps.Identity, deps.Audit, deps.TenantID)
 	grouphttp.Register(apiMux, svc, deps.Groups, deps.Audit, deps.TenantID)
 	policyhttp.Register(apiMux, svc, deps.Policies, deps.Audit, deps.TenantID)

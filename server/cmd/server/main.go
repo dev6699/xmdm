@@ -15,6 +15,7 @@ import (
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
+	certificatesspg "xmdm/server/internal/certificates/postgres"
 	devicepg "xmdm/server/internal/device/postgres"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
 	filespg "xmdm/server/internal/files/postgres"
@@ -58,17 +59,18 @@ func openStores() v1.Dependencies {
 	}
 	artifactStore := mustArtifactStore()
 	return v1.Dependencies{
-		Identity:   identitypg.New(pool),
-		Apps:       appspg.New(pool),
-		Files:      filespg.New(pool),
-		Artifacts:  artifactStore,
-		Groups:     grouppg.New(pool),
-		Policies:   policypg.New(pool),
-		Devices:    devicepg.New(pool),
-		Enrollment: enrollmentpg.New(pool),
-		Telemetry:  telemetrypg.New(pool),
-		Audit:      auditpg.NewDBStore(pool),
-		TenantID:   bootstrap.SeedTenantID,
+		Identity:     identitypg.New(pool),
+		Apps:         appspg.New(pool),
+		Files:        filespg.New(pool),
+		Certificates: certificatesspg.New(pool),
+		Artifacts:    artifactStore,
+		Groups:       grouppg.New(pool),
+		Policies:     policypg.New(pool),
+		Devices:      devicepg.New(pool),
+		Enrollment:   enrollmentpg.New(pool),
+		Telemetry:    telemetrypg.New(pool),
+		Audit:        auditpg.NewDBStore(pool),
+		TenantID:     bootstrap.SeedTenantID,
 	}
 }
 
