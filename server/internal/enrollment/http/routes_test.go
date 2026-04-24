@@ -2,6 +2,7 @@ package enrollmenthttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"image/png"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 )
 
@@ -21,7 +23,7 @@ func TestRegisterQRPng(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc)
+	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -58,7 +60,7 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc)
+	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -126,7 +128,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc)
+	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/qr/json", bytes.NewBufferString(`{"serverUrl":"not-a-url","deviceAdminPackageDownloadLocation":"https://cdn.example/launcher.apk","deviceAdminPackageChecksum":"abc123"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -148,9 +150,130 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res = httptest.NewRecorder()
 	mux = http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc)
+	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, nil, "tenant-1")
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad request, got %d", res.Code)
 	}
+}
+
+func TestRegisterTokenLifecycleRoutes(t *testing.T) {
+	store := &fakeEnrollmentStore{
+		issued: enrollment.IssuedToken{
+			Token: enrollment.Token{
+				ID:       "token-id",
+				TenantID: "tenant-1",
+				Status:   enrollment.TokenStatusIssued,
+			},
+			Secret: "secret-token",
+		},
+		validated: enrollment.Token{
+			ID:       "token-id",
+			TenantID: "tenant-1",
+			Status:   enrollment.TokenStatusIssued,
+		},
+		consumed: enrollment.Token{
+			ID:       "token-id",
+			TenantID: "tenant-1",
+			Status:   enrollment.TokenStatusConsumed,
+		},
+		revoked: enrollment.Token{
+			ID:       "token-id",
+			TenantID: "tenant-1",
+			Status:   enrollment.TokenStatusRevoked,
+		},
+	}
+
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens", bytes.NewBufferString(`{"ttlSeconds":3600}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected issue ok, got %d", res.Code)
+	}
+	var issued map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("decode issue response: %v", err)
+	}
+	if issued["token"] != "secret-token" {
+		t.Fatalf("unexpected token secret: %#v", issued["token"])
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens/validate", bytes.NewBufferString(`{"token":"secret-token"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res = httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected validate ok, got %d", res.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens/consume", bytes.NewBufferString(`{"token":"secret-token"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res = httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected consume ok, got %d", res.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/enrollment/tokens/token-id", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	res = httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected revoke ok, got %d", res.Code)
+	}
+}
+
+type fakeEnrollmentStore struct {
+	issued    enrollment.IssuedToken
+	validated enrollment.Token
+	consumed  enrollment.Token
+	revoked   enrollment.Token
+
+	issueTenant    string
+	issueExpiresAt time.Time
+	validateTenant string
+	validateToken  string
+	consumeTenant  string
+	consumeToken   string
+	revokeTenant   string
+	revokeID       string
+}
+
+func (s *fakeEnrollmentStore) IssueToken(ctx context.Context, tenantID string, expiresAt time.Time) (enrollment.IssuedToken, error) {
+	s.issueTenant = tenantID
+	s.issueExpiresAt = expiresAt
+	return s.issued, nil
+}
+
+func (s *fakeEnrollmentStore) ValidateToken(_ context.Context, tenantID, token string) (enrollment.Token, error) {
+	s.validateTenant = tenantID
+	s.validateToken = token
+	return s.validated, nil
+}
+
+func (s *fakeEnrollmentStore) ConsumeToken(_ context.Context, tenantID, token string) (enrollment.Token, error) {
+	s.consumeTenant = tenantID
+	s.consumeToken = token
+	return s.consumed, nil
+}
+
+func (s *fakeEnrollmentStore) RevokeToken(_ context.Context, tenantID, id string) (enrollment.Token, error) {
+	s.revokeTenant = tenantID
+	s.revokeID = id
+	return s.revoked, nil
+}
+
+func (s *fakeEnrollmentStore) ExpireTokens(context.Context, time.Time) (int64, error) {
+	return 0, nil
 }

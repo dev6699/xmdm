@@ -7,6 +7,103 @@ Path prefix:
 - The enrollment API surface lives under `/api/v1/enrollment/...`
 - It uses the same authenticated admin session semantics as the admin console
 
+## Enrollment Tokens
+
+### `POST /api/v1/enrollment/tokens`
+
+- Permission: `devices.write`
+- Request body:
+
+```json
+{
+  "ttlSeconds": 3600
+}
+```
+
+- Success response: `200 application/json`
+- Body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "issued",
+  "expiresAt": "2026-04-23T00:00:00Z",
+  "createdAt": "2026-04-23T00:00:00Z",
+  "updatedAt": "2026-04-23T00:00:00Z",
+  "token": "base64url-secret"
+}
+```
+
+### `POST /api/v1/enrollment/tokens/validate`
+
+- Request: none
+- Request body:
+
+```json
+{
+  "token": "base64url-secret"
+}
+```
+
+- Success response: `200 application/json`
+- Body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "issued",
+  "expiresAt": "2026-04-23T00:00:00Z",
+  "createdAt": "2026-04-23T00:00:00Z",
+  "updatedAt": "2026-04-23T00:00:00Z"
+}
+```
+
+### `POST /api/v1/enrollment/tokens/consume`
+
+- Request: none
+- Request body:
+
+```json
+{
+  "token": "base64url-secret"
+}
+```
+
+- Success response: `200 application/json`
+- Body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "consumed",
+  "expiresAt": "2026-04-23T00:00:00Z",
+  "consumedAt": "2026-04-23T00:00:00Z",
+  "createdAt": "2026-04-23T00:00:00Z",
+  "updatedAt": "2026-04-23T00:00:00Z"
+}
+```
+
+### `DELETE /api/v1/enrollment/tokens/{id}`
+
+- Permission: `devices.write`
+- Success response: `200 application/json`
+- Body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "revoked",
+  "expiresAt": "2026-04-23T00:00:00Z",
+  "revokedAt": "2026-04-23T00:00:00Z",
+  "createdAt": "2026-04-23T00:00:00Z",
+  "updatedAt": "2026-04-23T00:00:00Z"
+}
+```
+
 ## QR Payload
 
 ### `POST /api/v1/enrollment/qr`

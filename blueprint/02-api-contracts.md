@@ -38,6 +38,9 @@
 - Creates or binds a device during first enrollment.
 - Accepts an enrollment token, device identity hints, and optional bootstrap fields.
 - Returns the device identity, device secret, initial config snapshot, and any initial artifact or command data needed for first sync.
+- Enrollment token lifecycle routes live under `/api/v1/enrollment/tokens` for issuance, validation, consumption, and revocation.
+- The issued token is one-time use and is stored only as a hash server-side.
+- Token validation and consumption are public device-side calls that operate on the raw bootstrap token string.
 
 ### QR Payload
 
@@ -170,6 +173,7 @@
 - Device sync must tolerate empty command lists without treating that as an error.
 - Download URLs are server-authorized and short-lived when object storage is exposed directly.
 - Enrollment QR generation returns a PNG QR image; `/api/v1/enrollment/qr/json` returns the canonical Android provisioning payload for clients that need the raw JSON.
+- `/api/v1/enrollment/tokens` issues a token for a given TTL; `/api/v1/enrollment/tokens/validate` and `/api/v1/enrollment/tokens/consume` operate on the one-time token string; `DELETE /api/v1/enrollment/tokens/{id}` revokes an active token.
 
 ## Response Rules
 

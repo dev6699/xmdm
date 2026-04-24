@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 )
 
@@ -41,7 +43,128 @@ type AndroidQRPayload struct {
 	AdminExtrasBundle         map[string]any `json:"android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE"`
 }
 
-func Register(mux httpx.Router, svc *auth.Service) {
+type TokenIssueRequest struct {
+	TTLSeconds int `json:"ttlSeconds"`
+}
+
+type TokenLookupRequest struct {
+	Token string `json:"token"`
+}
+
+func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, tenantID string) {
+	mux.HandleFunc("/tokens", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		session, ok := sessionFromRequest(r, svc)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if !auth.HasPermission(session.Permissions, auth.PermissionDevicesWrite) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if store == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		req := TokenIssueRequest{TTLSeconds: 24 * 60 * 60}
+		if err := decodeTokenIssueRequest(r, &req); err != nil {
+			writeRequestError(w, err)
+			return
+		}
+		if req.TTLSeconds <= 0 {
+			writeRequestError(w, httpx.ErrInvalidInput)
+			return
+		}
+
+		issued, err := store.IssueToken(r.Context(), tenantID, time.Now().Add(time.Duration(req.TTLSeconds)*time.Second))
+		if err != nil {
+			writeEnrollmentError(w, err)
+			return
+		}
+
+		writeJSON(w, issued)
+	})
+
+	mux.HandleFunc("/tokens/validate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if store == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		req, err := decodeTokenLookupRequest(r)
+		if err != nil {
+			writeRequestError(w, err)
+			return
+		}
+		token, err := store.ValidateToken(r.Context(), tenantID, req.Token)
+		if err != nil {
+			writeEnrollmentError(w, err)
+			return
+		}
+		writeJSON(w, token)
+	})
+
+	mux.HandleFunc("/tokens/consume", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if store == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		req, err := decodeTokenLookupRequest(r)
+		if err != nil {
+			writeRequestError(w, err)
+			return
+		}
+		token, err := store.ConsumeToken(r.Context(), tenantID, req.Token)
+		if err != nil {
+			writeEnrollmentError(w, err)
+			return
+		}
+		writeJSON(w, token)
+	})
+
+	mux.HandleFunc("/tokens/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		session, ok := sessionFromRequest(r, svc)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if !auth.HasPermission(session.Permissions, auth.PermissionDevicesWrite) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if store == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		tokenID := r.PathValue("id")
+		if tokenID == "" {
+			writeRequestError(w, httpx.ErrInvalidInput)
+			return
+		}
+		token, err := store.RevokeToken(r.Context(), tenantID, tokenID)
+		if err != nil {
+			writeEnrollmentError(w, err)
+			return
+		}
+		writeJSON(w, token)
+	})
+
 	mux.HandleFunc("/qr", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -102,6 +225,25 @@ func Register(mux httpx.Router, svc *auth.Service) {
 
 		writeJSON(w, toPayload(payload))
 	})
+}
+
+func decodeTokenIssueRequest(r *http.Request, dst *TokenIssueRequest) error {
+	if err := httpx.DecodeJSONBody(r, dst); err != nil {
+		return err
+	}
+	return nil
+}
+
+func decodeTokenLookupRequest(r *http.Request) (TokenLookupRequest, error) {
+	var payload TokenLookupRequest
+	if err := httpx.DecodeJSONBody(r, &payload); err != nil {
+		return TokenLookupRequest{}, err
+	}
+	payload.Token = strings.TrimSpace(payload.Token)
+	if payload.Token == "" {
+		return TokenLookupRequest{}, httpx.ErrInvalidInput
+	}
+	return payload, nil
 }
 
 func toPayload(req QRRequest) AndroidQRPayload {
@@ -265,6 +407,19 @@ func writeRequestError(w http.ResponseWriter, err error) {
 		return
 	}
 	http.Error(w, "invalid json", http.StatusBadRequest)
+}
+
+func writeEnrollmentError(w http.ResponseWriter, err error) {
+	switch err {
+	case httpx.ErrInvalidInput:
+		http.Error(w, "invalid input", http.StatusBadRequest)
+	case httpx.ErrNotFound, enrollment.ErrTokenNotFound:
+		http.Error(w, "not found", http.StatusNotFound)
+	case enrollment.ErrTokenConsumed, enrollment.ErrTokenExpired, enrollment.ErrTokenRevoked, enrollment.ErrTokenConflict:
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, value any) {

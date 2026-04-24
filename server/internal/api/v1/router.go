@@ -8,6 +8,7 @@ import (
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
 	devicehttp "xmdm/server/internal/device/http"
+	"xmdm/server/internal/enrollment"
 	enrollmenthttp "xmdm/server/internal/enrollment/http"
 	grouphttp "xmdm/server/internal/group/http"
 	"xmdm/server/internal/httpx"
@@ -17,11 +18,11 @@ import (
 )
 
 // NewMux builds the versioned HTTP surface under /api/v1.
-func NewMux(svc *auth.Service, store admin.Repository, auditStore audit.Store, pluginManager *plugins.Manager, tenantID string) http.Handler {
+func NewMux(svc *auth.Service, store admin.Repository, enrollmentStore enrollment.Repository, auditStore audit.Store, pluginManager *plugins.Manager, tenantID string) http.Handler {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
 	enrollmentMux := httpx.WithPrefix(apiMux, "/enrollment")
-	enrollmenthttp.Register(enrollmentMux, svc)
+	enrollmenthttp.Register(enrollmentMux, svc, enrollmentStore, tenantID)
 	adminMux := httpx.WithPrefix(apiMux, "/admin")
 	adminhttp.Register(adminMux, svc)
 	identityhttp.Register(apiMux, svc, store, auditStore, tenantID)

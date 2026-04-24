@@ -38,7 +38,7 @@ Snapshot last updated: 2026-04-24
 | Item | State |
 | --- | --- |
 | M2-01 QR Enrollment | ☑ |
-| M2-02 Enrollment Tokens | ☐ |
+| M2-02 Enrollment Tokens | ☑ |
 | M2-03 Device Secret | ☐ |
 | M2-04 Signed Config | ☐ |
 | M2-05 Telemetry Upload | ☐ |
