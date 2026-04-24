@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"xmdm/server/internal/bootstrap"
+	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 )
 
@@ -74,11 +75,19 @@ func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bind device: %v", err)
 	}
-	if bound.DeviceID != "device-123" || bound.DeviceSecret == "" || bound.Status != "enrolled" {
+	if bound.DeviceID != "device-123" || bound.DeviceSecret == "" || bound.Status != device.StatusEnrolled {
 		t.Fatalf("unexpected bound device: %#v", bound)
 	}
 	if _, err := store.ConsumeToken(context.Background(), bootstrap.SeedTenantID, bindIssued.Secret); !errors.Is(err, enrollment.ErrTokenConsumed) {
 		t.Fatalf("expected consumed token after bind, got %v", err)
+	}
+
+	dupIssued, err := store.IssueToken(context.Background(), bootstrap.SeedTenantID, now.Add(4*time.Hour))
+	if err != nil {
+		t.Fatalf("issue duplicate token: %v", err)
+	}
+	if _, err := store.BindDevice(context.Background(), bootstrap.SeedTenantID, dupIssued.Secret, "device-123"); !errors.Is(err, enrollment.ErrDeviceConflict) {
+		t.Fatalf("expected duplicate device conflict, got %v", err)
 	}
 
 	expiringIssued, err := store.IssueToken(context.Background(), bootstrap.SeedTenantID, now.Add(10*time.Minute))

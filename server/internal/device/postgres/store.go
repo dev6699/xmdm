@@ -102,10 +102,10 @@ func (s *Store) RetireDevice(ctx context.Context, tenantID, id string) (device.D
 	now := s.now()
 	row := s.pool.QueryRow(ctx,
 		`UPDATE devices
-		 SET status = 'retired', deleted_at = $3, updated_at = $3
+		 SET status = $3, deleted_at = $4, updated_at = $4
 		 WHERE tenant_id = $1 AND id = $2
 		 RETURNING id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text`,
-		tenantID, id, now,
+		tenantID, id, device.StatusRetired, now,
 	)
 	rec, err := scanDevice(row)
 	if err != nil {

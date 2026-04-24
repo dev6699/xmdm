@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 )
@@ -239,7 +240,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 		bound: enrollment.BoundDevice{
 			DeviceID:     "device-123",
 			DeviceSecret: "device-secret",
-			Status:       "enrolled",
+			Status:       device.StatusEnrolled,
 		},
 	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})

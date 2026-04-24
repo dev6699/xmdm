@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"xmdm/server/internal/bootstrap"
+	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/telemetry"
 )
@@ -37,6 +38,14 @@ func TestStoreUploadTelemetry(t *testing.T) {
 	}
 	if rec.Payload["heartbeat"] == nil || rec.Payload["battery"] == nil {
 		t.Fatalf("unexpected telemetry payload: %#v", rec.Payload)
+	}
+
+	var status string
+	if err := pool.QueryRow(context.Background(), `SELECT status FROM devices WHERE tenant_id = $1 AND device_id = $2`, bootstrap.SeedTenantID, "device-123").Scan(&status); err != nil {
+		t.Fatalf("load device status: %v", err)
+	}
+	if status != device.StatusActive {
+		t.Fatalf("expected active status after telemetry, got %q", status)
 	}
 
 	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, "missing-device", deviceSecret, telemetry.UploadRequest{Heartbeat: map[string]any{"online": true}}); !errors.Is(err, telemetry.ErrDeviceNotFound) {

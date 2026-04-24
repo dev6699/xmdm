@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 
@@ -84,6 +85,13 @@ func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string
 	if err != nil {
 		return enrollment.BoundDevice{}, err
 	}
+	exists, err := deviceExistsByTenantAndDeviceIDForUpdate(ctx, tx, tenantID, deviceID)
+	if err != nil {
+		return enrollment.BoundDevice{}, err
+	}
+	if exists {
+		return enrollment.BoundDevice{}, enrollment.ErrDeviceConflict
+	}
 	if tokenRow.Status == enrollment.TokenStatusIssued && !tokenRow.ExpiresAt.After(now) {
 		tokenRow.Status = enrollment.TokenStatusExpired
 		tokenRow.UpdatedAt = now
@@ -112,7 +120,7 @@ func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string
 		`INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING device_id, status`,
-		uuid.NewString(), tenantID, deviceID, enrollment.HashToken(secret), "enrolled", now,
+		uuid.NewString(), tenantID, deviceID, enrollment.HashToken(secret), device.StatusEnrolled, now,
 	)
 	var bound enrollment.BoundDevice
 	if err := row.Scan(&bound.DeviceID, &bound.Status); err != nil {
@@ -262,6 +270,26 @@ func loadTokenByIDForUpdate(ctx context.Context, tx interface {
 		tenantID, id,
 	)
 	return scanToken(row)
+}
+
+func deviceExistsByTenantAndDeviceIDForUpdate(ctx context.Context, tx interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, tenantID, deviceID string) (bool, error) {
+	row := tx.QueryRow(ctx,
+		`SELECT 1
+		 FROM devices
+		 WHERE tenant_id = $1 AND device_id = $2
+		 FOR UPDATE`,
+		tenantID, deviceID,
+	)
+	var exists int
+	if err := row.Scan(&exists); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func updateToken(ctx context.Context, tx interface {

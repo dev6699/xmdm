@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/telemetry"
@@ -68,6 +69,11 @@ func (s *Store) Upload(ctx context.Context, tenantID, deviceID, secret string, r
 	if _, err := tx.Exec(ctx, `UPDATE devices SET updated_at = $2 WHERE id = $1`, deviceRow.ID, now); err != nil {
 		return telemetry.Record{}, err
 	}
+	if deviceRow.Status == device.StatusEnrolled {
+		if _, err := tx.Exec(ctx, `UPDATE devices SET status = $2, updated_at = $3 WHERE id = $1`, deviceRow.ID, device.StatusActive, now); err != nil {
+			return telemetry.Record{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return telemetry.Record{}, err
 	}
@@ -97,7 +103,7 @@ func loadDeviceForSecret(ctx context.Context, tx interface {
 		}
 		return deviceRow{}, err
 	}
-	if rec.Status == "retired" || rec.Status == "wiped" {
+	if rec.Status == device.StatusRetired || rec.Status == device.StatusWiped {
 		return deviceRow{}, telemetry.ErrDeviceUnauthorized
 	}
 	if rec.SecretHash != enrollment.HashToken(secret) {

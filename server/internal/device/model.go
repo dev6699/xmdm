@@ -2,6 +2,16 @@ package device
 
 import "time"
 
+const (
+	StatusPending   = "pending"
+	StatusEnrolled  = "enrolled"
+	StatusActive    = "active"
+	StatusLocked    = "locked"
+	StatusSuspended = "suspended"
+	StatusRetired   = "retired"
+	StatusWiped     = "wiped"
+)
+
 type RecordBase struct {
 	ID        string     `json:"id"`
 	TenantID  string     `json:"tenantId"`
