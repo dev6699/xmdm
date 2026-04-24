@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"xmdm/server/internal/admin"
+	"github.com/jackc/pgx/v5/pgxpool"
+	v1 "xmdm/server/internal/api/v1"
+	"xmdm/server/internal/audit"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
@@ -31,12 +33,7 @@ func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
 	now := time.Now()
 	svc.SetNow(func() time.Time { return now })
 
-	mux := newMux(svc, admin.NewRepository(
-		identitypg.New(pool),
-		grouppg.New(pool),
-		policypg.New(pool),
-		devicepg.New(pool),
-	), enrollmentpg.New(pool), telemetrypg.New(pool), auditpg.NewDBStore(pool), plugins.Disabled())
+	mux := newMux(svc, testDeps(pool, auditpg.NewDBStore(pool), plugins.Disabled()))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
 	res := httptest.NewRecorder()
@@ -83,12 +80,7 @@ func TestAdminDevicesRouteAllowsPermission(t *testing.T) {
 		t.Fatalf("login failed: %v", err)
 	}
 
-	mux := newMux(svc, admin.NewRepository(
-		identitypg.New(pool),
-		grouppg.New(pool),
-		policypg.New(pool),
-		devicepg.New(pool),
-	), enrollmentpg.New(pool), telemetrypg.New(pool), auditpg.NewDBStore(pool), plugins.Disabled())
+	mux := newMux(svc, testDeps(pool, auditpg.NewDBStore(pool), plugins.Disabled()))
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res := httptest.NewRecorder()
@@ -105,14 +97,8 @@ func TestCoreCrudLifecycle(t *testing.T) {
 	svc := auth.NewService("admin", "secret", time.Minute)
 	now := time.Now()
 	svc.SetNow(func() time.Time { return now })
-	store := admin.NewRepository(
-		identitypg.New(pool),
-		grouppg.New(pool),
-		policypg.New(pool),
-		devicepg.New(pool),
-	)
 	auditStore := auditpg.NewDBStore(pool)
-	mux := newMux(svc, store, enrollmentpg.New(pool), telemetrypg.New(pool), auditStore, plugins.Disabled())
+	mux := newMux(svc, testDeps(pool, auditStore, plugins.Disabled()))
 
 	session, err := svc.Login("admin", "secret")
 	if err != nil {
@@ -203,12 +189,7 @@ func TestPluginIsolationDoesNotExposeOptionalRoutes(t *testing.T) {
 		t.Fatalf("login failed: %v", err)
 	}
 
-	mux := newMux(svc, admin.NewRepository(
-		identitypg.New(pool),
-		grouppg.New(pool),
-		policypg.New(pool),
-		devicepg.New(pool),
-	), enrollmentpg.New(pool), telemetrypg.New(pool), auditpg.NewDBStore(pool), plugins.Disabled())
+	mux := newMux(svc, testDeps(pool, auditpg.NewDBStore(pool), plugins.Disabled()))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/plugins", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
@@ -216,5 +197,19 @@ func TestPluginIsolationDoesNotExposeOptionalRoutes(t *testing.T) {
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("expected optional plugin route to be absent, got %d", res.Code)
+	}
+}
+
+func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins.Manager) v1.Dependencies {
+	return v1.Dependencies{
+		Identity:      identitypg.New(pool),
+		Groups:        grouppg.New(pool),
+		Policies:      policypg.New(pool),
+		Devices:       devicepg.New(pool),
+		Enrollment:    enrollmentpg.New(pool),
+		Telemetry:     telemetrypg.New(pool),
+		Audit:         auditStore,
+		PluginManager: pluginManager,
+		TenantID:      bootstrap.SeedTenantID,
 	}
 }

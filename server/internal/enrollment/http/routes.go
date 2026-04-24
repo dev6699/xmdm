@@ -58,7 +58,9 @@ type EnrollmentRequest struct {
 }
 
 func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, tenantID string) {
-	mux.HandleFunc("", func(w http.ResponseWriter, r *http.Request) {
+	enrollmentMux := httpx.WithPrefix(mux, "/enrollment")
+
+	enrollmentMux.HandleFunc("", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -88,7 +90,7 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 		writeJSON(w, bound)
 	})
 
-	mux.HandleFunc("/tokens", func(w http.ResponseWriter, r *http.Request) {
+	enrollmentMux.HandleFunc("/tokens", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -126,7 +128,7 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 		writeJSON(w, issued)
 	})
 
-	mux.HandleFunc("/tokens/validate", func(w http.ResponseWriter, r *http.Request) {
+	enrollmentMux.HandleFunc("/tokens/validate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -148,7 +150,7 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 		writeJSON(w, token)
 	})
 
-	mux.HandleFunc("/tokens/consume", func(w http.ResponseWriter, r *http.Request) {
+	enrollmentMux.HandleFunc("/tokens/consume", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -170,7 +172,7 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 		writeJSON(w, token)
 	})
 
-	mux.HandleFunc("/tokens/{id}", func(w http.ResponseWriter, r *http.Request) {
+	enrollmentMux.HandleFunc("/tokens/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -201,7 +203,7 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 		writeJSON(w, token)
 	})
 
-	mux.HandleFunc("/qr", func(w http.ResponseWriter, r *http.Request) {
+	enrollmentMux.HandleFunc("/qr", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -238,7 +240,7 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 		_, _ = w.Write(png)
 	})
 
-	mux.HandleFunc("/qr/json", func(w http.ResponseWriter, r *http.Request) {
+	enrollmentMux.HandleFunc("/qr/json", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return

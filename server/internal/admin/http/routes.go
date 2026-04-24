@@ -5,10 +5,15 @@ import (
 
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/plugins"
 )
 
-func Register(mux httpx.Router, svc *auth.Service) {
-	registerSessionRoutes(mux, svc)
+func Register(mux httpx.Router, svc *auth.Service, pluginManager *plugins.Manager) {
+	adminMux := httpx.WithPrefix(mux, "/admin")
+	registerSessionRoutes(adminMux, svc)
+	if pluginManager != nil {
+		pluginManager.Register(adminMux)
+	}
 }
 
 func registerSessionRoutes(mux httpx.Router, svc *auth.Service) {

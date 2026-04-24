@@ -8,20 +8,16 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"xmdm/server/internal/admin"
 	v1 "xmdm/server/internal/api/v1"
-	"xmdm/server/internal/audit"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
 	devicepg "xmdm/server/internal/device/postgres"
-	enrollment "xmdm/server/internal/enrollment"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
 	grouppg "xmdm/server/internal/group/postgres"
 	identitypg "xmdm/server/internal/identity/postgres"
 	"xmdm/server/internal/plugins"
 	policypg "xmdm/server/internal/policy/postgres"
-	"xmdm/server/internal/telemetry"
 	telemetrypg "xmdm/server/internal/telemetry/postgres"
 )
 
@@ -32,9 +28,10 @@ func main() {
 	sessionTTL := envDuration("XMDM_SESSION_TTL", 24*time.Hour)
 
 	svc := auth.NewService(username, password, sessionTTL)
-	store, enrollmentStore, telemetryStore, auditStore := openStores()
+	deps := openStores()
 	pluginManager := plugins.Disabled()
-	mux := newMux(svc, store, enrollmentStore, telemetryStore, auditStore, pluginManager)
+	deps.PluginManager = pluginManager
+	mux := newMux(svc, deps)
 
 	log.Printf("xmdm server listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -42,11 +39,11 @@ func main() {
 	}
 }
 
-func newMux(svc *auth.Service, store admin.Repository, enrollmentStore enrollment.Repository, telemetryStore telemetry.Repository, auditStore audit.Store, pluginManager *plugins.Manager) http.Handler {
-	return v1.NewMux(svc, store, enrollmentStore, telemetryStore, auditStore, pluginManager, bootstrap.SeedTenantID)
+func newMux(svc *auth.Service, deps v1.Dependencies) http.Handler {
+	return v1.NewMux(svc, deps)
 }
 
-func openStores() (admin.Repository, enrollment.Repository, telemetry.Repository, audit.Store) {
+func openStores() v1.Dependencies {
 	dsn := env("XMDM_POSTGRES_DSN", bootstrap.DefaultPostgresDSN)
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
@@ -55,12 +52,16 @@ func openStores() (admin.Repository, enrollment.Repository, telemetry.Repository
 	if err := pool.Ping(context.Background()); err != nil {
 		log.Fatalf("ping postgres: %v", err)
 	}
-	return admin.NewRepository(
-		identitypg.New(pool),
-		grouppg.New(pool),
-		policypg.New(pool),
-		devicepg.New(pool),
-	), enrollmentpg.New(pool), telemetrypg.New(pool), auditpg.NewDBStore(pool)
+	return v1.Dependencies{
+		Identity:   identitypg.New(pool),
+		Groups:     grouppg.New(pool),
+		Policies:   policypg.New(pool),
+		Devices:    devicepg.New(pool),
+		Enrollment: enrollmentpg.New(pool),
+		Telemetry:  telemetrypg.New(pool),
+		Audit:      auditpg.NewDBStore(pool),
+		TenantID:   bootstrap.SeedTenantID,
+	}
 }
 
 func env(key, fallback string) string {

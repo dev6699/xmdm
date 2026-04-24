@@ -23,7 +23,7 @@ func TestRegisterQRPng(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -60,7 +60,7 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -128,7 +128,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/qr/json", bytes.NewBufferString(`{"serverUrl":"not-a-url","deviceAdminPackageDownloadLocation":"https://cdn.example/launcher.apk","deviceAdminPackageChecksum":"abc123"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -150,7 +150,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res = httptest.NewRecorder()
 	mux = http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, "tenant-1")
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad request, got %d", res.Code)
@@ -191,7 +191,7 @@ func TestRegisterTokenLifecycleRoutes(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, store, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens", bytes.NewBufferString(`{"ttlSeconds":3600}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -244,7 +244,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, store, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",

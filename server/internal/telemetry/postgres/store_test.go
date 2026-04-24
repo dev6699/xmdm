@@ -13,6 +13,8 @@ import (
 	"xmdm/server/internal/telemetry"
 )
 
+const seededDeviceID = "33333333-3333-3333-3333-333333333333"
+
 func TestStoreUploadTelemetry(t *testing.T) {
 	pool := openTelemetryTestPool(t)
 	t.Cleanup(pool.Close)
@@ -30,7 +32,7 @@ func TestStoreUploadTelemetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upload telemetry: %v", err)
 	}
-	if rec.DeviceID != "device-123" || rec.TenantID != bootstrap.SeedTenantID {
+	if rec.DeviceID != seededDeviceID || rec.TenantID != bootstrap.SeedTenantID {
 		t.Fatalf("unexpected telemetry record: %#v", rec)
 	}
 	if rec.Payload["heartbeat"] == nil || rec.Payload["battery"] == nil {
@@ -70,7 +72,7 @@ func resetTelemetryTestDB(t *testing.T, pool *pgxpool.Pool) {
 		VALUES ('`+bootstrap.SeedTenantID+`', '`+bootstrap.SeedTenantName+`', 'active');
 		INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
 		VALUES (
-			'device-123',
+			'`+seededDeviceID+`',
 			'`+bootstrap.SeedTenantID+`',
 			'device-123',
 			'`+enrollment.HashToken("device-secret")+`',
