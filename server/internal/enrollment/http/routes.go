@@ -78,6 +78,13 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 			writeEnrollmentError(w, err)
 			return
 		}
+		config := enrollment.NewBootstrapConfigSnapshot(req.DeviceIdentityPolicy.DeviceID, req.DeviceIdentityPolicy.DeviceIDUse, req.BootstrapExtras)
+		signed, err := enrollment.SignConfigSnapshot(config, bound.DeviceSecret)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		bound.Config = signed
 		writeJSON(w, bound)
 	})
 

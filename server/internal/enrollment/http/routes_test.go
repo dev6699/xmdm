@@ -267,6 +267,24 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if payload["deviceSecret"] != "device-secret" {
 		t.Fatalf("unexpected device secret: %#v", payload["deviceSecret"])
 	}
+	rawConfig, ok := payload["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config has wrong type: %T", payload["config"])
+	}
+	rawConfigJSON, err := json.Marshal(rawConfig)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	var config enrollment.ConfigSnapshot
+	if err := json.Unmarshal(rawConfigJSON, &config); err != nil {
+		t.Fatalf("decode config snapshot: %v", err)
+	}
+	if config.Version != "1" {
+		t.Fatalf("unexpected config version: %q", config.Version)
+	}
+	if err := enrollment.VerifyConfigSnapshot(config, "device-secret"); err != nil {
+		t.Fatalf("verify config snapshot: %v", err)
+	}
 }
 
 type fakeEnrollmentStore struct {

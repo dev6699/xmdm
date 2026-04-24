@@ -26,7 +26,19 @@ type IssuedToken struct {
 }
 
 type BoundDevice struct {
-	DeviceID     string `json:"deviceId"`
-	DeviceSecret string `json:"deviceSecret"`
-	Status       string `json:"status"`
+	DeviceID     string         `json:"deviceId"`
+	DeviceSecret string         `json:"deviceSecret"`
+	Status       string         `json:"status"`
+	Config       ConfigSnapshot `json:"config"`
+}
+
+type ConfigSnapshot struct {
+	Version      string         `json:"version"`
+	Device       map[string]any `json:"device"`
+	Policy       map[string]any `json:"policy"`
+	Apps         []any          `json:"apps"`
+	Files        []any          `json:"files"`
+	Certificates []any          `json:"certificates"`
+	Commands     []any          `json:"commands"`
+	Signature    string         `json:"signature"`
 }

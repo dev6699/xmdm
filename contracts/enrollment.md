@@ -34,9 +34,28 @@ Path prefix:
 {
   "deviceId": "serial-123",
   "deviceSecret": "base64url-secret",
-  "status": "enrolled"
+  "status": "enrolled",
+  "config": {
+    "version": "1",
+    "device": {
+      "deviceId": "serial-123",
+      "deviceIdUse": "serial"
+    },
+    "policy": {
+      "bootstrapExtras": {
+        "customer": "Acme"
+      }
+    },
+    "apps": [],
+    "files": [],
+    "certificates": [],
+    "commands": [],
+    "signature": "hmac-sha256"
+  }
 }
 ```
+
+- The config snapshot is signed with the device secret and uses HMAC-SHA256 over the canonical JSON body with an empty `signature` field.
 
 - Errors:
   - `400` invalid input or malformed JSON

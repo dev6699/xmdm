@@ -109,14 +109,22 @@
 {
   "deviceId": "string",
   "deviceSecret": "string",
-  "policyVersion": "string",
-  "config": {},
-  "apps": [],
-  "files": [],
-  "certificates": [],
-  "commands": []
+  "status": "enrolled",
+  "config": {
+    "version": "string",
+    "device": {},
+    "policy": {},
+    "apps": [],
+    "files": [],
+    "certificates": [],
+    "commands": [],
+    "signature": "string"
+  }
 }
 ```
+
+- The `config` payload is a signed config snapshot.
+- The signature is computed over the canonical JSON representation with `signature` blanked and keyed by the device secret.
 
 ### Config Snapshot
 
