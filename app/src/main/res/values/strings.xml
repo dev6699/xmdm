@@ -2,5 +2,5 @@
 <resources>
     <string name="app_name">XMDM Agent</string>
     <string name="launcher_title">XMDM Agent</string>
-    <string name="launcher_status">Android project scaffold initialized.\nNext: enrollment, bootstrap, and sync wiring.</string>
+    <string name="launcher_status">Device enrollment status</string>
 </resources>

@@ -60,6 +60,11 @@ For adb-driven checks, `com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64` accepts the 
 `MainActivity` also accepts `data:base64url:<payload>` on the launch intent, which is the most reliable adb path for device-side validation.
 Unit tests cover both the canonical Android provisioning JSON and the flat fallback JSON form.
 
+### Enrollment And First Config
+
+When bootstrap data is present and the device is not yet enrolled, `MainActivity` now calls the enrollment API at `/api/v1/enrollment`.
+The response supplies the device secret and the initial signed config snapshot, which are persisted locally as device identity and policy cache state.
+
 ### Retry Foundation
 
 Retry helpers live in `app/src/main/java/com/xmdm/launcher/retry/`.
@@ -78,4 +83,4 @@ It fetches a signed config snapshot through an injectable source, verifies the s
 
 ### Current State
 
-The scaffold already builds, local persistence is in place, bootstrap parsing now persists canonical or fallback payloads, config sync now retries transient failures before caching a verified snapshot, and `M3-02 Local Persistence` has passed a physical-device reboot check.
+The scaffold already builds, local persistence is in place, bootstrap parsing now persists canonical or fallback payloads, bootstrap state can now flow into enrollment and the initial signed config snapshot, config sync now retries transient failures before caching a verified snapshot, and `M3-02 Local Persistence` has passed a physical-device reboot check.

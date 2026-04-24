@@ -2,17 +2,33 @@ package com.xmdm.launcher
 
 import android.os.Bundle
 import android.util.Base64
+import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonParser
 import com.xmdm.launcher.bootstrap.BootstrapProvisioner
 import com.xmdm.launcher.databinding.ActivityMainBinding
+import com.xmdm.launcher.enrollment.EnrollmentCoordinator
+import com.xmdm.launcher.enrollment.HttpEnrollmentGateway
 import com.xmdm.launcher.state.AgentState
 import com.xmdm.launcher.state.AgentStateStore
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 class MainActivity : AppCompatActivity() {
     private val stateStore by lazy { AgentStateStore.from(applicationContext) }
+    private val enrollmentCoordinator by lazy {
+        EnrollmentCoordinator(
+            stateStore = stateStore,
+            gateway = HttpEnrollmentGateway(),
+        )
+    }
+    private var enrollmentInFlight = false
+    private val prettyJson = GsonBuilder().setPrettyPrinting().create()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,26 +40,38 @@ class MainActivity : AppCompatActivity() {
         consumeBootstrapIntent()
         lifecycleScope.launch {
             stateStore.state.collectLatest { state ->
-                binding.launcherStatus.text = renderStatus(state)
+                binding.launcherStatus.text = renderStatus(state, enrollmentInFlight)
+                maybeStartEnrollment(state)
             }
         }
     }
 
-    private fun renderStatus(state: AgentState): CharSequence {
+    private fun renderStatus(state: AgentState, enrollmentInFlight: Boolean): CharSequence {
         val bootstrapLine = if (state.isBootstrapped) {
             "bootstrap: restored"
         } else {
             "bootstrap: empty"
         }
-        val identityLine = if (state.isEnrolled) {
-            "device identity: restored"
-        } else {
-            "device identity: empty"
+        val identityLine = when {
+            state.isEnrolled -> "device identity: restored"
+            enrollmentInFlight -> "device identity: enrolling"
+            else -> "device identity: empty"
         }
         val policyLine = if (state.hasPolicyCache) {
-            "policy cache: restored"
+            val policyCache = state.policyCache!!
+            val savedAt = Instant.ofEpochMilli(policyCache.lastSyncAtEpochMillis)
+            buildString {
+                append("policy cache: restored")
+                append('\n')
+                append("saved at: ")
+                append(formatSavedAt(savedAt))
+                append('\n')
+                append("config snapshot:")
+                append('\n')
+                append(prettyConfig(policyCache.snapshotJson))
+            }
         } else {
-            "policy cache: empty"
+            "policy cache: empty\nsaved at: -\nconfig snapshot: empty"
         }
         return buildString {
             append(getString(R.string.launcher_status))
@@ -53,6 +81,35 @@ class MainActivity : AppCompatActivity() {
             append(identityLine)
             append('\n')
             append(policyLine)
+        }
+    }
+
+    private fun prettyConfig(snapshotJson: String): String {
+        val parsed = JsonParser.parseString(snapshotJson)
+        return prettyJson.toJson(parsed)
+    }
+
+    private fun formatSavedAt(instant: Instant): String {
+        return SAVED_AT_FORMATTER.format(instant.atZone(ZoneId.systemDefault()))
+    }
+
+    private fun maybeStartEnrollment(state: AgentState) {
+        if (enrollmentInFlight) {
+            return
+        }
+        val bootstrap = state.bootstrap ?: return
+        if (state.isEnrolled) {
+            return
+        }
+        enrollmentInFlight = true
+        lifecycleScope.launch {
+            try {
+                enrollmentCoordinator.enroll(bootstrap)
+            } catch (t: Throwable) {
+                Log.w(TAG, "enrollment failed", t)
+            } finally {
+                enrollmentInFlight = false
+            }
         }
     }
 
@@ -86,5 +143,7 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_BOOTSTRAP_JSON = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON"
         const val EXTRA_BOOTSTRAP_JSON_B64 = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64"
         const val BOOTSTRAP_DATA_PREFIX = "base64url:"
+        private const val TAG = "XmdmLauncher"
+        private val SAVED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
     }
 }

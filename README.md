@@ -60,7 +60,7 @@ Note: `M2-07 Enrollment E2E` and `M2-08 Reconnect E2E` are deferred until the An
 | M3-06 Reboot Survival | ☐ |
 | M3-07 Polling Fallback | ☐ |
 
-Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeeds, `M3-02 Local Persistence` has a DataStore-backed state store plus unit coverage and now survives a physical-device reboot check, `M3-03 Bootstrap Parsing` now accepts and persists canonical or fallback bootstrap JSON, and `M3-04 Retry Logic` adds a contract-driven config sync engine with retry and signature verification.
+Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeeds, `M3-02 Local Persistence` has a DataStore-backed state store plus unit coverage and now survives a physical-device reboot check, `M3-03 Bootstrap Parsing` now accepts and persists canonical or fallback bootstrap JSON, and the Android app now flows from bootstrap into enrollment so the device secret and initial signed config snapshot are fetched from the backend. `M3-04 Retry Logic` adds a contract-driven config sync engine with retry and signature verification.
 
 ### M4 - Content Delivery
 

@@ -69,17 +69,25 @@ class ConfigSnapshotVerifier(
 
     private fun appendObject(out: StringBuilder, objectValue: JsonObject) {
         out.append('{')
-        objectValue.entrySet()
-            .sortedBy { it.key }
-            .forEachIndexed { index, entry ->
-                if (index > 0) {
-                    out.append(',')
-                }
-                out.append(gson.toJson(entry.key))
-                out.append(':')
-                appendCanonical(out, entry.value)
+        val entries = orderedEntries(objectValue)
+        entries.forEachIndexed { index, entry ->
+            if (index > 0) {
+                out.append(',')
             }
+            out.append(gson.toJson(entry.key))
+            out.append(':')
+            appendCanonical(out, entry.value)
+        }
         out.append('}')
+    }
+
+    private fun orderedEntries(objectValue: JsonObject): List<Map.Entry<String, JsonElement>> {
+        val entriesByName = objectValue.entrySet().associateBy { it.key }
+        val ordered = SNAPSHOT_FIELD_ORDER.mapNotNull { entriesByName[it] }
+        if (ordered.isNotEmpty() && ordered.size == objectValue.entrySet().size) {
+            return ordered
+        }
+        return objectValue.entrySet().sortedBy { it.key }
     }
 
     private fun constantTimeEquals(expected: String, actual: String): Boolean {
@@ -95,5 +103,15 @@ class ConfigSnapshotVerifier(
 
     companion object {
         private const val HMAC_ALGORITHM = "HmacSHA256"
+        private val SNAPSHOT_FIELD_ORDER = listOf(
+            "version",
+            "device",
+            "policy",
+            "apps",
+            "files",
+            "certificates",
+            "commands",
+            "signature",
+        )
     }
 }
