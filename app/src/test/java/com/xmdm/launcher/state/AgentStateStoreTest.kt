@@ -26,8 +26,11 @@ class AgentStateStoreTest {
         store.saveBootstrap(
             BootstrapState(
                 serverUrl = "https://mdm.example",
+                secondaryServerUrl = null,
                 serverProject = "rest",
                 enrollmentToken = "enroll-token",
+                deviceId = null,
+                deviceIdUse = null,
                 bootstrapExtrasJson = """{"customer":"Acme"}""",
             ),
         )
@@ -76,8 +79,11 @@ class AgentStateStoreTest {
         store.saveBootstrap(
             BootstrapState(
                 serverUrl = "https://mdm.example",
+                secondaryServerUrl = null,
                 serverProject = "rest",
                 enrollmentToken = "enroll-token",
+                deviceId = null,
+                deviceIdUse = null,
                 bootstrapExtrasJson = "{}",
             ),
         )

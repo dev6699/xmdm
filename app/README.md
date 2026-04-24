@@ -50,6 +50,26 @@ It uses DataStore preferences to keep:
 `MainActivity` reads the stored state on startup and shows whether each piece was restored.
 The store has unit coverage that verifies save, reload, and clear behavior.
 
+### Bootstrap Parsing
+
+Bootstrap JSON is parsed in `app/src/main/java/com/xmdm/launcher/bootstrap/`.
+The parser accepts the Android provisioning payload shape from `contracts/enrollment.md` and the flat fallback form used for manual or ADB intake.
+
+`MainActivity` accepts raw bootstrap JSON from `com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON` or `Intent.EXTRA_TEXT`, parses it, and persists the normalized bootstrap state.
+For adb-driven checks, `com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64` accepts the same JSON encoded with base64 so shell quoting does not mangle the payload.
+`MainActivity` also accepts `data:base64url:<payload>` on the launch intent, which is the most reliable adb path for device-side validation.
+Unit tests cover both the canonical Android provisioning JSON and the flat fallback JSON form.
+
+### Retry Foundation
+
+Retry helpers live in `app/src/main/java/com/xmdm/launcher/retry/`.
+The current runner provides a small exponential-backoff utility that future config fetch and sync code can reuse.
+
+### Config Sync
+
+Config sync lives in `app/src/main/java/com/xmdm/launcher/sync/`.
+It fetches a signed config snapshot through an injectable source, verifies the snapshot signature, retries transient fetch failures, and stores the last successful policy cache locally.
+
 ### Conventions
 
 - Keep the launcher UI in XML with ViewBinding.
@@ -58,4 +78,4 @@ The store has unit coverage that verifies save, reload, and clear behavior.
 
 ### Current State
 
-`M3-01 Kotlin Project` is the active agent milestone in this directory. The scaffold already builds, so follow-on work should extend the existing project instead of replacing it.
+The scaffold already builds, local persistence is in place, bootstrap parsing now persists canonical or fallback payloads, config sync now retries transient failures before caching a verified snapshot, and `M3-02 Local Persistence` has passed a physical-device reboot check.
