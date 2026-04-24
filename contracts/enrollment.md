@@ -7,6 +7,43 @@ Path prefix:
 - The enrollment API surface lives under `/api/v1/enrollment/...`
 - It uses the same authenticated admin session semantics as the admin console
 
+## Device Enrollment
+
+### `POST /api/v1/enrollment`
+
+- Request: none
+- Request body:
+
+```json
+{
+  "enrollmentToken": "base64url-secret",
+  "deviceIdentityPolicy": {
+    "deviceId": "serial-123",
+    "deviceIdUse": "serial"
+  },
+  "bootstrapExtras": {
+    "customer": "Acme"
+  }
+}
+```
+
+- Success response: `200 application/json`
+- Body:
+
+```json
+{
+  "deviceId": "serial-123",
+  "deviceSecret": "base64url-secret",
+  "status": "enrolled"
+}
+```
+
+- Errors:
+  - `400` invalid input or malformed JSON
+  - `409` duplicate enrollment or consumed token
+  - `404` unknown token
+  - `500` internal error
+
 ## Enrollment Tokens
 
 ### `POST /api/v1/enrollment/tokens`

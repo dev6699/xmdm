@@ -51,7 +51,36 @@ type TokenLookupRequest struct {
 	Token string `json:"token"`
 }
 
+type EnrollmentRequest struct {
+	EnrollmentToken      string               `json:"enrollmentToken"`
+	DeviceIdentityPolicy DeviceIdentityPolicy `json:"deviceIdentityPolicy"`
+	BootstrapExtras      map[string]any       `json:"bootstrapExtras"`
+}
+
 func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, tenantID string) {
+	mux.HandleFunc("", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if store == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		req, err := decodeEnrollmentRequest(r)
+		if err != nil {
+			writeRequestError(w, err)
+			return
+		}
+		bound, err := store.BindDevice(r.Context(), tenantID, req.EnrollmentToken, req.DeviceIdentityPolicy.DeviceID)
+		if err != nil {
+			writeEnrollmentError(w, err)
+			return
+		}
+		writeJSON(w, bound)
+	})
+
 	mux.HandleFunc("/tokens", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -246,6 +275,20 @@ func decodeTokenLookupRequest(r *http.Request) (TokenLookupRequest, error) {
 	return payload, nil
 }
 
+func decodeEnrollmentRequest(r *http.Request) (EnrollmentRequest, error) {
+	var payload EnrollmentRequest
+	if err := httpx.DecodeJSONBody(r, &payload); err != nil {
+		return EnrollmentRequest{}, err
+	}
+	payload.EnrollmentToken = strings.TrimSpace(payload.EnrollmentToken)
+	payload.DeviceIdentityPolicy.DeviceID = strings.TrimSpace(payload.DeviceIdentityPolicy.DeviceID)
+	payload.DeviceIdentityPolicy.DeviceIDUse = strings.TrimSpace(payload.DeviceIdentityPolicy.DeviceIDUse)
+	if payload.EnrollmentToken == "" || payload.DeviceIdentityPolicy.DeviceID == "" {
+		return EnrollmentRequest{}, httpx.ErrInvalidInput
+	}
+	return payload, nil
+}
+
 func toPayload(req QRRequest) AndroidQRPayload {
 	return AndroidQRPayload{
 		DeviceAdminComponentName:  defaultComponentName(req.DeviceAdminComponentName),
@@ -416,6 +459,8 @@ func writeEnrollmentError(w http.ResponseWriter, err error) {
 	case httpx.ErrNotFound, enrollment.ErrTokenNotFound:
 		http.Error(w, "not found", http.StatusNotFound)
 	case enrollment.ErrTokenConsumed, enrollment.ErrTokenExpired, enrollment.ErrTokenRevoked, enrollment.ErrTokenConflict:
+		http.Error(w, err.Error(), http.StatusConflict)
+	case enrollment.ErrDeviceConflict:
 		http.Error(w, err.Error(), http.StatusConflict)
 	default:
 		http.Error(w, "internal error", http.StatusInternalServerError)

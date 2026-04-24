@@ -24,3 +24,9 @@ type IssuedToken struct {
 	Token
 	Secret string `json:"token"`
 }
+
+type BoundDevice struct {
+	DeviceID     string `json:"deviceId"`
+	DeviceSecret string `json:"deviceSecret"`
+	Status       string `json:"status"`
+}

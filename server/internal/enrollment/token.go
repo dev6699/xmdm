@@ -8,12 +8,13 @@ import (
 )
 
 var (
-	ErrTokenNotFound = errors.New("enrollment token not found")
-	ErrTokenConsumed = errors.New("enrollment token already consumed")
-	ErrTokenExpired  = errors.New("enrollment token expired")
-	ErrTokenRevoked  = errors.New("enrollment token revoked")
-	ErrTokenInvalid  = errors.New("invalid enrollment token")
-	ErrTokenConflict = errors.New("enrollment token conflict")
+	ErrTokenNotFound  = errors.New("enrollment token not found")
+	ErrTokenConsumed  = errors.New("enrollment token already consumed")
+	ErrTokenExpired   = errors.New("enrollment token expired")
+	ErrTokenRevoked   = errors.New("enrollment token revoked")
+	ErrTokenInvalid   = errors.New("invalid enrollment token")
+	ErrTokenConflict  = errors.New("enrollment token conflict")
+	ErrDeviceConflict = errors.New("device already enrolled")
 )
 
 func NewTokenSecret() (string, error) {

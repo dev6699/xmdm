@@ -65,6 +65,77 @@ func (s *Store) ConsumeToken(ctx context.Context, tenantID, secret string) (enro
 	return s.inspectToken(ctx, tenantID, secret, true)
 }
 
+func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string) (enrollment.BoundDevice, error) {
+	if tenantID == "" || token == "" || deviceID == "" {
+		return enrollment.BoundDevice{}, httpx.ErrInvalidInput
+	}
+	now := s.now()
+	secret, err := enrollment.NewTokenSecret()
+	if err != nil {
+		return enrollment.BoundDevice{}, err
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return enrollment.BoundDevice{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tokenRow, err := loadTokenByHashForUpdate(ctx, tx, tenantID, enrollment.HashToken(token))
+	if err != nil {
+		return enrollment.BoundDevice{}, err
+	}
+	if tokenRow.Status == enrollment.TokenStatusIssued && !tokenRow.ExpiresAt.After(now) {
+		tokenRow.Status = enrollment.TokenStatusExpired
+		tokenRow.UpdatedAt = now
+		if err := updateToken(ctx, tx, tokenRow); err != nil {
+			return enrollment.BoundDevice{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return enrollment.BoundDevice{}, err
+		}
+		return enrollment.BoundDevice{}, enrollment.ErrTokenExpired
+	}
+	if tokenRow.Status != enrollment.TokenStatusIssued {
+		switch tokenRow.Status {
+		case enrollment.TokenStatusConsumed:
+			return enrollment.BoundDevice{}, enrollment.ErrTokenConsumed
+		case enrollment.TokenStatusExpired:
+			return enrollment.BoundDevice{}, enrollment.ErrTokenExpired
+		case enrollment.TokenStatusRevoked:
+			return enrollment.BoundDevice{}, enrollment.ErrTokenRevoked
+		default:
+			return enrollment.BoundDevice{}, enrollment.ErrTokenConflict
+		}
+	}
+
+	row := tx.QueryRow(ctx,
+		`INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING device_id, status`,
+		uuid.NewString(), tenantID, deviceID, enrollment.HashToken(secret), "enrolled", now,
+	)
+	var bound enrollment.BoundDevice
+	if err := row.Scan(&bound.DeviceID, &bound.Status); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return enrollment.BoundDevice{}, enrollment.ErrDeviceConflict
+		}
+		return enrollment.BoundDevice{}, err
+	}
+
+	tokenRow.Status = enrollment.TokenStatusConsumed
+	tokenRow.ConsumedAt = &now
+	tokenRow.UpdatedAt = now
+	if err := updateToken(ctx, tx, tokenRow); err != nil {
+		return enrollment.BoundDevice{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return enrollment.BoundDevice{}, err
+	}
+	bound.DeviceSecret = secret
+	return bound, nil
+}
+
 func (s *Store) RevokeToken(ctx context.Context, tenantID, id string) (enrollment.Token, error) {
 	if tenantID == "" || id == "" {
 		return enrollment.Token{}, httpx.ErrInvalidInput

@@ -66,6 +66,21 @@ func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
 		t.Fatalf("expected revoked consume error, got %v", err)
 	}
 
+	bindIssued, err := store.IssueToken(context.Background(), bootstrap.SeedTenantID, now.Add(3*time.Hour))
+	if err != nil {
+		t.Fatalf("issue bind token: %v", err)
+	}
+	bound, err := store.BindDevice(context.Background(), bootstrap.SeedTenantID, bindIssued.Secret, "device-123")
+	if err != nil {
+		t.Fatalf("bind device: %v", err)
+	}
+	if bound.DeviceID != "device-123" || bound.DeviceSecret == "" || bound.Status != "enrolled" {
+		t.Fatalf("unexpected bound device: %#v", bound)
+	}
+	if _, err := store.ConsumeToken(context.Background(), bootstrap.SeedTenantID, bindIssued.Secret); !errors.Is(err, enrollment.ErrTokenConsumed) {
+		t.Fatalf("expected consumed token after bind, got %v", err)
+	}
+
 	expiringIssued, err := store.IssueToken(context.Background(), bootstrap.SeedTenantID, now.Add(10*time.Minute))
 	if err != nil {
 		t.Fatalf("issue expiring token: %v", err)

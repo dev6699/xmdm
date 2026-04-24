@@ -234,11 +234,47 @@ func TestRegisterTokenLifecycleRoutes(t *testing.T) {
 	}
 }
 
+func TestRegisterEnrollmentBindRoute(t *testing.T) {
+	store := &fakeEnrollmentStore{
+		bound: enrollment.BoundDevice{
+			DeviceID:     "device-123",
+			DeviceSecret: "device-secret",
+			Status:       "enrolled",
+		},
+	}
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1/enrollment"), svc, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
+		"enrollmentToken":"secret-token",
+		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected bind ok, got %d", res.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode bind response: %v", err)
+	}
+	if payload["deviceId"] != "device-123" {
+		t.Fatalf("unexpected device id: %#v", payload["deviceId"])
+	}
+	if payload["deviceSecret"] != "device-secret" {
+		t.Fatalf("unexpected device secret: %#v", payload["deviceSecret"])
+	}
+}
+
 type fakeEnrollmentStore struct {
 	issued    enrollment.IssuedToken
 	validated enrollment.Token
 	consumed  enrollment.Token
 	revoked   enrollment.Token
+	bound     enrollment.BoundDevice
 
 	issueTenant    string
 	issueExpiresAt time.Time
@@ -248,6 +284,9 @@ type fakeEnrollmentStore struct {
 	consumeToken   string
 	revokeTenant   string
 	revokeID       string
+	bindTenant     string
+	bindToken      string
+	bindDeviceID   string
 }
 
 func (s *fakeEnrollmentStore) IssueToken(ctx context.Context, tenantID string, expiresAt time.Time) (enrollment.IssuedToken, error) {
@@ -266,6 +305,13 @@ func (s *fakeEnrollmentStore) ConsumeToken(_ context.Context, tenantID, token st
 	s.consumeTenant = tenantID
 	s.consumeToken = token
 	return s.consumed, nil
+}
+
+func (s *fakeEnrollmentStore) BindDevice(_ context.Context, tenantID, token, deviceID string) (enrollment.BoundDevice, error) {
+	s.bindTenant = tenantID
+	s.bindToken = token
+	s.bindDeviceID = deviceID
+	return s.bound, nil
 }
 
 func (s *fakeEnrollmentStore) RevokeToken(_ context.Context, tenantID, id string) (enrollment.Token, error) {
