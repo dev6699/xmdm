@@ -3,4 +3,18 @@
     <string name="app_name">XMDM Agent</string>
     <string name="launcher_title">XMDM Agent</string>
     <string name="launcher_status">Device enrollment status</string>
+    <string name="recovery_title">Setup recovery</string>
+    <string name="recovery_subtitle_default">Something went wrong during device setup.</string>
+    <string name="recovery_subtitle">Setup failed during %1$s.</string>
+    <string name="recovery_no_details">No extra details available.</string>
+    <string name="recovery_retry">Retry enrollment</string>
+    <string name="recovery_clear_state">Reset enrollment state</string>
+    <string name="recovery_state_cleared">Local state cleared</string>
+    <string name="recovery_state_clear_failed">Failed to clear local state: %1$s</string>
+    <string name="recovery_retry_unavailable">No saved bootstrap is available to retry.</string>
+    <string name="recovery_retry_note">Retry reuses the saved bootstrap payload. Reset only clears enrollment identity and policy, not bootstrap input.</string>
+    <string name="recovery_device_owner_status">Device owner: %1$s</string>
+    <string name="recovery_device_owner_status_unknown">Device owner: checking…</string>
+    <string name="recovery_status_yes">yes</string>
+    <string name="recovery_status_no">no</string>
 </resources>

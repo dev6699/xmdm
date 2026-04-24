@@ -17,6 +17,46 @@ cd app
 
 The wrapper is checked in, so you do not need a system `gradle` install.
 
+### Run On Device
+
+Pick a connected device first:
+
+```sh
+export ADB_SERIAL="$(adb devices -l | awk 'NR==2 {print $1}')"
+```
+
+Install the debug APK on that device:
+
+```sh
+adb -s "$ADB_SERIAL" install -r app/build/outputs/apk/debug/xmdm-agent-debug.apk
+```
+
+Launch the main screen:
+
+```sh
+adb -s "$ADB_SERIAL" shell am start -n com.xmdm.launcher/.MainActivity
+```
+
+Launch the recovery screen:
+
+```sh
+adb -s "$ADB_SERIAL" shell am start -n com.xmdm.launcher/.recovery.RecoveryActivity --es com.xmdm.launcher.recovery.EXTRA_STAGE bootstrap --es com.xmdm.launcher.recovery.EXTRA_MESSAGE test
+```
+
+Launch the main screen with a bootstrap payload encoded as `base64url:<payload>`:
+
+```sh
+adb -s "$ADB_SERIAL" shell am start -n com.xmdm.launcher/.MainActivity -d 'base64url:<payload>'
+```
+
+If you have the QR JSON from the server, you can turn it into the payload like this:
+
+```sh
+json='{"android.app.extra.PROVISIONING_SERVER_URL":"http://192.168.0.168:8080","android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME":"com.xmdm.launcher/.AdminReceiver","android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE":{"com.xmdm.BASE_URL":"http://192.168.0.168:8080","com.xmdm.SERVER_PROJECT":"rest","com.xmdm.ENROLLMENT_TOKEN":"<token>","com.xmdm.DEVICE_ID":"device-999","com.xmdm.DEVICE_ID_USE":"serial","CUSTOMER":"Acme"}}'
+payload="$(printf '%s' "$json" | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+adb -s "$ADB_SERIAL" shell am start -n com.xmdm.launcher/.MainActivity -d "base64url:$payload"
+```
+
 ### Toolchain
 
 The current scaffold uses:
@@ -75,6 +115,24 @@ The current runner provides a small exponential-backoff utility that future conf
 Config sync lives in `app/src/main/java/com/xmdm/launcher/sync/`.
 It fetches a signed config snapshot through an injectable source, verifies the snapshot signature, retries transient fetch failures, and stores the last successful policy cache locally.
 
+### Recovery UI
+
+The operator recovery screen lives in `app/src/main/java/com/xmdm/launcher/recovery/`.
+It surfaces bootstrap and enrollment failures, shows the latest failure message, and provides buttons to retry enrollment or reset enrollment state.
+`Retry enrollment` reuses the original bootstrap payload that triggered the failure, so resetting local state does not lose the retry input.
+`Reset enrollment state` only wipes enrollment identity and policy cache data; bootstrap input stays available for retry.
+The screen also shows whether the app is currently the device owner.
+
+### Device Owner Test
+
+On a fresh, unprovisioned test device you can set the app as device owner with:
+
+```sh
+adb shell dpm set-device-owner com.xmdm.launcher/.AdminReceiver
+```
+
+This only works on a device that has not already been provisioned. On a normally used phone, Android will reject device-owner provisioning unless the device is reset back to a fresh state.
+
 ### Conventions
 
 - Keep the launcher UI in XML with ViewBinding.
@@ -83,4 +141,5 @@ It fetches a signed config snapshot through an injectable source, verifies the s
 
 ### Current State
 
-The scaffold already builds, local persistence is in place, bootstrap parsing now persists canonical or fallback payloads, bootstrap state can now flow into enrollment and the initial signed config snapshot, config sync now retries transient failures before caching a verified snapshot, and `M3-02 Local Persistence` has passed a physical-device reboot check.
+The scaffold already builds, local persistence is in place, bootstrap parsing now persists canonical or fallback payloads, bootstrap state can now flow into enrollment and the initial signed config snapshot, config sync now retries transient failures before caching a verified snapshot, the recovery UI can surface setup failures, and `M3-02 Local Persistence` has passed a physical-device reboot check.
+The main launcher screen also shows whether the app is currently device owner.

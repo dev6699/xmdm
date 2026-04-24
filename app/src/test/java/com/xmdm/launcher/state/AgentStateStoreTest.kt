@@ -32,6 +32,7 @@ class AgentStateStoreTest {
                 deviceId = null,
                 deviceIdUse = null,
                 bootstrapExtrasJson = """{"customer":"Acme"}""",
+                rawJson = """{"BASE_URL":"https://mdm.example"}""",
             ),
         )
         store.saveDeviceIdentity(
@@ -60,6 +61,7 @@ class AgentStateStoreTest {
         assertEquals("rest", state.bootstrap?.serverProject)
         assertEquals("enroll-token", state.bootstrap?.enrollmentToken)
         assertEquals("""{"customer":"Acme"}""", state.bootstrap?.bootstrapExtrasJson)
+        assertEquals("""{"BASE_URL":"https://mdm.example"}""", state.bootstrap?.rawJson)
         assertEquals("device-123", state.identity?.deviceId)
         assertEquals("serial", state.identity?.deviceIdUse)
         assertEquals("secret-abc", state.identity?.deviceSecret)
@@ -71,7 +73,7 @@ class AgentStateStoreTest {
     }
 
     @Test
-    fun clearStateRemovesAllPersistedValues() = runTest {
+    fun clearEnrollmentStatePreservesBootstrap() = runTest {
         val storeFile = createTempFile("agent-state", ".preferences_pb")
         val first = newStore(storeFile)
         val store = first.store
@@ -85,6 +87,7 @@ class AgentStateStoreTest {
                 deviceId = null,
                 deviceIdUse = null,
                 bootstrapExtrasJson = "{}",
+                rawJson = """{"BASE_URL":"https://mdm.example"}""",
             ),
         )
         store.saveDeviceIdentity(
@@ -94,14 +97,25 @@ class AgentStateStoreTest {
                 deviceSecret = "secret-abc",
             ),
         )
-        store.clear()
+        store.savePolicyCache(
+            PolicyCacheState(
+                snapshotJson = """{"version":"1"}""",
+                version = 7,
+                lastSyncAtEpochMillis = 123456789L,
+            ),
+        )
+        store.clearEnrollmentState()
         first.scope.cancel()
 
         val second = newStore(storeFile)
         val state = second.store.state.first()
-        assertFalse(state.isBootstrapped)
+        assertTrue(state.isBootstrapped)
         assertFalse(state.isEnrolled)
         assertFalse(state.hasPolicyCache)
+        assertEquals("https://mdm.example", state.bootstrap?.serverUrl)
+        assertEquals("rest", state.bootstrap?.serverProject)
+        assertEquals("enroll-token", state.bootstrap?.enrollmentToken)
+        assertEquals("""{"BASE_URL":"https://mdm.example"}""", state.bootstrap?.rawJson)
         second.scope.cancel()
     }
 

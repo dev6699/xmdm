@@ -8,6 +8,7 @@ data class BootstrapState(
     val deviceId: String?,
     val deviceIdUse: String?,
     val bootstrapExtrasJson: String,
+    val rawJson: String? = null,
 )
 
 data class DeviceIdentityState(

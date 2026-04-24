@@ -1,6 +1,7 @@
 package com.xmdm.launcher
 
 import android.os.Bundle
+import android.app.admin.DevicePolicyManager
 import android.util.Base64
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
@@ -11,6 +12,7 @@ import com.xmdm.launcher.bootstrap.BootstrapProvisioner
 import com.xmdm.launcher.databinding.ActivityMainBinding
 import com.xmdm.launcher.enrollment.EnrollmentCoordinator
 import com.xmdm.launcher.enrollment.HttpEnrollmentGateway
+import com.xmdm.launcher.recovery.RecoveryActivity
 import com.xmdm.launcher.state.AgentState
 import com.xmdm.launcher.state.AgentStateStore
 import kotlinx.coroutines.flow.collectLatest
@@ -29,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     }
     private var enrollmentInFlight = false
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
+    private var recoveryVisible = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,6 +60,11 @@ class MainActivity : AppCompatActivity() {
             enrollmentInFlight -> "device identity: enrolling"
             else -> "device identity: empty"
         }
+        val deviceOwnerLine = if (isDeviceOwnerApp()) {
+            "device owner: yes"
+        } else {
+            "device owner: no"
+        }
         val policyLine = if (state.hasPolicyCache) {
             val policyCache = state.policyCache!!
             val savedAt = Instant.ofEpochMilli(policyCache.lastSyncAtEpochMillis)
@@ -80,8 +88,15 @@ class MainActivity : AppCompatActivity() {
             append('\n')
             append(identityLine)
             append('\n')
+            append(deviceOwnerLine)
+            append('\n')
             append(policyLine)
         }
+    }
+
+    private fun isDeviceOwnerApp(): Boolean {
+        val devicePolicyManager = getSystemService(DevicePolicyManager::class.java) ?: return false
+        return devicePolicyManager.isDeviceOwnerApp(packageName)
     }
 
     private fun prettyConfig(snapshotJson: String): String {
@@ -107,6 +122,11 @@ class MainActivity : AppCompatActivity() {
                 enrollmentCoordinator.enroll(bootstrap)
             } catch (t: Throwable) {
                 Log.w(TAG, "enrollment failed", t)
+                showRecovery(
+                    stage = "enrollment",
+                    message = t.message ?: t.javaClass.simpleName,
+                    bootstrapJson = bootstrap.rawJson,
+                )
             } finally {
                 enrollmentInFlight = false
             }
@@ -118,8 +138,32 @@ class MainActivity : AppCompatActivity() {
             ?: return
 
         lifecycleScope.launch {
-            BootstrapProvisioner(stateStore).persist(rawBootstrapJson)
+            try {
+                BootstrapProvisioner(stateStore).persist(rawBootstrapJson)
+            } catch (t: Throwable) {
+                Log.w(TAG, "bootstrap parsing failed", t)
+                showRecovery(
+                    stage = "bootstrap",
+                    message = t.message ?: t.javaClass.simpleName,
+                    bootstrapJson = rawBootstrapJson,
+                )
+            }
         }
+    }
+
+    private fun showRecovery(stage: String, message: String, bootstrapJson: String? = null) {
+        if (recoveryVisible) {
+            return
+        }
+        recoveryVisible = true
+        startActivity(
+            RecoveryActivity.intent(
+                context = this,
+                stage = stage,
+                message = message,
+                bootstrapJson = bootstrapJson,
+            ),
+        )
     }
 
     private fun resolveBootstrapJson(): String? {
@@ -145,5 +189,16 @@ class MainActivity : AppCompatActivity() {
         const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
         private val SAVED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
+
+        fun intent(
+            context: android.content.Context,
+            bootstrapJson: String? = null,
+        ): android.content.Intent {
+            return android.content.Intent(context, MainActivity::class.java).apply {
+                if (bootstrapJson != null) {
+                    putExtra(EXTRA_BOOTSTRAP_JSON, bootstrapJson)
+                }
+            }
+        }
     }
 }

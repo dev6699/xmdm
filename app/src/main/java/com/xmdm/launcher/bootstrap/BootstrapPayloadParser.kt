@@ -37,6 +37,7 @@ class BootstrapPayloadParser(
                 deviceId = deviceId,
                 deviceIdUse = deviceIdUse,
                 bootstrapExtrasJson = gson.toJson(extras),
+                rawJson = rawJson,
             ),
             extrasJson = gson.toJson(extras),
         )

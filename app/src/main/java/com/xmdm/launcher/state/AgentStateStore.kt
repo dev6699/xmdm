@@ -38,6 +38,11 @@ class AgentStateStore(
                 prefs[Keys.BOOTSTRAP_DEVICE_ID_USE] = state.deviceIdUse
             }
             prefs[Keys.BOOTSTRAP_EXTRAS_JSON] = state.bootstrapExtrasJson
+            if (state.rawJson == null) {
+                prefs.remove(Keys.BOOTSTRAP_RAW_JSON)
+            } else {
+                prefs[Keys.BOOTSTRAP_RAW_JSON] = state.rawJson
+            }
         }
     }
 
@@ -57,9 +62,14 @@ class AgentStateStore(
         }
     }
 
-    suspend fun clear() {
+    suspend fun clearEnrollmentState() {
         dataStore.edit { prefs ->
-            prefs.clear()
+            prefs.remove(Keys.DEVICE_ID)
+            prefs.remove(Keys.DEVICE_ID_USE)
+            prefs.remove(Keys.DEVICE_SECRET)
+            prefs.remove(Keys.POLICY_SNAPSHOT_JSON)
+            prefs.remove(Keys.POLICY_VERSION)
+            prefs.remove(Keys.POLICY_LAST_SYNC_AT_EPOCH_MILLIS)
         }
     }
 
@@ -82,6 +92,7 @@ class AgentStateStore(
         val deviceId = prefs[Keys.BOOTSTRAP_DEVICE_ID]
         val deviceIdUse = prefs[Keys.BOOTSTRAP_DEVICE_ID_USE]
         val bootstrapExtrasJson = prefs[Keys.BOOTSTRAP_EXTRAS_JSON] ?: "{}"
+        val rawJson = prefs[Keys.BOOTSTRAP_RAW_JSON]
         return BootstrapState(
             serverUrl = serverUrl,
             secondaryServerUrl = secondaryServerUrl,
@@ -90,6 +101,7 @@ class AgentStateStore(
             deviceId = deviceId,
             deviceIdUse = deviceIdUse,
             bootstrapExtrasJson = bootstrapExtrasJson,
+            rawJson = rawJson,
         )
     }
 
@@ -123,6 +135,7 @@ class AgentStateStore(
         val BOOTSTRAP_DEVICE_ID = stringPreferencesKey("bootstrap_device_id")
         val BOOTSTRAP_DEVICE_ID_USE = stringPreferencesKey("bootstrap_device_id_use")
         val BOOTSTRAP_EXTRAS_JSON = stringPreferencesKey("bootstrap_extras_json")
+        val BOOTSTRAP_RAW_JSON = stringPreferencesKey("bootstrap_raw_json")
 
         val DEVICE_ID = stringPreferencesKey("device_id")
         val DEVICE_ID_USE = stringPreferencesKey("device_id_use")
