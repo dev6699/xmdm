@@ -1,26 +1,34 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"xmdm/server/internal/admin"
+	v1 "xmdm/server/internal/api/v1"
 	"xmdm/server/internal/audit"
+	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/bootstrap"
+	devicepg "xmdm/server/internal/device/postgres"
+	grouppg "xmdm/server/internal/group/postgres"
+	identitypg "xmdm/server/internal/identity/postgres"
 	"xmdm/server/internal/plugins"
+	policypg "xmdm/server/internal/policy/postgres"
 )
 
 func main() {
 	addr := env("XMDM_ADDR", ":8080")
-	username := env("XMDM_ADMIN_USERNAME", "admin")
-	password := env("XMDM_ADMIN_PASSWORD", "admin")
+	username := env("XMDM_ADMIN_USERNAME", bootstrap.DefaultAdminUsername)
+	password := env("XMDM_ADMIN_PASSWORD", bootstrap.DefaultAdminPassword)
 	sessionTTL := envDuration("XMDM_SESSION_TTL", 24*time.Hour)
 
 	svc := auth.NewService(username, password, sessionTTL)
-	store := admin.NewStore()
-	auditStore := audit.NewStore()
+	store, auditStore := openStores()
 	pluginManager := plugins.Disabled()
 	mux := newMux(svc, store, auditStore, pluginManager)
 
@@ -30,85 +38,25 @@ func main() {
 	}
 }
 
-func newMux(svc *auth.Service, store *admin.Store, auditStore *audit.Store, pluginManager *plugins.Manager) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write([]byte(`<form method="post"><input name="username"><input name="password" type="password"><button type="submit">Login</button></form>`))
-		case http.MethodPost:
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "invalid form", http.StatusBadRequest)
-				return
-			}
-			session, err := svc.Login(r.FormValue("username"), r.FormValue("password"))
-			if err != nil {
-				http.Error(w, "invalid credentials", http.StatusUnauthorized)
-				return
-			}
-			http.SetCookie(w, &http.Cookie{
-				Name:     auth.SessionCookieName,
-				Value:    session.ID,
-				Path:     "/",
-				HttpOnly: true,
-				SameSite: http.SameSiteLaxMode,
-				Expires:  session.ExpiresAt,
-			})
-			http.Redirect(w, r, "/admin/me", http.StatusSeeOther)
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})
-
-	mux.HandleFunc("/admin/logout", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		if cookie, err := r.Cookie(auth.SessionCookieName); err == nil {
-			svc.Logout(cookie.Value)
-		}
-		http.SetCookie(w, &http.Cookie{
-			Name:     auth.SessionCookieName,
-			Value:    "",
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   -1,
-		})
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	mux.HandleFunc("/admin/me", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		session, ok := sessionFromRequest(r, svc)
-		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"user":"` + session.Username + `"}`))
-	})
-
-	registerCRUD(mux, svc, store, auditStore, "tenant-1")
-	pluginManager.Register(mux)
-	return mux
+func newMux(svc *auth.Service, store admin.Repository, auditStore audit.Store, pluginManager *plugins.Manager) http.Handler {
+	return v1.NewMux(svc, store, auditStore, pluginManager, bootstrap.SeedTenantID)
 }
 
-func sessionFromRequest(r *http.Request, svc *auth.Service) (*auth.Session, bool) {
-	cookie, err := r.Cookie(auth.SessionCookieName)
+func openStores() (admin.Repository, audit.Store) {
+	dsn := env("XMDM_POSTGRES_DSN", bootstrap.DefaultPostgresDSN)
+	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
-		return nil, false
+		log.Fatalf("connect postgres: %v", err)
 	}
-	session, ok := svc.Authenticate(cookie.Value)
-	if !ok {
-		return nil, false
+	if err := pool.Ping(context.Background()); err != nil {
+		log.Fatalf("ping postgres: %v", err)
 	}
-	return session, true
+	return admin.NewRepository(
+		identitypg.New(pool),
+		grouppg.New(pool),
+		policypg.New(pool),
+		devicepg.New(pool),
+	), auditpg.NewDBStore(pool)
 }
 
 func env(key, fallback string) string {

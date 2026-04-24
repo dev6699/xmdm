@@ -4,13 +4,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"xmdm/server/internal/httpx"
 )
 
 func TestDisabledManagerRegistersNoRoutes(t *testing.T) {
 	mux := http.NewServeMux()
-	Disabled().Register(mux)
+	Disabled().Register(httpx.WithPrefix(mux, "/api/v1/admin"))
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/plugins", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/plugins", nil)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusNotFound {
@@ -20,9 +22,9 @@ func TestDisabledManagerRegistersNoRoutes(t *testing.T) {
 
 func TestEnabledManagerRegistersOptionalRoute(t *testing.T) {
 	mux := http.NewServeMux()
-	Enabled().Register(mux)
+	Enabled().Register(httpx.WithPrefix(mux, "/api/v1/admin"))
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/plugins", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/plugins", nil)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {

@@ -4,13 +4,13 @@ Go control plane implementation lives here.
 
 ### Admin Auth
 
-The initial backend slice provides a minimal session-based admin auth flow:
+The admin console provides a session-based admin auth flow:
 
-- `GET /admin/login` renders a simple form
-- `POST /admin/login` creates a session cookie
-- `POST /admin/logout` clears the session cookie
-- `GET /admin/me` verifies the active session
-- `GET /admin/devices` demonstrates a permission-gated admin route
+- `GET /api/v1/admin/login` renders a simple form
+- `POST /api/v1/admin/login` creates a session cookie
+- `POST /api/v1/admin/logout` clears the session cookie
+- `GET /api/v1/admin/me` verifies the active session
+- `GET /api/v1/admin/devices` exercises a permission-gated admin route
 
 Run it with:
 
@@ -18,6 +18,19 @@ Run it with:
 cd server
 go test ./...
 go run ./cmd/server
+```
+
+The server uses the Postgres-backed stores by default. If you want to point at a different database, set `XMDM_POSTGRES_DSN` before starting the server. The local compose database uses:
+
+```sh
+export XMDM_POSTGRES_DSN='postgres://xmdm:xmdm@127.0.0.1:5432/xmdm?sslmode=disable'
+```
+
+Server tests require a dedicated test database and will fail fast unless `XMDM_TEST_POSTGRES_DSN` is set. Use a separate database name, not the runtime database:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+go test ./...
 ```
 
 ### Core Schema
@@ -39,12 +52,11 @@ It creates the tenant-aware foundation tables:
 The local bootstrap migrator lives in [../infra/migrate.sh](../infra/migrate.sh).
 
 It applies the SQL files in [migrations/](migrations/) once, records applied files in `schema_migrations`, and seeds the single active tenant row required by the single-tenant v1 model.
+The bootstrap set now also creates the `audit_events` table used by the database-backed audit store.
 
 ### Audit Capture
 
-Admin create, update, and retire operations append immutable audit events in the in-memory audit store for now.
-
-The current backend slice verifies this behavior through the server tests before the database-backed audit table lands.
+Admin create, update, and retire operations append immutable audit events in the `audit_events` table.
 
 ### Admin E2E
 

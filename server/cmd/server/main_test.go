@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,19 +11,32 @@ import (
 	"time"
 
 	"xmdm/server/internal/admin"
-	"xmdm/server/internal/audit"
+	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/bootstrap"
+	devicepg "xmdm/server/internal/device/postgres"
+	grouppg "xmdm/server/internal/group/postgres"
+	identitypg "xmdm/server/internal/identity/postgres"
 	"xmdm/server/internal/plugins"
+	policypg "xmdm/server/internal/policy/postgres"
 )
 
 func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
+	pool := openTestPool(t)
+	resetTestDB(t, pool)
+
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionAdminRead})
 	now := time.Now()
 	svc.SetNow(func() time.Time { return now })
 
-	mux := newMux(svc, admin.NewStore(), audit.NewStore(), plugins.Disabled())
+	mux := newMux(svc, admin.NewRepository(
+		identitypg.New(pool),
+		grouppg.New(pool),
+		policypg.New(pool),
+		devicepg.New(pool),
+	), auditpg.NewDBStore(pool), plugins.Disabled())
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/devices", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/devices", nil)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusUnauthorized {
@@ -36,7 +51,7 @@ func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
 	form := url.Values{}
 	form.Set("username", "admin")
 	form.Set("password", "secret")
-	loginReq := httptest.NewRequest(http.MethodPost, "/admin/login", strings.NewReader(form.Encode()))
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/login", strings.NewReader(form.Encode()))
 	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	loginRes := httptest.NewRecorder()
 	mux.ServeHTTP(loginRes, loginReq)
@@ -44,7 +59,7 @@ func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
 		t.Fatalf("expected login redirect, got %d", loginRes.Code)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/admin/devices", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/devices", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res = httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
@@ -54,6 +69,9 @@ func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
 }
 
 func TestAdminDevicesRouteAllowsPermission(t *testing.T) {
+	pool := openTestPool(t)
+	resetTestDB(t, pool)
+
 	svc := auth.NewService("admin", "secret", time.Minute)
 	now := time.Now()
 	svc.SetNow(func() time.Time { return now })
@@ -63,8 +81,13 @@ func TestAdminDevicesRouteAllowsPermission(t *testing.T) {
 		t.Fatalf("login failed: %v", err)
 	}
 
-	mux := newMux(svc, admin.NewStore(), audit.NewStore(), plugins.Disabled())
-	req := httptest.NewRequest(http.MethodGet, "/admin/devices", nil)
+	mux := newMux(svc, admin.NewRepository(
+		identitypg.New(pool),
+		grouppg.New(pool),
+		policypg.New(pool),
+		devicepg.New(pool),
+	), auditpg.NewDBStore(pool), plugins.Disabled())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/devices", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
@@ -74,11 +97,19 @@ func TestAdminDevicesRouteAllowsPermission(t *testing.T) {
 }
 
 func TestCoreCrudLifecycle(t *testing.T) {
+	pool := openTestPool(t)
+	resetTestDB(t, pool)
+
 	svc := auth.NewService("admin", "secret", time.Minute)
 	now := time.Now()
 	svc.SetNow(func() time.Time { return now })
-	store := admin.NewStore()
-	auditStore := audit.NewStore()
+	store := admin.NewRepository(
+		identitypg.New(pool),
+		grouppg.New(pool),
+		policypg.New(pool),
+		devicepg.New(pool),
+	)
+	auditStore := auditpg.NewDBStore(pool)
 	mux := newMux(svc, store, auditStore, plugins.Disabled())
 
 	session, err := svc.Login("admin", "secret")
@@ -87,8 +118,8 @@ func TestCoreCrudLifecycle(t *testing.T) {
 	}
 
 	for _, kind := range []string{"users", "roles", "groups", "policies", "devices"} {
-		createBody := `{"name":"` + kind + `-one","extra":{"kind":"` + kind + `"}}`
-		req := httptest.NewRequest(http.MethodPost, "/admin/"+kind, strings.NewReader(createBody))
+		createBody := crudCreateBody(kind)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/"+kind, strings.NewReader(createBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 		res := httptest.NewRecorder()
@@ -96,16 +127,38 @@ func TestCoreCrudLifecycle(t *testing.T) {
 		if res.Code != http.StatusOK {
 			t.Fatalf("%s create failed: %d", kind, res.Code)
 		}
+		var created map[string]any
+		if err := json.Unmarshal(res.Body.Bytes(), &created); err != nil {
+			t.Fatalf("%s create decode failed: %v", kind, err)
+		}
+		id, _ := created["id"].(string)
+		if id == "" {
+			t.Fatalf("%s create returned empty id", kind)
+		}
 
-		req = httptest.NewRequest(http.MethodGet, "/admin/"+kind, nil)
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/"+kind, nil)
 		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 		res = httptest.NewRecorder()
 		mux.ServeHTTP(res, req)
 		if res.Code != http.StatusOK {
 			t.Fatalf("%s list failed: %d", kind, res.Code)
 		}
+		var listed []map[string]any
+		if err := json.Unmarshal(res.Body.Bytes(), &listed); err != nil {
+			t.Fatalf("%s list decode failed: %v", kind, err)
+		}
+		found := false
+		for _, item := range listed {
+			if item["id"] == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("%s list did not include created item", kind)
+		}
 
-		req = httptest.NewRequest(http.MethodPatch, "/admin/"+kind+"/"+kind+"-1", strings.NewReader(`{"name":"`+kind+`-two"}`))
+		req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/"+kind+"/"+id, strings.NewReader(crudUpdateBody(kind)))
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 		res = httptest.NewRecorder()
@@ -114,7 +167,7 @@ func TestCoreCrudLifecycle(t *testing.T) {
 			t.Fatalf("%s update failed: %d", kind, res.Code)
 		}
 
-		req = httptest.NewRequest(http.MethodDelete, "/admin/"+kind+"/"+kind+"-1", nil)
+		req = httptest.NewRequest(http.MethodDelete, "/api/v1/admin/"+kind+"/"+id, nil)
 		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 		res = httptest.NewRecorder()
 		mux.ServeHTTP(res, req)
@@ -123,7 +176,10 @@ func TestCoreCrudLifecycle(t *testing.T) {
 		}
 	}
 
-	events := auditStore.List("tenant-1")
+	events, err := auditStore.List(context.Background(), bootstrap.SeedTenantID)
+	if err != nil {
+		t.Fatalf("audit list failed: %v", err)
+	}
 	if len(events) != 15 {
 		t.Fatalf("expected 15 audit events, got %d", len(events))
 	}
@@ -133,6 +189,9 @@ func TestCoreCrudLifecycle(t *testing.T) {
 }
 
 func TestPluginIsolationDoesNotExposeOptionalRoutes(t *testing.T) {
+	pool := openTestPool(t)
+	resetTestDB(t, pool)
+
 	svc := auth.NewService("admin", "secret", time.Minute)
 	now := time.Now()
 	svc.SetNow(func() time.Time { return now })
@@ -142,9 +201,14 @@ func TestPluginIsolationDoesNotExposeOptionalRoutes(t *testing.T) {
 		t.Fatalf("login failed: %v", err)
 	}
 
-	mux := newMux(svc, admin.NewStore(), audit.NewStore(), plugins.Disabled())
+	mux := newMux(svc, admin.NewRepository(
+		identitypg.New(pool),
+		grouppg.New(pool),
+		policypg.New(pool),
+		devicepg.New(pool),
+	), auditpg.NewDBStore(pool), plugins.Disabled())
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/plugins", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/plugins", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)

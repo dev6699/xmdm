@@ -27,9 +27,18 @@ The local stack provides:
 
 1. Start the local stack.
 2. Apply the database migrations and seed data.
-3. Run the server with the local configuration file.
+3. Run the server against the local database using `XMDM_POSTGRES_DSN='postgres://xmdm:xmdm@127.0.0.1:5432/xmdm?sslmode=disable'`.
 4. Point the Android agent at the local server URL.
 5. Enroll a device and verify sync.
+
+For server tests, create or use a separate database and set `XMDM_TEST_POSTGRES_DSN` before running `go test ./...`. Do not point the test DSN at the runtime database.
+
+To create the local test database and print a safe DSN, run:
+
+```sh
+eval "$(./test-db-env.sh)"
+go test ./...
+```
 
 ## Notes
 

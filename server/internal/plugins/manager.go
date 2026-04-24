@@ -3,6 +3,8 @@ package plugins
 import (
 	"encoding/json"
 	"net/http"
+
+	"xmdm/server/internal/httpx"
 )
 
 type Manager struct {
@@ -17,11 +19,11 @@ func Enabled() *Manager {
 	return &Manager{enabled: true}
 }
 
-func (m *Manager) Register(mux *http.ServeMux) {
+func (m *Manager) Register(mux httpx.Router) {
 	if m == nil || !m.enabled {
 		return
 	}
-	mux.HandleFunc("/admin/plugins", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/plugins", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return

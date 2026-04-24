@@ -35,94 +35,47 @@
 
 ### Enrollment
 
-- `POST /api/v1/public/enrollments`
 - Creates or binds a device during first enrollment.
-- Accepts enrollment token, device identity hints, and optional bootstrap fields.
-- Returns device ID, device secret, config snapshot, and initial artifact lists.
+- Accepts an enrollment token, device identity hints, and optional bootstrap fields.
+- Returns the device identity, device secret, initial config snapshot, and any initial artifact or command data needed for first sync.
 
 ### QR Payload
 
-- `GET /api/v1/public/enrollments/{enrollmentId}/qr`
-- Returns JSON used to generate the QR code.
-- QR content includes server URL, enrollment token, device identity policy, and bootstrap extras.
+- Produces the JSON payload used to generate the enrollment QR code.
+- The QR payload carries the server URL, enrollment token, device identity policy, and bootstrap extras.
 
 ### Device Config Sync
 
-- `GET /api/v1/device/{deviceId}/config`
-- `POST /api/v1/device/{deviceId}/config`
-- Returns the signed policy snapshot, app list, file list, certificate list, and pending commands.
-- POST is used when the client needs to send telemetry in the same round trip.
+- Returns the signed policy snapshot plus the app, file, certificate, and command state that the device needs to apply.
+- The sync path is deterministic and idempotent.
+- The POST variant is used when the device needs to send telemetry in the same round trip.
 
 ### Telemetry Upload
 
-- `POST /api/v1/device/{deviceId}/telemetry`
-- Uploads heartbeat, battery, network, location, and app state.
+- Accepts device heartbeat, battery, network, location, and app-state telemetry.
+- Telemetry writes feed device health tracking and operational visibility.
 
 ### Log Upload
 
-- `POST /api/v1/device/{deviceId}/logs`
-- App and device logs are batch uploaded.
+- Accepts batch uploads of app and device logs.
+- Log uploads are separate from telemetry so large log payloads do not block config sync.
 
 ### Message Polling
 
-- `GET /api/v1/device/{deviceId}/messages`
-- Used only when MQTT is not active.
+- Provides a fallback read path for pending device messages when MQTT is not active.
 
 ### Artifact Download
 
-- `GET /api/v1/device/{deviceId}/artifacts/{artifactId}`
-- Returns an authorized download stream for app packages, files, and certificates.
+- Returns authorized download streams for app packages, files, and certificates.
+- Artifact access is mediated by the server rather than exposing object storage directly.
 
 ## Admin APIs
 
-### Devices
-
-- `GET /api/v1/admin/devices`
-- `POST /api/v1/admin/devices`
-- `GET /api/v1/admin/devices/{deviceId}`
-- `PATCH /api/v1/admin/devices/{deviceId}`
-- `DELETE /api/v1/admin/devices/{deviceId}`
-
-### Groups And Policies
-
-- `GET /api/v1/admin/groups`
-- `POST /api/v1/admin/groups`
-- `GET /api/v1/admin/policies`
-- `POST /api/v1/admin/policies`
-- `PUT /api/v1/admin/policies/{policyId}`
-
-### Apps
-
-- `GET /api/v1/admin/apps`
-- `POST /api/v1/admin/apps`
-- `POST /api/v1/admin/apps/{appId}/versions`
-- `POST /api/v1/admin/apps/{versionId}/publish`
-
-### Files And Certificates
-
-- `GET /api/v1/admin/files`
-- `POST /api/v1/admin/files`
-- `GET /api/v1/admin/certificates`
-- `POST /api/v1/admin/certificates`
-
-### Commands And Push
-
-- `POST /api/v1/admin/push`
-- `POST /api/v1/admin/commands`
-- `GET /api/v1/admin/commands`
-- `GET /api/v1/admin/commands/{commandId}`
-
-### Logs, Audit, Messaging
-
-- `GET /api/v1/admin/audit`
-- `GET /api/v1/admin/device-logs`
-- `GET /api/v1/admin/messages`
-
-### Plugins
-
-- `GET /api/v1/admin/plugins`
-- `GET /api/v1/admin/plugins/{pluginId}/settings`
-- `PUT /api/v1/admin/plugins/{pluginId}/settings`
+- The admin console manages users, roles, groups, policies, devices, and the operational admin workflow.
+- The console contract and payload shapes live in [../contracts/admin-console.md](../contracts/admin-console.md).
+- The live versioned admin surface uses `/api/v1/admin/...`.
+- The console wrapper can still mount the same contract under `/admin/...` when needed.
+- All `/api/v1/admin/...` endpoints should follow the versioning and error rules below.
 
 ## Canonical Payload Shapes
 

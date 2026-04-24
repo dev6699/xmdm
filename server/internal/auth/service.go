@@ -1,12 +1,12 @@
 package auth
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const SessionCookieName = "xmdm_session"
@@ -21,9 +21,9 @@ type Session struct {
 }
 
 type Service struct {
-	username   string
-	password   string
-	sessionTTL time.Duration
+	username    string
+	password    string
+	sessionTTL  time.Duration
 	permissions []Permission
 
 	mu       sync.Mutex
@@ -105,9 +105,5 @@ func (s *Service) SetNow(now func() time.Time) {
 }
 
 func newSessionID() string {
-	var buf [32]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		panic(err)
-	}
-	return hex.EncodeToString(buf[:])
+	return uuid.NewString()
 }

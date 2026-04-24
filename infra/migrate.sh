@@ -4,12 +4,16 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$script_dir"
 
+postgres_db=${XMDM_POSTGRES_DB:-xmdm}
+postgres_user=${XMDM_POSTGRES_USER:-xmdm}
+postgres_password=${XMDM_POSTGRES_PASSWORD:-xmdm}
+
 compose() {
   docker compose "$@"
 }
 
 psql() {
-  compose exec -T -e PGPASSWORD=xmdm postgres psql -h 127.0.0.1 -U xmdm -d xmdm -v ON_ERROR_STOP=1 "$@"
+  compose exec -T -e PGPASSWORD="$postgres_password" postgres psql -h 127.0.0.1 -U "$postgres_user" -d "$postgres_db" -v ON_ERROR_STOP=1 "$@"
 }
 
 wait_for_postgres() {

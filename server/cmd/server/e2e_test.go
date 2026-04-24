@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,51 +14,86 @@ import (
 	"time"
 
 	"xmdm/server/internal/admin"
-	"xmdm/server/internal/audit"
+	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/bootstrap"
+	devicepg "xmdm/server/internal/device/postgres"
+	grouppg "xmdm/server/internal/group/postgres"
+	identitypg "xmdm/server/internal/identity/postgres"
 	"xmdm/server/internal/plugins"
+	policypg "xmdm/server/internal/policy/postgres"
 )
 
 func TestAdminE2E(t *testing.T) {
+	pool := openTestPool(t)
+	resetTestDB(t, pool)
+
 	svc := auth.NewService("admin", "secret", time.Minute)
 	now := time.Now()
 	svc.SetNow(func() time.Time { return now })
 
-	store := admin.NewStore()
-	auditStore := audit.NewStore()
+	store := admin.NewRepository(
+		identitypg.New(pool),
+		grouppg.New(pool),
+		policypg.New(pool),
+		devicepg.New(pool),
+	)
+	auditStore := auditpg.NewDBStore(pool)
 	handler := newMux(svc, store, auditStore, plugins.Disabled())
 	client := newE2EClient(t, handler)
 	baseURL := "http://xmdm.local"
 
 	login(client, t, baseURL, "admin", "secret")
-	assertStatus(t, client, http.MethodGet, baseURL+"/admin/me", "", http.StatusOK)
+	assertStatus(t, client, http.MethodGet, baseURL+"/api/v1/admin/me", "", http.StatusOK)
 
 	for _, kind := range []string{"users", "roles", "groups", "policies", "devices"} {
-		created := postJSON(t, client, baseURL+"/admin/"+kind, `{"name":"`+kind+`-one","extra":{"kind":"`+kind+`"}}`)
-		if created["id"] != kind+"-1" {
+		created := postJSON(t, client, baseURL+"/api/v1/admin/"+kind, crudCreateBody(kind))
+		id, _ := created["id"].(string)
+		if id == "" {
+			t.Fatalf("%s create returned empty id", kind)
+		}
+		if created["id"] == "" {
 			t.Fatalf("%s create returned id %v", kind, created["id"])
 		}
-		if created["status"] != "active" {
+		if kind == "devices" {
+			if created["status"] != "pending" {
+				t.Fatalf("%s create returned status %v", kind, created["status"])
+			}
+		} else if created["status"] != "active" {
 			t.Fatalf("%s create returned status %v", kind, created["status"])
 		}
 
-		listed := getJSONList(t, client, baseURL+"/admin/"+kind)
-		if len(listed) != 1 {
-			t.Fatalf("%s list returned %d items", kind, len(listed))
+		listed := getJSONList(t, client, baseURL+"/api/v1/admin/"+kind)
+		found := false
+		for _, item := range listed {
+			if item["id"] == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("%s list did not include created item", kind)
 		}
 
-		updated := patchJSON(t, client, baseURL+"/admin/"+kind+"/"+kind+"-1", `{"name":"`+kind+`-two"}`)
-		if updated["name"] != kind+"-two" {
+		updated := patchJSON(t, client, baseURL+"/api/v1/admin/"+kind+"/"+id, crudUpdateBody(kind))
+		if kind == "users" {
+			if updated["email"] != "users-two@example.com" {
+				t.Fatalf("%s update returned email %v", kind, updated["email"])
+			}
+		} else if updated["name"] != kind+"-two" {
 			t.Fatalf("%s update returned name %v", kind, updated["name"])
 		}
 
-		retired := deleteJSON(t, client, baseURL+"/admin/"+kind+"/"+kind+"-1")
+		retired := deleteJSON(t, client, baseURL+"/api/v1/admin/"+kind+"/"+id)
 		if retired["status"] != "retired" {
 			t.Fatalf("%s retire returned status %v", kind, retired["status"])
 		}
 	}
 
-	events := auditStore.List("tenant-1")
+	events, err := auditStore.List(context.Background(), bootstrap.SeedTenantID)
+	if err != nil {
+		t.Fatalf("audit list failed: %v", err)
+	}
 	if len(events) != 15 {
 		t.Fatalf("expected 15 audit events, got %d", len(events))
 	}
@@ -65,8 +101,42 @@ func TestAdminE2E(t *testing.T) {
 		t.Fatalf("unexpected audit actions: first=%s last=%s", events[0].Action, events[len(events)-1].Action)
 	}
 
-	assertStatus(t, client, http.MethodPost, baseURL+"/admin/logout", "", http.StatusNoContent)
-	assertStatus(t, client, http.MethodGet, baseURL+"/admin/me", "", http.StatusUnauthorized)
+	assertStatus(t, client, http.MethodPost, baseURL+"/api/v1/admin/logout", "", http.StatusNoContent)
+	assertStatus(t, client, http.MethodGet, baseURL+"/api/v1/admin/me", "", http.StatusUnauthorized)
+}
+
+func crudCreateBody(kind string) string {
+	switch kind {
+	case "users":
+		return `{"email":"users-one@example.com","passwordHash":"hash-users-one","roleId":"` + bootstrap.SeedAdminRoleID + `"}`
+	case "roles":
+		return `{"name":"roles-one","permissions":["admin.read","admin.write"]}`
+	case "groups":
+		return `{"name":"groups-one"}`
+	case "policies":
+		return `{"name":"policies-one","version":1,"kioskMode":false,"restrictions":{"camera":false}}`
+	case "devices":
+		return `{"name":"devices-one","secretHash":"hash-devices-one"}`
+	default:
+		return `{"name":"` + kind + `-one"}`
+	}
+}
+
+func crudUpdateBody(kind string) string {
+	switch kind {
+	case "users":
+		return `{"email":"users-two@example.com","passwordHash":"hash-users-two","roleId":"` + bootstrap.SeedAdminRoleID + `"}`
+	case "roles":
+		return `{"name":"roles-two","permissions":["admin.read"]}`
+	case "groups":
+		return `{"name":"groups-two"}`
+	case "policies":
+		return `{"name":"policies-two","version":2,"kioskMode":true,"restrictions":{"camera":true}}`
+	case "devices":
+		return `{"name":"devices-two","secretHash":"hash-devices-two"}`
+	default:
+		return `{"name":"` + kind + `-two"}`
+	}
 }
 
 func newE2EClient(t *testing.T, handler http.Handler) *http.Client {
@@ -105,7 +175,7 @@ func login(client *http.Client, t *testing.T, baseURL, username, password string
 	form.Set("username", username)
 	form.Set("password", password)
 
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/admin/login", strings.NewReader(form.Encode()))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/admin/login", strings.NewReader(form.Encode()))
 	if err != nil {
 		t.Fatalf("build login request: %v", err)
 	}
