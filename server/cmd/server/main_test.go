@@ -20,6 +20,7 @@ import (
 	identitypg "xmdm/server/internal/identity/postgres"
 	"xmdm/server/internal/plugins"
 	policypg "xmdm/server/internal/policy/postgres"
+	telemetrypg "xmdm/server/internal/telemetry/postgres"
 )
 
 func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
@@ -35,7 +36,7 @@ func TestAdminDevicesRouteRequiresPermission(t *testing.T) {
 		grouppg.New(pool),
 		policypg.New(pool),
 		devicepg.New(pool),
-	), enrollmentpg.New(pool), auditpg.NewDBStore(pool), plugins.Disabled())
+	), enrollmentpg.New(pool), telemetrypg.New(pool), auditpg.NewDBStore(pool), plugins.Disabled())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
 	res := httptest.NewRecorder()
@@ -87,7 +88,7 @@ func TestAdminDevicesRouteAllowsPermission(t *testing.T) {
 		grouppg.New(pool),
 		policypg.New(pool),
 		devicepg.New(pool),
-	), enrollmentpg.New(pool), auditpg.NewDBStore(pool), plugins.Disabled())
+	), enrollmentpg.New(pool), telemetrypg.New(pool), auditpg.NewDBStore(pool), plugins.Disabled())
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res := httptest.NewRecorder()
@@ -111,7 +112,7 @@ func TestCoreCrudLifecycle(t *testing.T) {
 		devicepg.New(pool),
 	)
 	auditStore := auditpg.NewDBStore(pool)
-	mux := newMux(svc, store, enrollmentpg.New(pool), auditStore, plugins.Disabled())
+	mux := newMux(svc, store, enrollmentpg.New(pool), telemetrypg.New(pool), auditStore, plugins.Disabled())
 
 	session, err := svc.Login("admin", "secret")
 	if err != nil {
@@ -207,7 +208,7 @@ func TestPluginIsolationDoesNotExposeOptionalRoutes(t *testing.T) {
 		grouppg.New(pool),
 		policypg.New(pool),
 		devicepg.New(pool),
-	), enrollmentpg.New(pool), auditpg.NewDBStore(pool), plugins.Disabled())
+	), enrollmentpg.New(pool), telemetrypg.New(pool), auditpg.NewDBStore(pool), plugins.Disabled())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/plugins", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})

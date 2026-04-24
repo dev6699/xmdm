@@ -237,3 +237,60 @@ Path prefix:
   - `400` invalid input or malformed JSON
   - `401` unauthorized
   - `403` forbidden
+
+## Telemetry Upload
+
+### `POST /api/v1/devices/{deviceId}/telemetry`
+
+- Device authentication:
+  - `X-XMDM-Device-Secret: base64url-secret`
+- Request body:
+
+```json
+{
+  "observedAt": "2026-04-24T12:00:00Z",
+  "heartbeat": {
+    "online": true
+  },
+  "battery": {
+    "level": 87
+  },
+  "network": {
+    "connected": true
+  },
+  "location": {
+    "latitude": 1.3521,
+    "longitude": 103.8198
+  },
+  "appState": {
+    "packageName": "com.example.app",
+    "foreground": true
+  }
+}
+```
+
+- Success response: `200 application/json`
+- Body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "deviceId": "serial-123",
+  "observedAt": "2026-04-24T12:00:00Z",
+  "payload": {
+    "heartbeat": {
+      "online": true
+    },
+    "battery": {
+      "level": 87
+    }
+  }
+}
+```
+
+- Errors:
+  - `400` invalid input or malformed JSON
+  - `401` unauthorized
+  - `404` unknown device
+  - `500` internal error

@@ -15,14 +15,17 @@ import (
 	identityhttp "xmdm/server/internal/identity/http"
 	"xmdm/server/internal/plugins"
 	policyhttp "xmdm/server/internal/policy/http"
+	"xmdm/server/internal/telemetry"
+	telemetryhttp "xmdm/server/internal/telemetry/http"
 )
 
 // NewMux builds the versioned HTTP surface under /api/v1.
-func NewMux(svc *auth.Service, store admin.Repository, enrollmentStore enrollment.Repository, auditStore audit.Store, pluginManager *plugins.Manager, tenantID string) http.Handler {
+func NewMux(svc *auth.Service, store admin.Repository, enrollmentStore enrollment.Repository, telemetryStore telemetry.Repository, auditStore audit.Store, pluginManager *plugins.Manager, tenantID string) http.Handler {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
 	enrollmentMux := httpx.WithPrefix(apiMux, "/enrollment")
 	enrollmenthttp.Register(enrollmentMux, svc, enrollmentStore, tenantID)
+	telemetryhttp.Register(apiMux, telemetryStore, tenantID)
 	adminMux := httpx.WithPrefix(apiMux, "/admin")
 	adminhttp.Register(adminMux, svc)
 	identityhttp.Register(apiMux, svc, store, auditStore, tenantID)

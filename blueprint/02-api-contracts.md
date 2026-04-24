@@ -60,6 +60,7 @@
 
 - Accepts device heartbeat, battery, network, location, and app-state telemetry.
 - Telemetry writes feed device health tracking and operational visibility.
+- The live upload surface uses `POST /api/v1/devices/{deviceId}/telemetry` with the device secret in `X-XMDM-Device-Secret`.
 
 ### Log Upload
 

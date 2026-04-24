@@ -23,6 +23,7 @@ import (
 	identitypg "xmdm/server/internal/identity/postgres"
 	"xmdm/server/internal/plugins"
 	policypg "xmdm/server/internal/policy/postgres"
+	telemetrypg "xmdm/server/internal/telemetry/postgres"
 )
 
 func TestAdminE2E(t *testing.T) {
@@ -40,7 +41,7 @@ func TestAdminE2E(t *testing.T) {
 		devicepg.New(pool),
 	)
 	auditStore := auditpg.NewDBStore(pool)
-	handler := newMux(svc, store, enrollmentpg.New(pool), auditStore, plugins.Disabled())
+	handler := newMux(svc, store, enrollmentpg.New(pool), telemetrypg.New(pool), auditStore, plugins.Disabled())
 	client := newE2EClient(t, handler)
 	baseURL := "http://xmdm.local"
 
