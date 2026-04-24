@@ -38,6 +38,18 @@ The app uses a single-module Android project:
 - `app/src/main/java/com/xmdm/launcher/` for Kotlin sources
 - `app/src/main/res/` for XML layouts, strings, colors, and theme resources
 
+### Persistence
+
+The first local state store lives in `app/src/main/java/com/xmdm/launcher/state/`.
+It uses DataStore preferences to keep:
+
+- bootstrap data
+- device identity and secret
+- policy snapshot cache metadata
+
+`MainActivity` reads the stored state on startup and shows whether each piece was restored.
+The store has unit coverage that verifies save, reload, and clear behavior.
+
 ### Conventions
 
 - Keep the launcher UI in XML with ViewBinding.
