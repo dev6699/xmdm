@@ -60,7 +60,7 @@ Admin create, update, and retire operations append immutable audit events in the
 
 ### Admin E2E
 
-The admin end-to-end test runs the login, CRUD, logout, and audit flow through the HTTP handler stack without a socket listener.
+The root E2E suite in [e2e/README.md](e2e/README.md) runs the login, CRUD, logout, enrollment, telemetry, and audit flows through the HTTP handler stack without a socket listener.
 
 It exercises the same entrypoints that the roadmap uses for the clean-install verification checkpoint.
 

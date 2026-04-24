@@ -1,7 +1,6 @@
-package main
+package e2e_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -13,10 +12,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	v1 "xmdm/server/internal/api/v1"
+	"xmdm/server/internal/audit"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
+	device "xmdm/server/internal/device"
+	devicepg "xmdm/server/internal/device/postgres"
+	enrollmentpg "xmdm/server/internal/enrollment/postgres"
+	grouppg "xmdm/server/internal/group/postgres"
+	identitypg "xmdm/server/internal/identity/postgres"
 	"xmdm/server/internal/plugins"
+	policypg "xmdm/server/internal/policy/postgres"
+	telemetrypg "xmdm/server/internal/telemetry/postgres"
 )
 
 func TestAdminE2E(t *testing.T) {
@@ -28,7 +37,7 @@ func TestAdminE2E(t *testing.T) {
 	svc.SetNow(func() time.Time { return now })
 
 	auditStore := auditpg.NewDBStore(pool)
-	handler := newMux(svc, testDeps(pool, auditStore, plugins.Disabled()))
+	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled()))
 	client := newE2EClient(t, handler)
 	baseURL := "http://xmdm.local"
 
@@ -45,10 +54,10 @@ func TestAdminE2E(t *testing.T) {
 			t.Fatalf("%s create returned id %v", kind, created["id"])
 		}
 		if kind == "devices" {
-			if created["status"] != "pending" {
+			if created["status"] != device.StatusPending {
 				t.Fatalf("%s create returned status %v", kind, created["status"])
 			}
-		} else if created["status"] != "active" {
+		} else if created["status"] != device.StatusActive {
 			t.Fatalf("%s create returned status %v", kind, created["status"])
 		}
 
@@ -74,7 +83,7 @@ func TestAdminE2E(t *testing.T) {
 		}
 
 		retired := deleteJSON(t, client, baseURL+"/api/v1/"+kind+"/"+id)
-		if retired["status"] != "retired" {
+		if retired["status"] != device.StatusRetired {
 			t.Fatalf("%s retire returned status %v", kind, retired["status"])
 		}
 	}
@@ -230,11 +239,13 @@ func getJSONList(t *testing.T, client *http.Client, url string) []map[string]any
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(res.Body)
-		t.Fatalf("expected 200, got %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
+		t.Fatalf("list request got %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
 	}
-	var payload []map[string]any
-	decodeBody(t, res.Body, &payload)
-	return payload
+	var listed []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	return listed
 }
 
 func doJSON(t *testing.T, client *http.Client, method, url, body string, want int) map[string]any {
@@ -243,34 +254,33 @@ func doJSON(t *testing.T, client *http.Client, method, url, body string, want in
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
-	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	req.Header.Set("Content-Type", "application/json")
 	res, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("request %s %s: %v", method, url, err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode != want {
-		data, _ := io.ReadAll(res.Body)
-		t.Fatalf("expected %d, got %d: %s", want, res.StatusCode, strings.TrimSpace(string(data)))
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected %d, got %d for %s %s: %s", want, res.StatusCode, method, url, strings.TrimSpace(string(body)))
 	}
 	var payload map[string]any
-	decodeBody(t, res.Body, &payload)
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode json response: %v", err)
+	}
 	return payload
 }
 
-func decodeBody(t *testing.T, r io.Reader, dst any) {
-	t.Helper()
-	raw, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
-	if len(raw) == 0 {
-		t.Fatalf("empty body")
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	if err := dec.Decode(dst); err != nil {
-		t.Fatalf("decode body: %v", err)
+func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins.Manager) v1.Dependencies {
+	return v1.Dependencies{
+		Identity:      identitypg.New(pool),
+		Groups:        grouppg.New(pool),
+		Policies:      policypg.New(pool),
+		Devices:       devicepg.New(pool),
+		Enrollment:    enrollmentpg.New(pool),
+		Telemetry:     telemetrypg.New(pool),
+		Audit:         auditStore,
+		PluginManager: pluginManager,
+		TenantID:      bootstrap.SeedTenantID,
 	}
 }

@@ -46,6 +46,8 @@ Snapshot last updated: 2026-04-24
 | M2-07 Enrollment E2E | ☐ |
 | M2-08 Reconnect E2E | ☐ |
 
+Note: `M2-07 Enrollment E2E` and `M2-08 Reconnect E2E` are deferred until the Android app work is underway.
+
 ### M3 - Agent Foundation
 
 | Item | State |
