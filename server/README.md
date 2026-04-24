@@ -57,6 +57,18 @@ The admin E2E coverage verifies:
 - app version upload with publish support
 - version listing for a managed app
 
+### File Storage
+
+File upload and artifact metadata storage now live under `/api/v1/files`.
+
+The admin E2E coverage verifies:
+
+- multipart file upload persists the binary into object storage plus the file and artifact metadata
+- file listing includes the backing artifact details
+- file retirement marks the logical file retired while preserving the artifact metadata
+
+The server defaults to the local SeaweedFS S3 endpoint on `localhost:8333` and reads the object-store settings from `XMDM_OBJECT_STORAGE_ENDPOINT`, `XMDM_OBJECT_STORAGE_REGION`, `XMDM_OBJECT_STORAGE_ACCESS_KEY`, `XMDM_OBJECT_STORAGE_SECRET_KEY`, and `XMDM_OBJECT_STORAGE_BUCKET`.
+
 ### Migration Tooling
 
 The local bootstrap migrator lives in [../infra/migrate.sh](../infra/migrate.sh).

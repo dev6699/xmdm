@@ -45,4 +45,5 @@ go test ./...
 - Keep local credentials separate from production credentials.
 - The compose file pins image tags so the local environment does not drift unexpectedly.
 - SeaweedFS exposes an S3 endpoint on `localhost:8333` and accepts arbitrary access and secret keys by default, so use a local-only credential pair in app and server config.
+- The server defaults use `XMDM_OBJECT_STORAGE_ENDPOINT=http://127.0.0.1:8333`, `XMDM_OBJECT_STORAGE_BUCKET=xmdm`, and matching local credentials when the env vars are unset.
 - If a service container is stale, stop the stack and recreate it before debugging the agent.

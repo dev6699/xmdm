@@ -1,9 +1,11 @@
 package e2e_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -15,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	v1 "xmdm/server/internal/api/v1"
 	appspg "xmdm/server/internal/apps/postgres"
+	"xmdm/server/internal/artifacts"
 	"xmdm/server/internal/audit"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
@@ -22,6 +25,7 @@ import (
 	device "xmdm/server/internal/device"
 	devicepg "xmdm/server/internal/device/postgres"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
+	filespg "xmdm/server/internal/files/postgres"
 	grouppg "xmdm/server/internal/group/postgres"
 	identitypg "xmdm/server/internal/identity/postgres"
 	"xmdm/server/internal/plugins"
@@ -38,7 +42,9 @@ func TestAdminE2E(t *testing.T) {
 	svc.SetNow(func() time.Time { return now })
 
 	auditStore := auditpg.NewDBStore(pool)
-	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled()))
+	artifactStore := newTestArtifactStore(t)
+	defer func() { _ = artifactStore.Delete(context.Background(), "artifacts/launcher.apk") }()
+	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled(), artifactStore))
 	client := newE2EClient(t, handler)
 	baseURL := "http://xmdm.local"
 
@@ -112,12 +118,41 @@ func TestAdminE2E(t *testing.T) {
 		}
 	}
 
+	fileCreated := postMultipartFile(t, client, baseURL+"/api/v1/files", map[string]string{
+		"name":       "launcher.apk",
+		"storageKey": "artifacts/launcher.apk",
+		"checksum":   "sha256-file-abc",
+		"sizeBytes":  "1024",
+		"mimeType":   "application/vnd.android.package-archive",
+	}, "file", "launcher.apk", bytes.Repeat([]byte("x"), 1024))
+	if fileCreated["name"] != "launcher.apk" {
+		t.Fatalf("file create returned name %v", fileCreated["name"])
+	}
+	if fileCreated["artifact"] == nil {
+		t.Fatalf("expected artifact details in file response: %#v", fileCreated)
+	}
+	files := getJSONList(t, client, baseURL+"/api/v1/files")
+	if len(files) != 1 {
+		t.Fatalf("expected one file, got %d", len(files))
+	}
+	if files[0]["artifact"] == nil {
+		t.Fatalf("expected artifact details in file list: %#v", files[0])
+	}
+	fileID, _ := fileCreated["id"].(string)
+	if fileID == "" {
+		t.Fatalf("file create returned empty id")
+	}
+	fileRetired := deleteJSON(t, client, baseURL+"/api/v1/files/"+fileID)
+	if fileRetired["status"] != "retired" {
+		t.Fatalf("file retire returned status %v", fileRetired["status"])
+	}
+
 	events, err := auditStore.List(context.Background(), bootstrap.SeedTenantID)
 	if err != nil {
 		t.Fatalf("audit list failed: %v", err)
 	}
-	if len(events) != 19 {
-		t.Fatalf("expected 19 audit events, got %d", len(events))
+	if len(events) != 21 {
+		t.Fatalf("expected 21 audit events, got %d", len(events))
 	}
 	if events[0].Action != "create" || events[len(events)-1].Action != "retire" {
 		t.Fatalf("unexpected audit actions: first=%s last=%s", events[0].Action, events[len(events)-1].Action)
@@ -299,10 +334,11 @@ func doJSON(t *testing.T, client *http.Client, method, url, body string, want in
 	return payload
 }
 
-func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins.Manager) v1.Dependencies {
+func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins.Manager, artifactStore artifacts.Store) v1.Dependencies {
 	return v1.Dependencies{
 		Identity:      identitypg.New(pool),
 		Apps:          appspg.New(pool),
+		Files:         filespg.New(pool),
 		Groups:        grouppg.New(pool),
 		Policies:      policypg.New(pool),
 		Devices:       devicepg.New(pool),
@@ -310,6 +346,47 @@ func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins
 		Telemetry:     telemetrypg.New(pool),
 		Audit:         auditStore,
 		PluginManager: pluginManager,
+		Artifacts:     artifactStore,
 		TenantID:      bootstrap.SeedTenantID,
 	}
+}
+
+func postMultipartFile(t *testing.T, client *http.Client, url string, fields map[string]string, fileField, fileName string, content []byte) map[string]any {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write form field %s: %v", key, err)
+		}
+	}
+	part, err := writer.CreateFormFile(fileField, fileName)
+	if err != nil {
+		t.Fatalf("create multipart file part: %v", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatalf("write multipart file part: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, url, &body)
+	if err != nil {
+		t.Fatalf("build multipart request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("multipart upload request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		responseBody, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected %d, got %d for multipart upload: %s", http.StatusOK, res.StatusCode, strings.TrimSpace(string(responseBody)))
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode multipart response: %v", err)
+	}
+	return payload
 }

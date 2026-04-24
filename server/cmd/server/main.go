@@ -10,11 +10,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	v1 "xmdm/server/internal/api/v1"
 	appspg "xmdm/server/internal/apps/postgres"
+	"xmdm/server/internal/artifacts"
+	s3store "xmdm/server/internal/artifacts/s3"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
 	devicepg "xmdm/server/internal/device/postgres"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
+	filespg "xmdm/server/internal/files/postgres"
 	grouppg "xmdm/server/internal/group/postgres"
 	identitypg "xmdm/server/internal/identity/postgres"
 	"xmdm/server/internal/plugins"
@@ -53,9 +56,12 @@ func openStores() v1.Dependencies {
 	if err := pool.Ping(context.Background()); err != nil {
 		log.Fatalf("ping postgres: %v", err)
 	}
+	artifactStore := mustArtifactStore()
 	return v1.Dependencies{
 		Identity:   identitypg.New(pool),
 		Apps:       appspg.New(pool),
+		Files:      filespg.New(pool),
+		Artifacts:  artifactStore,
 		Groups:     grouppg.New(pool),
 		Policies:   policypg.New(pool),
 		Devices:    devicepg.New(pool),
@@ -64,6 +70,26 @@ func openStores() v1.Dependencies {
 		Audit:      auditpg.NewDBStore(pool),
 		TenantID:   bootstrap.SeedTenantID,
 	}
+}
+
+func mustArtifactStore() artifacts.Store {
+	endpoint := env("XMDM_OBJECT_STORAGE_ENDPOINT", "http://127.0.0.1:8333")
+	region := env("XMDM_OBJECT_STORAGE_REGION", "us-east-1")
+	accessKey := env("XMDM_OBJECT_STORAGE_ACCESS_KEY", "xmdm")
+	secretKey := env("XMDM_OBJECT_STORAGE_SECRET_KEY", "xmdm")
+	bucket := env("XMDM_OBJECT_STORAGE_BUCKET", "xmdm")
+	store, err := s3store.New(context.Background(), s3store.Config{
+		Endpoint:        endpoint,
+		Region:          region,
+		AccessKeyID:     accessKey,
+		SecretAccessKey: secretKey,
+		Bucket:          bucket,
+		UsePathStyle:    true,
+	})
+	if err != nil {
+		log.Fatalf("init object storage: %v", err)
+	}
+	return store
 }
 
 func env(key, fallback string) string {

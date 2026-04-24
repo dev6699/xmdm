@@ -60,20 +60,22 @@ Note: `M2-07 Enrollment E2E` and `M2-08 Reconnect E2E` are complete on the enrol
 | M3-06 Reboot Survival | ☑ |
 | M3-07 Polling Fallback | ☑ |
 
-Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeeds, `M3-02 Local Persistence` has a DataStore-backed state store plus unit coverage and now survives a physical-device reboot check, `M3-03 Bootstrap Parsing` now accepts and persists canonical or fallback bootstrap JSON, the Android app now flows from bootstrap into enrollment so the device secret and initial signed config snapshot are fetched from the backend, `M3-04 Retry Logic` adds a contract-driven config sync engine with retry and signature verification, `M3-05 Recovery UI` surfaces bootstrap and enrollment failures with a device-owner entry point, `M3-06 Reboot Survival` now has a physical-device reboot verification with the persisted state file checksum unchanged and the launcher UI restoring bootstrap, identity, and policy cache after reboot, `M3-07 Polling Fallback` is verified by the sync engine falling back from the primary polling path to the secondary server URL when the primary path is unavailable, and `M4-01 App Management` is complete with app CRUD plus immutable version upload and publish support.
+Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeeds, `M3-02 Local Persistence` has a DataStore-backed state store plus unit coverage and now survives a physical-device reboot check, `M3-03 Bootstrap Parsing` now accepts and persists canonical or fallback bootstrap JSON, the Android app now flows from bootstrap into enrollment so the device secret and initial signed config snapshot are fetched from the backend, `M3-04 Retry Logic` adds a contract-driven config sync engine with retry and signature verification, `M3-05 Recovery UI` surfaces bootstrap and enrollment failures with a device-owner entry point, `M3-06 Reboot Survival` now has a physical-device reboot verification with the persisted state file checksum unchanged and the launcher UI restoring bootstrap, identity, and policy cache after reboot, and `M3-07 Polling Fallback` is verified by the sync engine falling back from the primary polling path to the secondary server URL when the primary path is unavailable.
 
 ### M4 - Content Delivery
 
 | Item | State |
 | --- | --- |
 | M4-01 App Management | ☑ |
-| M4-02 File Storage | ☐ |
+| M4-02 File Storage | ☑ |
 | M4-03 Certificates | ☐ |
 | M4-04 Checksum Verification | ☐ |
 | M4-05 App Install Flow | ☐ |
 | M4-06 File Download Flow | ☐ |
 | M4-07 Content E2E | ☐ |
 | M4-08 Artifact Cleanup | ☐ |
+
+Note: `M4-01 App Management` is complete with app CRUD plus immutable version upload and publish support, and `M4-02 File Storage` is complete with multipart file upload plus artifact metadata persistence.
 
 ### M5 - Push And Commands
 

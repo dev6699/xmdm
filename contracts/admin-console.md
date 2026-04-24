@@ -388,6 +388,115 @@ Response body:
   - `404` app not found or retired
   - `409` duplicate app/package/version conflict
 
+## Files
+
+### `GET /api/v1/files`
+
+- Permission: `admin.read`
+- Success response: `200 application/json`
+- Body:
+
+```json
+[
+  {
+    "id": "uuid",
+    "tenantId": "uuid",
+    "status": "active",
+    "updatedAt": "2026-04-23T00:00:00Z",
+    "deletedAt": null,
+    "name": "launcher.apk",
+    "artifactId": "uuid",
+    "checksum": "sha256-file-abc",
+    "mimeType": "application/vnd.android.package-archive",
+    "artifact": {
+      "id": "uuid",
+      "tenantId": "uuid",
+      "status": "active",
+      "updatedAt": "2026-04-23T00:00:00Z",
+      "deletedAt": null,
+      "storageKey": "artifacts/launcher.apk",
+      "checksum": "sha256-file-abc",
+      "sizeBytes": 1024,
+      "mimeType": "application/vnd.android.package-archive"
+    }
+  }
+]
+```
+
+### `POST /api/v1/files`
+
+- Permission: `admin.write`
+- Request body:
+
+`multipart/form-data`
+
+- Fields:
+  - `name` `string`
+  - `storageKey` `string`
+  - `checksum` `string`
+  - `sizeBytes` `integer`
+  - `mimeType` `string`
+  - `file` `binary`
+
+- The server streams the uploaded `file` part into configured object storage and persists both the logical file record and the backing artifact metadata.
+- The server also accepts the JSON metadata-only shape for internal registration flows, but multipart upload is the primary path.
+- Response body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "active",
+  "updatedAt": "2026-04-23T00:00:00Z",
+  "deletedAt": null,
+  "name": "launcher.apk",
+  "artifactId": "uuid",
+  "checksum": "sha256-file-abc",
+  "mimeType": "application/vnd.android.package-archive",
+  "artifact": {
+    "id": "uuid",
+    "tenantId": "uuid",
+    "status": "active",
+    "updatedAt": "2026-04-23T00:00:00Z",
+    "deletedAt": null,
+    "storageKey": "artifacts/launcher.apk",
+    "checksum": "sha256-file-abc",
+    "sizeBytes": 1024,
+    "mimeType": "application/vnd.android.package-archive"
+  }
+}
+```
+
+### `DELETE /api/v1/files/{id}`
+
+- Permission: `admin.write`
+- Response body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "retired",
+  "updatedAt": "2026-04-23T00:00:00Z",
+  "deletedAt": "2026-04-23T00:00:00Z",
+  "name": "launcher.apk",
+  "artifactId": "uuid",
+  "checksum": "sha256-file-abc",
+  "mimeType": "application/vnd.android.package-archive",
+  "artifact": {
+    "id": "uuid",
+    "tenantId": "uuid",
+    "status": "active",
+    "updatedAt": "2026-04-23T00:00:00Z",
+    "deletedAt": null,
+    "storageKey": "artifacts/launcher.apk",
+    "checksum": "sha256-file-abc",
+    "sizeBytes": 1024,
+    "mimeType": "application/vnd.android.package-archive"
+  }
+}
+```
+
 ## Groups
 
 ### `GET /api/v1/groups`

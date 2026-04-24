@@ -6,12 +6,15 @@ import (
 	adminhttp "xmdm/server/internal/admin/http"
 	apps "xmdm/server/internal/apps"
 	apphttp "xmdm/server/internal/apps/http"
+	"xmdm/server/internal/artifacts"
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/device"
 	devicehttp "xmdm/server/internal/device/http"
 	"xmdm/server/internal/enrollment"
 	enrollmenthttp "xmdm/server/internal/enrollment/http"
+	files "xmdm/server/internal/files"
+	filehttp "xmdm/server/internal/files/http"
 	"xmdm/server/internal/group"
 	grouphttp "xmdm/server/internal/group/http"
 	"xmdm/server/internal/httpx"
@@ -27,6 +30,8 @@ import (
 type Dependencies struct {
 	Identity      identity.Repository
 	Apps          apps.Repository
+	Files         files.Repository
+	Artifacts     artifacts.Store
 	Groups        group.Repository
 	Policies      policy.Repository
 	Devices       device.Repository
@@ -45,6 +50,7 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	telemetryhttp.Register(apiMux, deps.Telemetry, deps.TenantID)
 	adminhttp.Register(apiMux, svc, deps.PluginManager)
 	apphttp.Register(apiMux, svc, deps.Apps, deps.Audit, deps.TenantID)
+	filehttp.Register(apiMux, svc, deps.Files, deps.Artifacts, deps.Audit, deps.TenantID)
 	identityhttp.Register(apiMux, svc, deps.Identity, deps.Audit, deps.TenantID)
 	grouphttp.Register(apiMux, svc, deps.Groups, deps.Audit, deps.TenantID)
 	policyhttp.Register(apiMux, svc, deps.Policies, deps.Audit, deps.TenantID)
