@@ -69,6 +69,10 @@ func RegisterCRUDFor[Req any, Resp Record](mux Router, svc *auth.Service, auditS
 					http.Error(w, "invalid input", http.StatusBadRequest)
 					return
 				}
+				if err == ErrConflict {
+					http.Error(w, "conflict", http.StatusConflict)
+					return
+				}
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
@@ -113,6 +117,10 @@ func RegisterCRUDFor[Req any, Resp Record](mux Router, svc *auth.Service, auditS
 			if err != nil {
 				if err == ErrInvalidInput {
 					http.Error(w, "invalid input", http.StatusBadRequest)
+					return
+				}
+				if err == ErrConflict {
+					http.Error(w, "conflict", http.StatusConflict)
 					return
 				}
 				if err == ErrNotFound {

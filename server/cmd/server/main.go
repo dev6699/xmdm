@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	v1 "xmdm/server/internal/api/v1"
+	appspg "xmdm/server/internal/apps/postgres"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
@@ -54,6 +55,7 @@ func openStores() v1.Dependencies {
 	}
 	return v1.Dependencies{
 		Identity:   identitypg.New(pool),
+		Apps:       appspg.New(pool),
 		Groups:     grouppg.New(pool),
 		Policies:   policypg.New(pool),
 		Devices:    devicepg.New(pool),

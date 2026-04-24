@@ -12,7 +12,8 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 The admin E2E verifies:
 
 - admin login and session handling
-- CRUD for users, roles, groups, policies, and devices
+- CRUD for users, roles, apps, groups, policies, and devices
+- app version upload and publish
 - audit event capture for admin mutations
 - logout and session invalidation
 

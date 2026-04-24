@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	adminhttp "xmdm/server/internal/admin/http"
+	apps "xmdm/server/internal/apps"
+	apphttp "xmdm/server/internal/apps/http"
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/device"
@@ -24,6 +26,7 @@ import (
 
 type Dependencies struct {
 	Identity      identity.Repository
+	Apps          apps.Repository
 	Groups        group.Repository
 	Policies      policy.Repository
 	Devices       device.Repository
@@ -41,6 +44,7 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	enrollmenthttp.Register(apiMux, svc, deps.Enrollment, deps.TenantID)
 	telemetryhttp.Register(apiMux, deps.Telemetry, deps.TenantID)
 	adminhttp.Register(apiMux, svc, deps.PluginManager)
+	apphttp.Register(apiMux, svc, deps.Apps, deps.Audit, deps.TenantID)
 	identityhttp.Register(apiMux, svc, deps.Identity, deps.Audit, deps.TenantID)
 	grouphttp.Register(apiMux, svc, deps.Groups, deps.Audit, deps.TenantID)
 	policyhttp.Register(apiMux, svc, deps.Policies, deps.Audit, deps.TenantID)

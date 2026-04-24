@@ -232,6 +232,162 @@ Response body:
 }
 ```
 
+## Apps
+
+### `GET /api/v1/apps`
+
+- Permission: `admin.read`
+- Success response: `200 application/json`
+- Body:
+
+```json
+[
+  {
+    "id": "uuid",
+    "tenantId": "uuid",
+    "status": "active",
+    "updatedAt": "2026-04-23T00:00:00Z",
+    "deletedAt": null,
+    "packageName": "com.example.app",
+    "name": "App name"
+  }
+]
+```
+
+### `POST /api/v1/apps`
+
+- Permission: `admin.write`
+- Request body:
+
+```json
+{
+  "packageName": "com.example.app",
+  "name": "App name"
+}
+```
+
+- Response body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "active",
+  "updatedAt": "2026-04-23T00:00:00Z",
+  "deletedAt": null,
+  "packageName": "com.example.app",
+  "name": "App name"
+}
+```
+
+### `PATCH /api/v1/apps/{id}`
+
+- Permission: `admin.write`
+- Request body:
+
+```json
+{
+  "packageName": "com.example.app",
+  "name": "App name"
+}
+```
+
+- Response body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "active",
+  "updatedAt": "2026-04-23T00:00:00Z",
+  "deletedAt": null,
+  "packageName": "com.example.app",
+  "name": "App name"
+}
+```
+
+### `DELETE /api/v1/apps/{id}`
+
+- Permission: `admin.write`
+- Response body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "retired",
+  "updatedAt": "2026-04-23T00:00:00Z",
+  "deletedAt": "2026-04-23T00:00:00Z",
+  "packageName": "com.example.app",
+  "name": "App name"
+}
+```
+
+### `GET /api/v1/apps/{id}/versions`
+
+- Permission: `admin.read`
+- Success response: `200 application/json`
+- Body:
+
+```json
+[
+  {
+    "id": "uuid",
+    "tenantId": "uuid",
+    "appId": "uuid",
+    "status": "published",
+    "versionName": "1.0.0",
+    "versionCode": 100,
+    "artifactId": "artifact-1",
+    "checksum": "sha256-abc",
+    "publishedAt": "2026-04-23T00:00:00Z",
+    "createdAt": "2026-04-23T00:00:00Z"
+  }
+]
+```
+
+- Errors:
+  - `404` app not found or retired
+
+### `POST /api/v1/apps/{id}/versions`
+
+- Permission: `admin.write`
+- Request body:
+
+```json
+{
+  "versionName": "1.0.0",
+  "versionCode": 100,
+  "artifactId": "artifact-1",
+  "checksum": "sha256-abc",
+  "publish": true
+}
+```
+
+- `artifactId` is optional.
+- `publish` marks the new version as published when `true`; otherwise it stays uploaded.
+- Response body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "appId": "uuid",
+  "status": "published",
+  "versionName": "1.0.0",
+  "versionCode": 100,
+  "artifactId": "artifact-1",
+  "checksum": "sha256-abc",
+  "publishedAt": "2026-04-23T00:00:00Z",
+  "createdAt": "2026-04-23T00:00:00Z"
+}
+```
+
+- Errors:
+  - `400` invalid input or malformed JSON
+  - `404` app not found or retired
+  - `409` duplicate app/package/version conflict
+
 ## Groups
 
 ### `GET /api/v1/groups`

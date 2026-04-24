@@ -47,6 +47,16 @@ It creates the tenant-aware foundation tables:
 - devices
 - device_groups
 
+### App Management
+
+App management and immutable version upload now live under `/api/v1/apps` and `/api/v1/apps/{id}/versions`.
+
+The admin E2E coverage verifies:
+
+- app create, list, update, and retire
+- app version upload with publish support
+- version listing for a managed app
+
 ### Migration Tooling
 
 The local bootstrap migrator lives in [../infra/migrate.sh](../infra/migrate.sh).

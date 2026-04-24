@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	v1 "xmdm/server/internal/api/v1"
+	appspg "xmdm/server/internal/apps/postgres"
 	"xmdm/server/internal/audit"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
@@ -44,7 +45,7 @@ func TestAdminE2E(t *testing.T) {
 	login(client, t, baseURL, "admin", "secret")
 	assertStatus(t, client, http.MethodGet, baseURL+"/api/v1/admin/me", "", http.StatusOK)
 
-	for _, kind := range []string{"users", "roles", "groups", "policies", "devices"} {
+	for _, kind := range []string{"users", "roles", "apps", "groups", "policies", "devices"} {
 		created := postJSON(t, client, baseURL+"/api/v1/"+kind, crudCreateBody(kind))
 		id, _ := created["id"].(string)
 		if id == "" {
@@ -82,6 +83,29 @@ func TestAdminE2E(t *testing.T) {
 			t.Fatalf("%s update returned name %v", kind, updated["name"])
 		}
 
+		if kind == "apps" {
+			version := postJSON(t, client, baseURL+"/api/v1/apps/"+id+"/versions", `{
+				"versionName":"1.0.0",
+				"versionCode":100,
+				"artifactId":"artifact-1",
+				"checksum":"sha256-abc",
+				"publish":true
+			}`)
+			if version["status"] != "published" {
+				t.Fatalf("app version create returned status %v", version["status"])
+			}
+			if version["versionName"] != "1.0.0" {
+				t.Fatalf("app version create returned versionName %v", version["versionName"])
+			}
+			versions := getJSONList(t, client, baseURL+"/api/v1/apps/"+id+"/versions")
+			if len(versions) != 1 {
+				t.Fatalf("expected one version, got %d", len(versions))
+			}
+			if versions[0]["status"] != "published" {
+				t.Fatalf("app version list returned status %v", versions[0]["status"])
+			}
+		}
+
 		retired := deleteJSON(t, client, baseURL+"/api/v1/"+kind+"/"+id)
 		if retired["status"] != device.StatusRetired {
 			t.Fatalf("%s retire returned status %v", kind, retired["status"])
@@ -92,8 +116,8 @@ func TestAdminE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("audit list failed: %v", err)
 	}
-	if len(events) != 15 {
-		t.Fatalf("expected 15 audit events, got %d", len(events))
+	if len(events) != 19 {
+		t.Fatalf("expected 19 audit events, got %d", len(events))
 	}
 	if events[0].Action != "create" || events[len(events)-1].Action != "retire" {
 		t.Fatalf("unexpected audit actions: first=%s last=%s", events[0].Action, events[len(events)-1].Action)
@@ -111,6 +135,8 @@ func crudCreateBody(kind string) string {
 		return `{"name":"roles-one","permissions":["admin.read","admin.write"]}`
 	case "groups":
 		return `{"name":"groups-one"}`
+	case "apps":
+		return `{"packageName":"com.example.app","name":"apps-one"}`
 	case "policies":
 		return `{"name":"policies-one","version":1,"kioskMode":false,"restrictions":{"camera":false}}`
 	case "devices":
@@ -128,6 +154,8 @@ func crudUpdateBody(kind string) string {
 		return `{"name":"roles-two","permissions":["admin.read"]}`
 	case "groups":
 		return `{"name":"groups-two"}`
+	case "apps":
+		return `{"packageName":"com.example.app.two","name":"apps-two"}`
 	case "policies":
 		return `{"name":"policies-two","version":2,"kioskMode":true,"restrictions":{"camera":true}}`
 	case "devices":
@@ -274,6 +302,7 @@ func doJSON(t *testing.T, client *http.Client, method, url, body string, want in
 func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins.Manager) v1.Dependencies {
 	return v1.Dependencies{
 		Identity:      identitypg.New(pool),
+		Apps:          appspg.New(pool),
 		Groups:        grouppg.New(pool),
 		Policies:      policypg.New(pool),
 		Devices:       devicepg.New(pool),
