@@ -52,13 +52,15 @@ Note: `M2-07 Enrollment E2E` and `M2-08 Reconnect E2E` are deferred until the An
 
 | Item | State |
 | --- | --- |
-| M3-01 Kotlin Project | ☐ |
+| M3-01 Kotlin Project | ☑ |
 | M3-02 Local Persistence | ☐ |
 | M3-03 Bootstrap Parsing | ☐ |
 | M3-04 Retry Logic | ☐ |
 | M3-05 Recovery UI | ☐ |
 | M3-06 Reboot Survival | ☐ |
 | M3-07 Polling Fallback | ☐ |
+
+Note: `M3-01 Kotlin Project` scaffold work has started in [app/](app) and `assembleDebug` now succeeds.
 
 ### M4 - Content Delivery
 
