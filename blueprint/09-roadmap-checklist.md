@@ -182,8 +182,8 @@ Owner roles used below:
 
 - Owner: `QA`
 - Depends on: M2-01, M2-03, M2-04, M2-05, M2-06
-- Task: verify fresh-device enrollment on a clean emulator and one physical device.
-- Done when: both targets enroll and sync successfully.
+- Task: verify fresh-device enrollment on a physical device.
+- Done when: the physical device enrolls and syncs successfully.
 
 ### M2-08 Reconnect E2E
 

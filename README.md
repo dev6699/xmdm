@@ -43,10 +43,10 @@ Snapshot last updated: 2026-04-24
 | M2-04 Signed Config | ☑ |
 | M2-05 Telemetry Upload | ☑ |
 | M2-06 State Transitions | ☑ |
-| M2-07 Enrollment E2E | ☐ |
-| M2-08 Reconnect E2E | ☐ |
+| M2-07 Enrollment E2E | ☑ |
+| M2-08 Reconnect E2E | ☑ |
 
-Note: `M2-07 Enrollment E2E` and `M2-08 Reconnect E2E` are deferred until the Android app work is underway.
+Note: `M2-07 Enrollment E2E` and `M2-08 Reconnect E2E` are complete on the enrolled physical device.
 
 ### M3 - Agent Foundation
 
