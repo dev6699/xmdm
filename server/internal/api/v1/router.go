@@ -59,7 +59,7 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
 	enrollmenthttp.Register(apiMux, svc, deps.Enrollment, deps.Apps, deps.ManagedFiles, deps.Certificates, deps.TenantID)
 	telemetryhttp.Register(apiMux, deps.Telemetry, deps.TenantID)
-	adminhttp.Register(apiMux, svc, deps.PluginManager)
+	adminhttp.Register(apiMux, svc, deps.PluginManager, deps.Audit, deps.Commands, deps.TenantID)
 	commandhttp.Register(apiMux, deps.Devices, deps.Commands, deps.TenantID)
 	apphttp.Register(apiMux, svc, deps.Apps, deps.Devices, deps.Artifacts, deps.Audit, deps.TenantID)
 	filehttp.Register(apiMux, svc, deps.Files, deps.Artifacts, deps.Audit, deps.TenantID)

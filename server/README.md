@@ -88,6 +88,7 @@ For topic isolation, see [../infra/mosquitto/mqtt-security.md](../infra/mosquitt
 
 The server now exposes `GET /api/v1/devices/{deviceId}/commands` as the HTTP fallback path for pending commands.
 The endpoint authenticates with `X-XMDM-Device-Secret`, reads queued or sent command rows from PostgreSQL, and returns them in a `commands` array.
+The admin surface exposes `POST /api/v1/admin/commands` for queued command creation, and the request target can expand to a device, a group, or a broadcast set.
 
 ### Migration Tooling
 

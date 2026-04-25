@@ -64,8 +64,8 @@ type fakeCommandStore struct {
 	items []commands.Command
 }
 
-func (s *fakeCommandStore) Enqueue(context.Context, string, string, commands.Upsert) (commands.Command, error) {
-	return commands.Command{}, nil
+func (s *fakeCommandStore) Enqueue(context.Context, string, commands.Upsert) ([]commands.Command, error) {
+	return nil, nil
 }
 
 func (s *fakeCommandStore) ListPending(context.Context, string, string) ([]commands.Command, error) {
