@@ -30,6 +30,7 @@ import (
 	filespg "xmdm/server/internal/files/postgres"
 	grouppg "xmdm/server/internal/group/postgres"
 	identitypg "xmdm/server/internal/identity/postgres"
+	managedfilespg "xmdm/server/internal/managedfiles/postgres"
 	"xmdm/server/internal/plugins"
 	policypg "xmdm/server/internal/policy/postgres"
 	telemetrypg "xmdm/server/internal/telemetry/postgres"
@@ -395,6 +396,7 @@ func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins
 		Identity:      identitypg.New(pool),
 		Apps:          appspg.New(pool),
 		Files:         filespg.New(pool),
+		ManagedFiles:  managedfilespg.New(pool),
 		Certificates:  certificatesspg.New(pool),
 		Groups:        grouppg.New(pool),
 		Policies:      policypg.New(pool),

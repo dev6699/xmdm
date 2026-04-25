@@ -33,12 +33,12 @@ type BoundDevice struct {
 }
 
 type ConfigSnapshot struct {
-	Version      string         `json:"version"`
-	Device       map[string]any `json:"device"`
-	Policy       map[string]any `json:"policy"`
-	Apps         []any          `json:"apps"`
-	Files        []any          `json:"files"`
-	Certificates []any          `json:"certificates"`
-	Commands     []any          `json:"commands"`
-	Signature    string         `json:"signature"`
+	Version      string                `json:"version"`
+	Device       map[string]any        `json:"device"`
+	Policy       map[string]any        `json:"policy"`
+	Apps         []any                 `json:"apps"`
+	Files        []ManagedFileSnapshot `json:"files"`
+	Certificates []any                 `json:"certificates"`
+	Commands     []any                 `json:"commands"`
+	Signature    string                `json:"signature"`
 }

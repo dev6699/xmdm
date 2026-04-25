@@ -65,7 +65,16 @@ class AgentStateStore(
     suspend fun saveManagedApps(state: ManagedAppsState) {
         dataStore.edit { prefs ->
             prefs[Keys.MANAGED_APPS_SNAPSHOT_JSON] = state.snapshotJson
+            prefs[Keys.MANAGED_APPS_VERSION] = state.version
             prefs[Keys.MANAGED_APPS_LAST_APPLIED_AT_EPOCH_MILLIS] = state.lastAppliedAtEpochMillis
+        }
+    }
+
+    suspend fun saveManagedFiles(state: ManagedFilesState) {
+        dataStore.edit { prefs ->
+            prefs[Keys.MANAGED_FILES_SNAPSHOT_JSON] = state.snapshotJson
+            prefs[Keys.MANAGED_FILES_VERSION] = state.version
+            prefs[Keys.MANAGED_FILES_LAST_APPLIED_AT_EPOCH_MILLIS] = state.lastAppliedAtEpochMillis
         }
     }
 
@@ -78,7 +87,11 @@ class AgentStateStore(
             prefs.remove(Keys.POLICY_VERSION)
             prefs.remove(Keys.POLICY_LAST_SYNC_AT_EPOCH_MILLIS)
             prefs.remove(Keys.MANAGED_APPS_SNAPSHOT_JSON)
+            prefs.remove(Keys.MANAGED_APPS_VERSION)
             prefs.remove(Keys.MANAGED_APPS_LAST_APPLIED_AT_EPOCH_MILLIS)
+            prefs.remove(Keys.MANAGED_FILES_SNAPSHOT_JSON)
+            prefs.remove(Keys.MANAGED_FILES_VERSION)
+            prefs.remove(Keys.MANAGED_FILES_LAST_APPLIED_AT_EPOCH_MILLIS)
         }
     }
 
@@ -112,11 +125,13 @@ class AgentStateStore(
         val identity = identityFromPrefs(prefs)
         val policyCache = policyCacheFromPrefs(prefs)
         val managedApps = managedAppsFromPrefs(prefs)
+        val managedFiles = managedFilesFromPrefs(prefs)
         return AgentState(
             bootstrap = bootstrap,
             identity = identity,
             policyCache = policyCache,
             managedApps = managedApps,
+            managedFiles = managedFiles,
         )
     }
 
@@ -165,9 +180,22 @@ class AgentStateStore(
 
     private fun managedAppsFromPrefs(prefs: Preferences): ManagedAppsState? {
         val snapshotJson = prefs[Keys.MANAGED_APPS_SNAPSHOT_JSON] ?: return null
+        val version = prefs[Keys.MANAGED_APPS_VERSION] ?: return null
         val lastAppliedAtEpochMillis = prefs[Keys.MANAGED_APPS_LAST_APPLIED_AT_EPOCH_MILLIS] ?: return null
         return ManagedAppsState(
             snapshotJson = snapshotJson,
+            version = version,
+            lastAppliedAtEpochMillis = lastAppliedAtEpochMillis,
+        )
+    }
+
+    private fun managedFilesFromPrefs(prefs: Preferences): ManagedFilesState? {
+        val snapshotJson = prefs[Keys.MANAGED_FILES_SNAPSHOT_JSON] ?: return null
+        val version = prefs[Keys.MANAGED_FILES_VERSION] ?: return null
+        val lastAppliedAtEpochMillis = prefs[Keys.MANAGED_FILES_LAST_APPLIED_AT_EPOCH_MILLIS] ?: return null
+        return ManagedFilesState(
+            snapshotJson = snapshotJson,
+            version = version,
             lastAppliedAtEpochMillis = lastAppliedAtEpochMillis,
         )
     }
@@ -190,7 +218,11 @@ class AgentStateStore(
         val POLICY_VERSION = longPreferencesKey("policy_version")
         val POLICY_LAST_SYNC_AT_EPOCH_MILLIS = longPreferencesKey("policy_last_sync_at_epoch_millis")
         val MANAGED_APPS_SNAPSHOT_JSON = stringPreferencesKey("managed_apps_snapshot_json")
+        val MANAGED_APPS_VERSION = longPreferencesKey("managed_apps_version")
         val MANAGED_APPS_LAST_APPLIED_AT_EPOCH_MILLIS = longPreferencesKey("managed_apps_last_applied_at_epoch_millis")
+        val MANAGED_FILES_SNAPSHOT_JSON = stringPreferencesKey("managed_files_snapshot_json")
+        val MANAGED_FILES_VERSION = longPreferencesKey("managed_files_version")
+        val MANAGED_FILES_LAST_APPLIED_AT_EPOCH_MILLIS = longPreferencesKey("managed_files_last_applied_at_epoch_millis")
     }
 
     companion object {

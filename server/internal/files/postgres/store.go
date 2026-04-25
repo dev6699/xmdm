@@ -97,6 +97,25 @@ func (s *Store) ListFiles(ctx context.Context, tenantID string) ([]files.File, e
 	return items, nil
 }
 
+func (s *Store) GetFile(ctx context.Context, tenantID, id string) (files.File, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT f.id::text, f.tenant_id::text, f.name, f.status, f.updated_at, f.deleted_at, f.artifact_id::text, f.checksum, f.mime_type,
+		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
+		 FROM files f
+		 JOIN artifacts a ON a.tenant_id = f.tenant_id AND a.id = f.artifact_id
+		 WHERE f.tenant_id = $1 AND f.id = $2`,
+		tenantID, id,
+	)
+	rec, err := scanFileWithArtifact(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return files.File{}, httpx.ErrNotFound
+		}
+		return files.File{}, err
+	}
+	return rec, nil
+}
+
 func (s *Store) RetireFile(ctx context.Context, tenantID, id string) (files.File, error) {
 	row := s.pool.QueryRow(ctx,
 		`UPDATE files

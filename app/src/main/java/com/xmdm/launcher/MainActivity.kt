@@ -13,17 +13,21 @@ import com.xmdm.launcher.apps.AndroidManagedAppInstaller
 import com.xmdm.launcher.apps.HttpManagedAppDownloader
 import com.xmdm.launcher.apps.ManagedAppInstallCoordinator
 import com.xmdm.launcher.apps.ManagedAppInstallProgress
+import com.xmdm.launcher.files.ManagedFileInstallCoordinator
 import com.xmdm.launcher.databinding.ActivityMainBinding
 import com.xmdm.launcher.enrollment.EnrollmentCoordinator
 import com.xmdm.launcher.enrollment.HttpEnrollmentGateway
 import com.xmdm.launcher.recovery.RecoveryActivity
 import com.xmdm.launcher.state.AgentState
 import com.xmdm.launcher.state.AgentStateStore
+import com.xmdm.launcher.state.ManagedAppsState
+import com.xmdm.launcher.state.ManagedFilesState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -44,10 +48,18 @@ class MainActivity : AppCompatActivity() {
             installer = AndroidManagedAppInstaller(applicationContext),
         )
     }
+    private val managedFileCoordinator by lazy {
+        ManagedFileInstallCoordinator(
+            downloader = HttpManagedAppDownloader(),
+            rootDir = File(applicationContext.filesDir, "managed-files"),
+        )
+    }
     private val managedAppProgress = MutableStateFlow<ManagedAppInstallProgress>(ManagedAppInstallProgress.Idle)
     private lateinit var binding: ActivityMainBinding
     private var enrollmentInFlight = false
+    private var fileInstallInFlight = false
     private var appInstallInFlight = false
+    private var lastManagedFilesSnapshotVersion: Long? = null
     private var lastManagedAppsSnapshotVersion: Long? = null
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
     private var cachedPrettySnapshotJson: String? = null
@@ -69,6 +81,7 @@ class MainActivity : AppCompatActivity() {
                 latestState = state
                 renderLauncherStatus()
                 maybeStartEnrollment(state)
+                maybeApplyManagedFiles(state)
                 maybeApplyManagedApps(state)
             }
         }
@@ -132,6 +145,11 @@ class MainActivity : AppCompatActivity() {
         } else {
             "policy cache: empty\nsaved at: -\nconfig snapshot: empty"
         }
+        val managedFilesLine = if (state.hasManagedFiles) {
+            "managed files: restored"
+        } else {
+            "managed files: empty"
+        }
         val managedAppsLine = if (state.hasManagedApps) {
             "managed apps: restored"
         } else {
@@ -147,6 +165,8 @@ class MainActivity : AppCompatActivity() {
             append(deviceOwnerLine)
             append('\n')
             append(policyLine)
+            append('\n')
+            append(managedFilesLine)
             append('\n')
             append(managedAppsLine)
         }
@@ -279,11 +299,73 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun maybeApplyManagedFiles(state: AgentState) {
+        val policyCache = state.policyCache ?: return
+        val identity = state.identity ?: return
+        val bootstrap = state.bootstrap ?: return
+        if (fileInstallInFlight) {
+            return
+        }
+        if (state.hasManagedFiles && state.managedFiles?.version == policyCache.version) {
+            lastManagedFilesSnapshotVersion = policyCache.version
+            return
+        }
+        if (lastManagedFilesSnapshotVersion == policyCache.version && state.hasManagedFiles) {
+            return
+        }
+        fileInstallInFlight = true
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                managedFileCoordinator.apply(
+                    snapshotJson = policyCache.snapshotJson,
+                    deviceSecret = identity.deviceSecret,
+                    serverUrl = bootstrap.serverUrl,
+                    deviceId = identity.deviceId,
+                    deviceIdUse = identity.deviceIdUse,
+                    bootstrapExtrasJson = bootstrap.bootstrapExtrasJson,
+                    previousSnapshotJson = state.managedFiles?.snapshotJson,
+                )
+                stateStore.saveManagedFiles(
+                    ManagedFilesState(
+                        snapshotJson = policyCache.snapshotJson,
+                        version = policyCache.version,
+                        lastAppliedAtEpochMillis = System.currentTimeMillis(),
+                    ),
+                )
+                lastManagedFilesSnapshotVersion = policyCache.version
+            } catch (t: Throwable) {
+                Log.w(TAG, "managed file install failed", t)
+                withContext(Dispatchers.Main) {
+                    showRecovery(
+                        stage = "file-install",
+                        message = t.message ?: t.javaClass.simpleName,
+                        bootstrapJson = bootstrap.rawJson,
+                    )
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    fileInstallInFlight = false
+                    renderUi()
+                }
+            }
+        }
+    }
+
     private fun maybeApplyManagedApps(state: AgentState) {
         val policyCache = state.policyCache ?: return
         val identity = state.identity ?: return
         val bootstrap = state.bootstrap ?: return
         if (appInstallInFlight) {
+            return
+        }
+        if (!state.hasManagedFiles || state.managedFiles?.version != policyCache.version) {
+            return
+        }
+        if (lastManagedFilesSnapshotVersion != null && lastManagedFilesSnapshotVersion != policyCache.version) {
+            return
+        }
+        if (state.hasManagedApps && state.managedApps?.version == policyCache.version) {
+            lastManagedAppsSnapshotVersion = policyCache.version
             return
         }
         if (lastManagedAppsSnapshotVersion == policyCache.version && state.hasManagedApps) {
@@ -301,8 +383,9 @@ class MainActivity : AppCompatActivity() {
                     onProgress = { progress -> managedAppProgress.value = progress },
                 )
                 stateStore.saveManagedApps(
-                    com.xmdm.launcher.state.ManagedAppsState(
+                    ManagedAppsState(
                         snapshotJson = policyCache.snapshotJson,
+                        version = policyCache.version,
                         lastAppliedAtEpochMillis = System.currentTimeMillis(),
                     ),
                 )
@@ -339,6 +422,7 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                     stateStore.clearProvisioningState()
                 }
+                lastManagedFilesSnapshotVersion = null
                 lastManagedAppsSnapshotVersion = null
                 cachedPrettySnapshotJson = null
                 cachedPrettySnapshotText = ""

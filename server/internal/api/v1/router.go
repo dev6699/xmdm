@@ -22,6 +22,8 @@ import (
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/identity"
 	identityhttp "xmdm/server/internal/identity/http"
+	managedfiles "xmdm/server/internal/managedfiles"
+	managedfilehttp "xmdm/server/internal/managedfiles/http"
 	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
 	policyhttp "xmdm/server/internal/policy/http"
@@ -33,6 +35,7 @@ type Dependencies struct {
 	Identity      identity.Repository
 	Apps          apps.Repository
 	Files         files.Repository
+	ManagedFiles  managedfiles.Repository
 	Certificates  certificates.Repository
 	Artifacts     artifacts.Store
 	Groups        group.Repository
@@ -49,11 +52,12 @@ type Dependencies struct {
 func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
-	enrollmenthttp.Register(apiMux, svc, deps.Enrollment, deps.Apps, deps.Certificates, deps.TenantID)
+	enrollmenthttp.Register(apiMux, svc, deps.Enrollment, deps.Apps, deps.ManagedFiles, deps.Certificates, deps.TenantID)
 	telemetryhttp.Register(apiMux, deps.Telemetry, deps.TenantID)
 	adminhttp.Register(apiMux, svc, deps.PluginManager)
 	apphttp.Register(apiMux, svc, deps.Apps, deps.Devices, deps.Artifacts, deps.Audit, deps.TenantID)
 	filehttp.Register(apiMux, svc, deps.Files, deps.Artifacts, deps.Audit, deps.TenantID)
+	managedfilehttp.Register(apiMux, svc, deps.ManagedFiles, deps.Devices, deps.Artifacts, deps.TenantID)
 	certificatehttp.Register(apiMux, svc, deps.Certificates, deps.Artifacts, deps.Audit, deps.TenantID)
 	identityhttp.Register(apiMux, svc, deps.Identity, deps.Audit, deps.TenantID)
 	grouphttp.Register(apiMux, svc, deps.Groups, deps.Audit, deps.TenantID)

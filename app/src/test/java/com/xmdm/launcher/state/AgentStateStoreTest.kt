@@ -52,7 +52,15 @@ class AgentStateStoreTest {
         store.saveManagedApps(
             ManagedAppsState(
                 snapshotJson = """{"version":"1","apps":[]}""",
+                version = 7,
                 lastAppliedAtEpochMillis = 123456999L,
+            ),
+        )
+        store.saveManagedFiles(
+            ManagedFilesState(
+                snapshotJson = """{"version":"1","files":[]}""",
+                version = 7,
+                lastAppliedAtEpochMillis = 123456990L,
             ),
         )
         first.scope.cancel()
@@ -64,6 +72,7 @@ class AgentStateStoreTest {
         assertTrue(state.isEnrolled)
         assertTrue(state.hasPolicyCache)
         assertTrue(state.hasManagedApps)
+        assertTrue(state.hasManagedFiles)
         assertEquals("https://mdm.example", state.bootstrap?.serverUrl)
         assertEquals("rest", state.bootstrap?.serverProject)
         assertEquals("enroll-token", state.bootstrap?.enrollmentToken)
@@ -76,7 +85,11 @@ class AgentStateStoreTest {
         assertEquals(7L, state.policyCache?.version)
         assertEquals(123456789L, state.policyCache?.lastSyncAtEpochMillis)
         assertEquals("""{"version":"1","apps":[]}""", state.managedApps?.snapshotJson)
+        assertEquals(7L, state.managedApps?.version)
         assertEquals(123456999L, state.managedApps?.lastAppliedAtEpochMillis)
+        assertEquals("""{"version":"1","files":[]}""", state.managedFiles?.snapshotJson)
+        assertEquals(7L, state.managedFiles?.version)
+        assertEquals(123456990L, state.managedFiles?.lastAppliedAtEpochMillis)
 
         reloaded.scope.cancel()
     }
@@ -116,7 +129,15 @@ class AgentStateStoreTest {
         store.saveManagedApps(
             ManagedAppsState(
                 snapshotJson = """{"version":"1","apps":[]}""",
+                version = 7,
                 lastAppliedAtEpochMillis = 123456999L,
+            ),
+        )
+        store.saveManagedFiles(
+            ManagedFilesState(
+                snapshotJson = """{"version":"1","files":[]}""",
+                version = 7,
+                lastAppliedAtEpochMillis = 123456990L,
             ),
         )
         store.clearEnrollmentState()
@@ -128,6 +149,7 @@ class AgentStateStoreTest {
         assertFalse(state.isEnrolled)
         assertFalse(state.hasPolicyCache)
         assertFalse(state.hasManagedApps)
+        assertFalse(state.hasManagedFiles)
         assertEquals("https://mdm.example", state.bootstrap?.serverUrl)
         assertEquals("rest", state.bootstrap?.serverProject)
         assertEquals("enroll-token", state.bootstrap?.enrollmentToken)
@@ -170,7 +192,15 @@ class AgentStateStoreTest {
         store.saveManagedApps(
             ManagedAppsState(
                 snapshotJson = """{"version":"1","apps":[{"packageName":"com.example.old"}]}""",
+                version = 7,
                 lastAppliedAtEpochMillis = 123456999L,
+            ),
+        )
+        store.saveManagedFiles(
+            ManagedFilesState(
+                snapshotJson = """{"version":"1","files":[{"path":"device-config.txt"}]}""",
+                version = 7,
+                lastAppliedAtEpochMillis = 123456990L,
             ),
         )
         store.clearProvisioningState()
@@ -182,7 +212,11 @@ class AgentStateStoreTest {
         assertFalse(state.isEnrolled)
         assertFalse(state.hasPolicyCache)
         assertTrue(state.hasManagedApps)
+        assertTrue(state.hasManagedFiles)
         assertEquals("""{"version":"1","apps":[{"packageName":"com.example.old"}]}""", state.managedApps?.snapshotJson)
+        assertEquals(7L, state.managedApps?.version)
+        assertEquals("""{"version":"1","files":[{"path":"device-config.txt"}]}""", state.managedFiles?.snapshotJson)
+        assertEquals(7L, state.managedFiles?.version)
         second.scope.cancel()
     }
 

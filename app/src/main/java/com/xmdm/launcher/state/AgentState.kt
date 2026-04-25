@@ -25,6 +25,13 @@ data class PolicyCacheState(
 
 data class ManagedAppsState(
     val snapshotJson: String,
+    val version: Long,
+    val lastAppliedAtEpochMillis: Long,
+)
+
+data class ManagedFilesState(
+    val snapshotJson: String,
+    val version: Long,
     val lastAppliedAtEpochMillis: Long,
 )
 
@@ -33,6 +40,7 @@ data class AgentState(
     val identity: DeviceIdentityState? = null,
     val policyCache: PolicyCacheState? = null,
     val managedApps: ManagedAppsState? = null,
+    val managedFiles: ManagedFilesState? = null,
 ) {
     val isBootstrapped: Boolean
         get() = bootstrap != null
@@ -45,6 +53,9 @@ data class AgentState(
 
     val hasManagedApps: Boolean
         get() = managedApps != null
+
+    val hasManagedFiles: Boolean
+        get() = managedFiles != null
 
     companion object {
         fun empty(): AgentState = AgentState()

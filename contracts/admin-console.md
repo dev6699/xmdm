@@ -442,6 +442,7 @@ Response body:
 - `checksum` must match the SHA-256 digest of the uploaded bytes encoded as base64url without padding.
 - The server streams the uploaded `file` part into configured object storage and persists both the logical file record and the backing artifact metadata.
 - The server also accepts the JSON metadata-only shape for internal registration flows, but multipart upload is the primary path.
+- This endpoint is the raw artifact upload path used by app versions and other reusable blobs.
 - Response body:
 
 ```json
@@ -496,6 +497,97 @@ Response body:
     "sizeBytes": 1024,
     "mimeType": "application/vnd.android.package-archive"
   }
+}
+```
+
+### `GET /api/v1/managed-files`
+
+- Permission: `admin.read`
+- Success response: `200 application/json`
+- Body:
+
+```json
+[
+  {
+    "id": "uuid",
+    "tenantId": "uuid",
+    "status": "active",
+    "updatedAt": "2026-04-23T00:00:00Z",
+    "deletedAt": null,
+    "fileId": "uuid",
+    "path": "device-config.txt",
+    "replaceVariables": true,
+    "file": {
+      "id": "uuid",
+      "tenantId": "uuid",
+      "status": "active",
+      "updatedAt": "2026-04-23T00:00:00Z",
+      "deletedAt": null,
+      "name": "device-config.txt",
+      "artifactId": "uuid",
+      "checksum": "sha256-file-abc",
+      "mimeType": "text/plain",
+      "artifact": {
+        "id": "uuid",
+        "tenantId": "uuid",
+        "status": "active",
+        "updatedAt": "2026-04-23T00:00:00Z",
+        "deletedAt": null,
+        "storageKey": "artifacts/device-config.txt",
+        "checksum": "sha256-file-abc",
+        "sizeBytes": 1024,
+        "mimeType": "text/plain"
+      }
+    }
+  }
+]
+```
+
+### `POST /api/v1/managed-files`
+
+- Permission: `admin.write`
+- Request body:
+
+```json
+{
+  "fileId": "uuid",
+  "path": "device-config.txt",
+  "replaceVariables": true
+}
+```
+
+- `fileId` must reference an active file record created through `/api/v1/files`.
+- The managed-file record tells the launcher where to write the content on-device and whether to render the file as a template.
+- Response body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "active",
+  "updatedAt": "2026-04-23T00:00:00Z",
+  "deletedAt": null,
+  "fileId": "uuid",
+  "path": "device-config.txt",
+  "replaceVariables": true
+}
+```
+
+### `DELETE /api/v1/managed-files/{id}`
+
+- Permission: `admin.write`
+- Response body:
+
+```json
+{
+  "id": "uuid",
+  "tenantId": "uuid",
+  "status": "retired",
+  "updatedAt": "2026-04-23T00:00:00Z",
+  "deletedAt": "2026-04-23T00:00:00Z",
+  "fileId": "uuid",
+  "path": "device-config.txt",
+  "replaceVariables": true
 }
 ```
 

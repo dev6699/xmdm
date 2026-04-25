@@ -59,7 +59,17 @@ Path prefix:
         "downloadPath": "/api/v1/devices/serial-123/apps/uuid/versions/uuid/artifact"
       }
     ],
-    "files": [],
+    "files": [
+      {
+        "fileId": "uuid",
+        "name": "device-config.txt",
+        "path": "device-config.txt",
+        "checksum": "sha256-file-abc",
+        "mimeType": "text/plain",
+        "downloadPath": "/api/v1/devices/serial-123/managed-files/uuid/artifact",
+        "replaceVariables": true
+      }
+    ],
     "certificates": [],
     "commands": [],
     "signature": "hmac-sha256"
@@ -69,6 +79,8 @@ Path prefix:
 
 - The config snapshot is signed with the device secret and uses HMAC-SHA256 over the canonical JSON body with an empty `signature` field.
 - App entries in `config.apps` describe the managed package, the published version, the artifact checksum, and the device-scoped download path used by the launcher to fetch install bytes.
+- File entries in `config.files` describe the managed device path, the artifact checksum, the MIME type, the template flag, and the device-scoped managed-file download path used by the launcher to fetch and render file content.
+- Managed file entries are created through `/api/v1/managed-files` and point at an existing uploaded file record.
 
 - Errors:
   - `400` invalid input or malformed JSON
