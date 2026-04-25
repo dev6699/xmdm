@@ -84,6 +84,11 @@ Override `XMDM_MQTT_DYNSEC_ADDRESS`, `XMDM_MQTT_DYNSEC_CLIENT_ID`, `XMDM_MQTT_DY
 The command publisher uses the broker `xmdm-server` client by default; override `XMDM_MQTT_USERNAME` and `XMDM_MQTT_PASSWORD` if you change that broker identity.
 For topic isolation, see [../infra/mosquitto/mqtt-security.md](../infra/mosquitto/mqtt-security.md).
 
+### Polling Fallback
+
+The server now exposes `GET /api/v1/devices/{deviceId}/commands` as the HTTP fallback path for pending commands.
+The endpoint authenticates with `X-XMDM-Device-Secret`, reads queued or sent command rows from PostgreSQL, and returns them in a `commands` array.
+
 ### Migration Tooling
 
 The local bootstrap migrator lives in [../infra/migrate.sh](../infra/migrate.sh).

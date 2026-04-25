@@ -16,6 +16,7 @@ import (
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
 	certificatesspg "xmdm/server/internal/certificates/postgres"
+	commandspg "xmdm/server/internal/commands/postgres"
 	devicepg "xmdm/server/internal/device/postgres"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
 	filespg "xmdm/server/internal/files/postgres"
@@ -70,6 +71,7 @@ func openStores() v1.Dependencies {
 	pushPublisher := mustPushPublisher()
 	devicesStore := devicepg.New(pool)
 	enrollmentStore := enrollmentpg.New(pool)
+	commandStore := commandspg.New(pool)
 	devicesStore.SetProvisioner(provisioner)
 	enrollmentStore.SetProvisioner(provisioner)
 	return v1.Dependencies{
@@ -77,6 +79,7 @@ func openStores() v1.Dependencies {
 		Apps:         appspg.New(pool),
 		Files:        filespg.New(pool),
 		ManagedFiles: managedfilespg.New(pool),
+		Commands:     commandStore,
 		Certificates: certificatesspg.New(pool),
 		Artifacts:    artifactStore,
 		Groups:       grouppg.New(pool),

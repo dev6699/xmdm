@@ -52,4 +52,5 @@ go test ./...
 - The broker defaults use `MOSQUITTO_DYNSEC_PASSWORD=xmdm-admin` unless you override it.
 - The server-side broker provisioner uses `XMDM_MQTT_DYNSEC_ADDRESS=127.0.0.1:1883`, `XMDM_MQTT_DYNSEC_CLIENT_ID=xmdm-dynsec`, `XMDM_MQTT_DYNSEC_ADMIN_USER=admin`, `XMDM_MQTT_DYNSEC_PASSWORD=xmdm-admin`, and default keepalive and dial timeout values.
 - The command publisher uses the broker `xmdm-server` client by default via `XMDM_MQTT_USERNAME=xmdm-server` and `XMDM_MQTT_PASSWORD=xmdm-server-secret`.
+- The HTTP polling fallback uses `GET /api/v1/devices/{deviceId}/commands` with `X-XMDM-Device-Secret` and reads PostgreSQL `commands` rows.
 - If a service container is stale, stop the stack and recreate it before debugging the agent.

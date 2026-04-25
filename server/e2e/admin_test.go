@@ -397,6 +397,7 @@ func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins
 		Apps:          appspg.New(pool),
 		Files:         filespg.New(pool),
 		ManagedFiles:  managedfilespg.New(pool),
+		Commands:      nil,
 		Certificates:  certificatesspg.New(pool),
 		Groups:        grouppg.New(pool),
 		Policies:      policypg.New(pool),
