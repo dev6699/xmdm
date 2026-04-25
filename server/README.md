@@ -69,6 +69,10 @@ The admin E2E coverage verifies:
 
 The server defaults to the local SeaweedFS S3 endpoint on `localhost:8333` and reads the object-store settings from `XMDM_OBJECT_STORAGE_ENDPOINT`, `XMDM_OBJECT_STORAGE_REGION`, `XMDM_OBJECT_STORAGE_ACCESS_KEY`, `XMDM_OBJECT_STORAGE_SECRET_KEY`, and `XMDM_OBJECT_STORAGE_BUCKET`.
 
+### Artifact Cleanup
+
+Ops can inspect and purge orphan artifact records with [cmd/artifact-cleanup/README.md](cmd/artifact-cleanup/README.md).
+
 ### Migration Tooling
 
 The local bootstrap migrator lives in [../infra/migrate.sh](../infra/migrate.sh).

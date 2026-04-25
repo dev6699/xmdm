@@ -10,3 +10,7 @@ Local development entry points:
 - [docker-compose.yml](docker-compose.yml)
 - [bootstrap-local.sh](bootstrap-local.sh)
 - [test-db-env.sh](test-db-env.sh)
+
+Operational helpers:
+
+- [../server/cmd/artifact-cleanup/README.md](../server/cmd/artifact-cleanup/README.md)

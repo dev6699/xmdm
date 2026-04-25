@@ -186,6 +186,75 @@ func (s *Store) loadArtifactByID(ctx context.Context, tenantID, artifactID strin
 	return &artifact, nil
 }
 
+func (s *Store) ListOrphanArtifacts(ctx context.Context, tenantID string) ([]files.Artifact, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
+		 FROM artifacts a
+		 WHERE a.tenant_id = $1
+		   AND NOT EXISTS (
+			   SELECT 1
+			   FROM files f
+			   WHERE f.tenant_id = a.tenant_id
+			     AND f.artifact_id = a.id
+		   )
+		   AND NOT EXISTS (
+			   SELECT 1
+			   FROM certificates c
+			   WHERE c.tenant_id = a.tenant_id
+			     AND c.artifact_id = a.id
+		   )
+		   AND NOT EXISTS (
+			   SELECT 1
+			   FROM app_versions v
+			   WHERE v.tenant_id = a.tenant_id
+			     AND v.artifact_id = a.id::text
+		   )
+		 ORDER BY a.created_at`,
+		tenantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]files.Artifact, 0)
+	for rows.Next() {
+		rec, err := scanArtifact(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) RetireArtifact(ctx context.Context, tenantID, id string) (files.Artifact, error) {
+	row := s.pool.QueryRow(ctx,
+		`UPDATE artifacts
+		 SET status = $3, deleted_at = $4, updated_at = $4
+		 WHERE tenant_id = $1 AND id = $2
+		 RETURNING id::text, tenant_id::text, storage_key, checksum, size_bytes, mime_type, status, updated_at, deleted_at`,
+		tenantID, id, files.StatusRetired, s.now(),
+	)
+	artifact, err := scanArtifact(row)
+	if err != nil {
+		return files.Artifact{}, err
+	}
+	return artifact, nil
+}
+
+func (s *Store) DeleteArtifact(ctx context.Context, tenantID, id string) error {
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM artifacts
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, id,
+	)
+	return err
+}
+
 func scanFile(scanner rowScanner) (files.File, error) {
 	var rec files.File
 	var deletedAt pgtype.Timestamptz
