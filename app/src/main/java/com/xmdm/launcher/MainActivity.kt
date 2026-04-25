@@ -20,11 +20,13 @@ import com.xmdm.launcher.enrollment.HttpEnrollmentGateway
 import com.xmdm.launcher.recovery.RecoveryActivity
 import com.xmdm.launcher.state.AgentState
 import com.xmdm.launcher.state.AgentStateStore
+import com.xmdm.launcher.state.LauncherEnrollmentStateMachine
 import com.xmdm.launcher.state.ManagedAppsState
 import com.xmdm.launcher.state.ManagedFilesState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -33,6 +35,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.max
 import kotlin.math.min
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
     private val stateStore by lazy { AgentStateStore.from(applicationContext) }
@@ -54,22 +57,24 @@ class MainActivity : AppCompatActivity() {
             rootDir = File(applicationContext.filesDir, "managed-files"),
         )
     }
+    private val enrollmentStateMachine = LauncherEnrollmentStateMachine()
     private val managedAppProgress = MutableStateFlow<ManagedAppInstallProgress>(ManagedAppInstallProgress.Idle)
     private lateinit var binding: ActivityMainBinding
-    private var enrollmentInFlight = false
+    private val instanceId = UUID.randomUUID().toString().take(8)
     private var fileInstallInFlight = false
     private var appInstallInFlight = false
     private var lastManagedFilesSnapshotVersion: Long? = null
     private var lastManagedAppsSnapshotVersion: Long? = null
+    private var lastEnrollmentAttemptBootstrapJson: String? = null
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
     private var cachedPrettySnapshotJson: String? = null
     private var cachedPrettySnapshotText: String = ""
-    private var lastProvisioningRunId: String? = null
     private var recoveryVisible = false
     private var latestState: AgentState = AgentState.empty()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.w(TAG, "onCreate instance=$instanceId")
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -95,6 +100,7 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        Log.w(TAG, "onNewIntent instance=$instanceId")
         lifecycleScope.launch {
             consumeBootstrapIntent()
         }
@@ -106,11 +112,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderManagedAppProgress() {
-        binding.launcherActivity.text = renderLiveManagedAppStatus(managedAppProgress.value)
+        binding.launcherActivity.text = renderLiveManagedAppStatus(latestState, managedAppProgress.value)
     }
 
     private fun renderLauncherStatus() {
-        binding.launcherStatus.text = renderStatus(latestState, enrollmentInFlight)
+        binding.launcherStatus.text = renderStatus(latestState, enrollmentStateMachine.isEnrollmentInFlight)
     }
 
     private fun renderStatus(state: AgentState, enrollmentInFlight: Boolean): CharSequence {
@@ -118,6 +124,11 @@ class MainActivity : AppCompatActivity() {
             "bootstrap: restored"
         } else {
             "bootstrap: empty"
+        }
+        val enrollmentLine = when {
+            state.isEnrolled -> getString(R.string.launcher_enrollment_success)
+            enrollmentInFlight -> getString(R.string.launcher_enrollment_in_progress)
+            else -> getString(R.string.launcher_enrollment_empty)
         }
         val identityLine = when {
             state.isEnrolled -> "device identity: restored"
@@ -160,6 +171,8 @@ class MainActivity : AppCompatActivity() {
             append('\n')
             append(bootstrapLine)
             append('\n')
+            append(enrollmentLine)
+            append('\n')
             append(identityLine)
             append('\n')
             append(deviceOwnerLine)
@@ -172,9 +185,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun renderLiveManagedAppStatus(progress: ManagedAppInstallProgress): CharSequence {
+    private fun renderLiveManagedAppStatus(state: AgentState, progress: ManagedAppInstallProgress): CharSequence {
         return when (progress) {
-            ManagedAppInstallProgress.Idle -> getString(R.string.launcher_live_idle)
+            ManagedAppInstallProgress.Idle -> if (state.isEnrolled) {
+                getString(R.string.launcher_live_completed)
+            } else {
+                getString(R.string.launcher_live_idle)
+            }
             ManagedAppInstallProgress.VerifyingSnapshot -> getString(R.string.launcher_live_verifying)
             is ManagedAppInstallProgress.Downloading -> {
                 val appName = progress.app.name ?: progress.app.packageName
@@ -219,6 +236,19 @@ class MainActivity : AppCompatActivity() {
                 progress.installed.size,
                 progress.uninstalled.size,
             )
+            is ManagedAppInstallProgress.Completed -> buildString {
+                append(getString(R.string.launcher_live_completed))
+                if (progress.installed.isNotEmpty() || progress.uninstalled.isNotEmpty()) {
+                    append('\n')
+                    append(
+                        getString(
+                            R.string.launcher_live_completed_details,
+                            progress.installed.size,
+                            progress.uninstalled.size,
+                        ),
+                    )
+                }
+            }
             is ManagedAppInstallProgress.Failed -> getString(
                 R.string.launcher_live_failed,
                 progress.message,
@@ -275,26 +305,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun maybeStartEnrollment(state: AgentState) {
-        if (enrollmentInFlight) {
+        val bootstrap = enrollmentStateMachine.nextEnrollmentBootstrap(state) ?: return
+        val bootstrapJson = bootstrap.rawJson?.trim() ?: return
+        Log.w(TAG, "maybeStartEnrollment instance=$instanceId bootstrap=${bootstrapJson.hashCode()}")
+        if (lastEnrollmentAttemptBootstrapJson == bootstrapJson) {
+            Log.w(TAG, "enrollment already attempted instance=$instanceId bootstrap=${bootstrapJson.hashCode()}")
             return
         }
-        val bootstrap = state.bootstrap ?: return
-        if (state.isEnrolled) {
-            return
-        }
-        enrollmentInFlight = true
+        lastEnrollmentAttemptBootstrapJson = bootstrapJson
+        Log.w(TAG, "mark enrollment attempted instance=$instanceId bootstrap=${bootstrapJson.hashCode()}")
         lifecycleScope.launch {
             try {
                 enrollmentCoordinator.enroll(bootstrap)
+                enrollmentStateMachine.onEnrollmentSucceeded()
             } catch (t: Throwable) {
                 Log.w(TAG, "enrollment failed", t)
+                enrollmentStateMachine.onEnrollmentFailed(
+                    stage = "enrollment",
+                    message = t.message ?: t.javaClass.simpleName,
+                    bootstrapJson = bootstrap.rawJson,
+                )
                 showRecovery(
                     stage = "enrollment",
                     message = t.message ?: t.javaClass.simpleName,
                     bootstrapJson = bootstrap.rawJson,
                 )
-            } finally {
-                enrollmentInFlight = false
             }
         }
     }
@@ -375,7 +410,7 @@ class MainActivity : AppCompatActivity() {
         managedAppProgress.value = ManagedAppInstallProgress.VerifyingSnapshot
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                managedAppCoordinator.apply(
+                val result = managedAppCoordinator.apply(
                     snapshotJson = policyCache.snapshotJson,
                     deviceSecret = identity.deviceSecret,
                     serverUrl = bootstrap.serverUrl,
@@ -390,6 +425,12 @@ class MainActivity : AppCompatActivity() {
                     ),
                 )
                 lastManagedAppsSnapshotVersion = policyCache.version
+                withContext(Dispatchers.Main) {
+                    managedAppProgress.value = ManagedAppInstallProgress.Completed(
+                        installed = result.installed,
+                        uninstalled = result.uninstalled,
+                    )
+                }
             } catch (t: Throwable) {
                 Log.w(TAG, "managed app install failed", t)
                 managedAppProgress.value = ManagedAppInstallProgress.Failed(t.message ?: t.javaClass.simpleName)
@@ -412,10 +453,7 @@ class MainActivity : AppCompatActivity() {
     private suspend fun consumeBootstrapIntent() {
         val rawBootstrapJson = resolveBootstrapJson()
             ?: return
-        val provisioningRunId = intent.getStringExtra(EXTRA_PROVISIONING_RUN_ID)
-        if (provisioningRunId != null && provisioningRunId == lastProvisioningRunId) {
-            return
-        }
+        Log.w(TAG, "consumeBootstrapIntent instance=$instanceId reset=${intent.getBooleanExtra(EXTRA_RESET_STATE, false)} bootstrap=${rawBootstrapJson.hashCode()}")
 
         try {
             if (intent.getBooleanExtra(EXTRA_RESET_STATE, false)) {
@@ -424,15 +462,16 @@ class MainActivity : AppCompatActivity() {
                 }
                 lastManagedFilesSnapshotVersion = null
                 lastManagedAppsSnapshotVersion = null
+                lastEnrollmentAttemptBootstrapJson = null
                 cachedPrettySnapshotJson = null
                 cachedPrettySnapshotText = ""
                 managedAppProgress.value = ManagedAppInstallProgress.Idle
                 renderManagedAppProgress()
             }
+            enrollmentStateMachine.reset()
+            enrollmentStateMachine.onBootstrapReceived(rawBootstrapJson)
             BootstrapProvisioner(stateStore).persist(rawBootstrapJson)
-            if (provisioningRunId != null) {
-                lastProvisioningRunId = provisioningRunId
-            }
+            maybeStartEnrollment(stateStore.state.first())
         } catch (t: Throwable) {
             Log.w(TAG, "bootstrap parsing failed", t)
             showRecovery(
@@ -479,7 +518,6 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_BOOTSTRAP_JSON = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON"
         const val EXTRA_BOOTSTRAP_JSON_B64 = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64"
         const val EXTRA_RESET_STATE = "com.xmdm.launcher.EXTRA_RESET_STATE"
-        const val EXTRA_PROVISIONING_RUN_ID = "com.xmdm.launcher.EXTRA_PROVISIONING_RUN_ID"
         const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
         private val SAVED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")

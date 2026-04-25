@@ -6,4 +6,4 @@ Blueprint decisions remain under `/blueprint`; this directory is for repo-level 
 
 Useful runbooks:
 
-- [Device Reprovision Runbook](device-reprovision.md)
+- None at the moment.

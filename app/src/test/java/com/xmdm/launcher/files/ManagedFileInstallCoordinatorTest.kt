@@ -30,7 +30,7 @@ class ManagedFileInstallCoordinatorTest {
                   "name":"device-config.txt",
                   "path":"configs/device-config.txt",
                   "checksum":"$checksum",
-                  "downloadPath":"/api/v1/devices/device-123/files/file-1/artifact",
+                  "downloadPath":"/api/v1/devices/device-123/managed-files/file-1/artifact",
                   "mimeType":"text/plain",
                   "description":"Device config",
                   "remove":false,
@@ -53,7 +53,7 @@ class ManagedFileInstallCoordinatorTest {
                   "name":"old.txt",
                   "path":"configs/old.txt",
                   "checksum":"$checksum",
-                  "downloadPath":"/api/v1/devices/device-123/files/file-old/artifact",
+                  "downloadPath":"/api/v1/devices/device-123/managed-files/file-old/artifact",
                   "mimeType":"text/plain",
                   "description":"Old file",
                   "remove":false,
@@ -76,7 +76,7 @@ class ManagedFileInstallCoordinatorTest {
                   "name":"device-config.txt",
                   "path":"configs/device-config.txt",
                   "checksum":"$checksum",
-                  "downloadPath":"/api/v1/devices/device-123/files/file-1/artifact",
+                  "downloadPath":"/api/v1/devices/device-123/managed-files/file-1/artifact",
                   "mimeType":"text/plain",
                   "description":"Device config",
                   "remove":false,
@@ -100,7 +100,7 @@ class ManagedFileInstallCoordinatorTest {
                   "name":"old.txt",
                   "path":"configs/old.txt",
                   "checksum":"$checksum",
-                  "downloadPath":"/api/v1/devices/device-123/files/file-old/artifact",
+                  "downloadPath":"/api/v1/devices/device-123/managed-files/file-old/artifact",
                   "mimeType":"text/plain",
                   "description":"Old file",
                   "remove":false,
@@ -143,7 +143,7 @@ class ManagedFileInstallCoordinatorTest {
             previousSnapshotJson = previous,
         )
 
-        assertEquals(listOf("https://mdm.example/api/v1/devices/device-123/files/file-1/artifact"), downloads)
+        assertEquals(listOf("https://mdm.example/api/v1/devices/device-123/managed-files/file-1/artifact"), downloads)
         assertEquals(listOf("configs/device-config.txt"), result.written)
         assertEquals(listOf("configs/old.txt"), result.removed)
 

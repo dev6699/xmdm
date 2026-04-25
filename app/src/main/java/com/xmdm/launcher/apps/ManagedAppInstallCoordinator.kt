@@ -53,6 +53,11 @@ sealed interface ManagedAppInstallProgress {
         val uninstalled: List<String>,
     ) : ManagedAppInstallProgress
 
+    data class Completed(
+        val installed: List<String>,
+        val uninstalled: List<String>,
+    ) : ManagedAppInstallProgress
+
     data class Failed(
         val message: String,
     ) : ManagedAppInstallProgress
@@ -153,8 +158,6 @@ class ManagedAppInstallCoordinator(
             installer.uninstall(packageName)
             uninstalled += packageName
         }
-
-        onProgress(ManagedAppInstallProgress.Queued(installed = installed.toList(), uninstalled = uninstalled.toList()))
 
         return ManagedAppInstallResult(
             installed = installed,

@@ -54,7 +54,7 @@ class RecoveryActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.recovery_retry_unavailable, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            startActivity(MainActivity.intent(this, retryBootstrap))
+            startActivity(MainActivity.intent(this, retryBootstrap, resetState = true))
             finish()
         }
 

@@ -9,13 +9,14 @@ import (
 	"strings"
 	"time"
 
-	qrcode "github.com/skip2/go-qrcode"
 	"xmdm/server/internal/apps"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/certificates"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/managedfiles"
+
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 type QRRequest struct {

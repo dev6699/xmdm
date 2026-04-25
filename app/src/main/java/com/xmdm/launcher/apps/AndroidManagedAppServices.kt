@@ -1,11 +1,16 @@
 package com.xmdm.launcher.apps
 
+import android.app.admin.DevicePolicyManager
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.content.pm.PackageInstaller
 import android.os.Build
+import android.util.Log
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -102,9 +107,14 @@ class AndroidManagedAppInstaller(
     }
 
     override suspend fun install(app: ManagedAppSpec, apkFile: File) {
+        Log.w(TAG, "install managed app package=${app.packageName} version=${app.versionName} starting")
+        Log.w(TAG, "install managed app package=${app.packageName} using PackageInstaller session")
         val packageInstaller = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         params.setAppPackageName(app.packageName)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        }
         val sessionId = packageInstaller.createSession(params)
         val action = "install:${app.packageName}:$sessionId"
         val completion = ManagedAppInstallResultRegistry.register(action)
@@ -117,7 +127,16 @@ class AndroidManagedAppInstaller(
                 }
                 session.commit(resultIntentSender(action))
             }
-            completion.await()
+            try {
+                completion.await()
+            } catch (t: Throwable) {
+                Log.w(TAG, "install managed app package=${app.packageName} session install failed, trying restore", t)
+                if (installExistingSystemPackageIfPossible(app)) {
+                    Log.w(TAG, "install managed app package=${app.packageName} restored existing system package after session failure")
+                    return
+                }
+                throw t
+            }
         } finally {
             ManagedAppInstallResultRegistry.clear(action)
         }
@@ -140,4 +159,76 @@ class AndroidManagedAppInstaller(
         Intent(context, ManagedAppInstallResultReceiver::class.java).setAction(action),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     ).intentSender
+
+    private fun installExistingSystemPackageIfPossible(app: ManagedAppSpec): Boolean {
+        val packageName = app.packageName
+        val packageInfo = runCatching {
+            getPackageInfoIncludingUninstalled(packageName)
+        }.getOrElse {
+            Log.w(TAG, "install managed app package=$packageName could not load package info for restore", it)
+            return false
+        }
+        val appInfo = packageInfo.applicationInfo ?: return false
+        if (!isSystemPackage(appInfo)) {
+            Log.w(TAG, "install managed app package=$packageName is not a system package, skipping restore")
+            return false
+        }
+        val devicePolicyManager = context.getSystemService(DevicePolicyManager::class.java) ?: return false
+        if (!devicePolicyManager.isDeviceOwnerApp(context.packageName)) {
+            Log.w(TAG, "install managed app package=$packageName is system package but app is not device owner, skipping restore")
+            return false
+        }
+        Log.w(TAG, "install managed app package=$packageName restoring existing system package for device owner")
+        val result = devicePolicyManager.installExistingPackage(
+            ComponentName(context, com.xmdm.launcher.AdminReceiver::class.java),
+            packageName,
+        )
+        if (!result) {
+            Log.w(TAG, "install managed app package=$packageName installExistingPackage returned false")
+            throw IllegalStateException("managed app restore failed")
+        }
+        val restoredVersion = getPackageVersionCode(packageName)
+        if (restoredVersion != app.versionCode) {
+            throw IllegalStateException(
+                "managed app restore mismatch for $packageName (expected=${app.versionCode}, actual=$restoredVersion)",
+            )
+        }
+        return true
+    }
+
+    private fun getPackageInfoIncludingUninstalled(packageName: String): PackageInfo {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(
+                packageName,
+                PackageManager.PackageInfoFlags.of(PackageManager.MATCH_UNINSTALLED_PACKAGES.toLong()),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(packageName, PackageManager.GET_UNINSTALLED_PACKAGES)
+        }
+    }
+
+    private fun getPackageVersionCode(packageName: String): Long {
+        val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(packageName, 0)
+        }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
+        }
+    }
+
+    private fun isSystemPackage(appInfo: ApplicationInfo): Boolean {
+        return appInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0 ||
+            appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0
+    }
+
+    companion object {
+        private const val TAG = "XmdmLauncher"
+    }
 }

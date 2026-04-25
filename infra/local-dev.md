@@ -30,7 +30,7 @@ The local stack provides:
 3. Run the server against the local database using `XMDM_POSTGRES_DSN='postgres://xmdm:xmdm@127.0.0.1:5432/xmdm?sslmode=disable'`.
 4. Point the Android agent at the local server URL.
 5. Enroll a device and verify sync.
-6. When you need to reprovision a physical device, follow [docs/device-reprovision.md](../docs/device-reprovision.md) for the exact login, token, QR, and adb commands.
+6. When you need to reprovision a physical device, use the adb-backed content E2E in [`server/e2e/content_test.go`](../server/e2e/content_test.go) as the canonical reprovision and verification flow.
 
 For server tests, create or use a separate database and set `XMDM_TEST_POSTGRES_DSN` before running `go test ./...`. Do not point the test DSN at the runtime database.
 

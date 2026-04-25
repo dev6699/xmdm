@@ -90,7 +90,6 @@ class AgentStateStoreTest {
         assertEquals("""{"version":"1","files":[]}""", state.managedFiles?.snapshotJson)
         assertEquals(7L, state.managedFiles?.version)
         assertEquals(123456990L, state.managedFiles?.lastAppliedAtEpochMillis)
-
         reloaded.scope.cancel()
     }
 
