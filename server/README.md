@@ -90,6 +90,7 @@ The server now exposes `GET /api/v1/devices/{deviceId}/commands` as the HTTP fal
 The endpoint authenticates with `X-XMDM-Device-Secret`, reads queued or sent command rows from PostgreSQL, and returns them in a `commands` array.
 The admin surface exposes `POST /api/v1/admin/commands` for queued command creation, and the request target can expand to a device, a group, or a broadcast set.
 Device acknowledgements use `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack` with the same device secret header and update the command row to `acked` or `failed`.
+The admin console also serves a simple browser form at `GET /api/v1/admin/commands` for the same targeting modes.
 
 ### Migration Tooling
 

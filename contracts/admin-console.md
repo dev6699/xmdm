@@ -48,6 +48,40 @@ Path prefix:
 - Errors:
   - `401` unauthorized
 
+### `GET /api/v1/admin/commands`
+
+- Permission: `admin.write`
+- Success response: `200 text/html`
+- Body: simple command creation form with target type, device ID, group ID, and payload fields
+
+### `POST /api/v1/admin/commands`
+
+- Permission: `admin.write`
+- Request body:
+  - `application/json` for API clients, or
+  - `application/x-www-form-urlencoded` for the browser form
+- Fields:
+  - `type` `string`
+  - `payload` `object` or JSON string
+  - `target.type` `device`, `group`, or `broadcast`
+  - `target.deviceId` required when `target.type=device`
+  - `target.groupId` required when `target.type=group`
+- Success response: `200 application/json`
+- Body:
+
+```json
+{
+  "commands": [
+    {
+      "id": "uuid",
+      "type": "reboot",
+      "status": "queued",
+      "deviceId": "device-123"
+    }
+  ]
+}
+```
+
 ## Users
 
 ### `GET /api/v1/users`

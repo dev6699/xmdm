@@ -48,6 +48,55 @@ func TestRegisterCreatesCommands(t *testing.T) {
 	}
 }
 
+func TestRegisterServesCommandForm(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Hour)
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/commands", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("unexpected content type: %q", got)
+	}
+	if !strings.Contains(rr.Body.String(), "Create Command") {
+		t.Fatalf("missing form content: %s", rr.Body.String())
+	}
+}
+
+func TestRegisterCreatesGroupCommandFromForm(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Hour)
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	store := &fakeAdminCommandStore{
+		items: []commands.Command{{ID: "cmd-1", Type: "reboot", Status: commands.StatusQueued, DeviceID: "device-1"}},
+	}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, store, "tenant-1")
+
+	form := strings.NewReader("type=reboot&targetType=group&targetGroupId=group-123&payload=%7B%22force%22%3Atrue%7D")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/commands", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 type fakeAdminCommandStore struct {
 	items []commands.Command
 }
