@@ -72,6 +72,7 @@ func openStores() v1.Dependencies {
 	devicesStore := devicepg.New(pool)
 	enrollmentStore := enrollmentpg.New(pool)
 	commandStore := commandspg.New(pool)
+	commandStore.SetPublisher(pushPublisher)
 	devicesStore.SetProvisioner(provisioner)
 	enrollmentStore.SetProvisioner(provisioner)
 	return v1.Dependencies{

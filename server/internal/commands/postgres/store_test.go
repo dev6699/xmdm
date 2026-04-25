@@ -11,6 +11,7 @@ import (
 	"xmdm/server/internal/commands"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/push"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -119,6 +120,55 @@ func TestEnqueueFansOutToGroupAndBroadcast(t *testing.T) {
 	}
 }
 
+func TestEnqueuePublishesAndMarksSent(t *testing.T) {
+	pool := openCommandsTestPool(t)
+	t.Cleanup(pool.Close)
+	resetCommandsTestDB(t, pool)
+
+	store := New(pool)
+	now := time.Date(2026, 4, 25, 16, 0, 0, 0, time.UTC)
+	store.SetNow(func() time.Time { return now })
+	pub := &recordingPublisher{}
+	store.SetPublisher(pub)
+
+	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
+		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+		 RETURNING device_id`,
+		bootstrap.SeedTenantID, "device-push", enrollment.HashToken("secret"), "active", now,
+	).Scan(new(string)); err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+
+	created, err := store.Enqueue(context.Background(), bootstrap.SeedTenantID, commands.Upsert{
+		Type:   "reboot",
+		Target: commands.Target{Type: commands.TargetDevice, DeviceID: "device-push"},
+		Payload: map[string]any{
+			"force": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if len(created) != 1 {
+		t.Fatalf("expected one command, got %d", len(created))
+	}
+	if len(pub.calls) != 1 {
+		t.Fatalf("expected one publish call, got %d", len(pub.calls))
+	}
+	if pub.calls[0].DeviceID != "device-push" || pub.calls[0].Type != "reboot" {
+		t.Fatalf("unexpected publish call: %#v", pub.calls[0])
+	}
+
+	var status string
+	if err := pool.QueryRow(context.Background(), `SELECT status FROM commands WHERE tenant_id = $1 AND device_id = $2`,
+		bootstrap.SeedTenantID, "device-push").Scan(&status); err != nil {
+		t.Fatalf("load command status: %v", err)
+	}
+	if status != commands.StatusSent {
+		t.Fatalf("expected sent status, got %s", status)
+	}
+}
+
 func TestAcknowledgeUpdatesCommandStatus(t *testing.T) {
 	pool := openCommandsTestPool(t)
 	t.Cleanup(pool.Close)
@@ -198,4 +248,14 @@ func resetCommandsTestDB(t *testing.T, pool *pgxpool.Pool) {
 	if err != nil {
 		t.Fatalf("reset postgres: %v", err)
 	}
+}
+
+type recordingPublisher struct {
+	calls []push.CommandMessage
+}
+
+func (p *recordingPublisher) PublishCommand(_ context.Context, deviceID string, message push.CommandMessage) error {
+	message.DeviceID = deviceID
+	p.calls = append(p.calls, message)
+	return nil
 }

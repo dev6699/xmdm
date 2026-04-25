@@ -78,7 +78,7 @@ Ops can inspect and purge orphan artifact records with [cmd/artifact-cleanup/REA
 The server now constructs an internal MQTT publisher in [internal/push](internal/push) at startup and points it at `127.0.0.1:1883` by default.
 Override `XMDM_MQTT_ADDRESS` if you want to use a different broker.
 The dynsec control client authenticates as `admin` by default; override `XMDM_MQTT_DYNSEC_ADMIN_USER` and `XMDM_MQTT_DYNSEC_PASSWORD` to match a different broker identity.
-The package publishes command envelopes to `devices/{deviceId}/commands` and includes a fake-broker test that verifies the topic and JSON payload emitted on publish.
+The command queue publishes command envelopes to `devices/{deviceId}/commands` immediately after enqueue and marks the row `sent` when MQTT succeeds, while keeping the row readable through the polling fallback path if publish fails.
 Device MQTT credentials are provisioned automatically when enrollment binds a device and are revoked when the device is retired.
 Override `XMDM_MQTT_DYNSEC_ADDRESS`, `XMDM_MQTT_DYNSEC_CLIENT_ID`, `XMDM_MQTT_DYNSEC_ADMIN_USER`, `XMDM_MQTT_DYNSEC_PASSWORD`, `XMDM_MQTT_DYNSEC_KEEPALIVE`, or `XMDM_MQTT_DYNSEC_DIAL_TIMEOUT` if your broker control path differs from the local compose defaults.
 The command publisher uses the broker `xmdm-server` client by default; override `XMDM_MQTT_USERNAME` and `XMDM_MQTT_PASSWORD` if you change that broker identity.

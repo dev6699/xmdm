@@ -71,7 +71,7 @@
 
 ### Message Polling
 
-- Provides a fallback read path for pending device messages when MQTT is not active.
+- Provides a fallback read path for pending device messages when MQTT is not active or a queued command has not yet been delivered over MQTT.
 - The live polling surface uses `GET /api/v1/devices/{deviceId}/commands` with the device secret in `X-XMDM-Device-Secret`.
 - The response returns a `commands` array of pending command records.
 - Device acknowledgements use `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack` with the device secret in `X-XMDM-Device-Secret`.

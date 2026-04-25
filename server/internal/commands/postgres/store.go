@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"xmdm/server/internal/commands"
 	device "xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/push"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -18,8 +20,9 @@ import (
 )
 
 type Store struct {
-	pool *pgxpool.Pool
-	now  func() time.Time
+	pool      *pgxpool.Pool
+	now       func() time.Time
+	publisher push.Publisher
 }
 
 type rowScanner interface {
@@ -29,6 +32,8 @@ type rowScanner interface {
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool, now: time.Now} }
 
 func (s *Store) SetNow(now func() time.Time) { s.now = now }
+
+func (s *Store) SetPublisher(publisher push.Publisher) { s.publisher = publisher }
 
 func (s *Store) Enqueue(ctx context.Context, tenantID string, req commands.Upsert) ([]commands.Command, error) {
 	if tenantID == "" || req.Type == "" {
@@ -77,6 +82,7 @@ func (s *Store) Enqueue(ctx context.Context, tenantID string, req commands.Upser
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.publishEnqueued(ctx, commandsOut)
 	return commandsOut, nil
 }
 
@@ -158,6 +164,39 @@ func (s *Store) Acknowledge(ctx context.Context, tenantID, deviceID, commandID s
 		return commands.Command{}, err
 	}
 	return rec, nil
+}
+
+func (s *Store) publishEnqueued(ctx context.Context, items []commands.Command) {
+	if s == nil || s.publisher == nil {
+		return
+	}
+	for _, item := range items {
+		if err := s.publisher.PublishCommand(ctx, item.DeviceID, push.CommandMessage{
+			Type:      item.Type,
+			CommandID: item.ID,
+			TenantID:  item.TenantID,
+			DeviceID:  item.DeviceID,
+			Payload:   item.Payload,
+			CreatedAt: item.CreatedAt,
+		}); err != nil {
+			log.Printf("mqtt publish for command %s failed: %v", item.ID, err)
+			continue
+		}
+		if err := s.markSent(ctx, item.TenantID, item.DeviceID, item.ID); err != nil {
+			log.Printf("mark command %s sent failed: %v", item.ID, err)
+		}
+	}
+}
+
+func (s *Store) markSent(ctx context.Context, tenantID, deviceID, commandID string) error {
+	now := s.now()
+	_, err := s.pool.Exec(ctx,
+		`UPDATE commands
+		 SET status = $4, updated_at = $5
+		 WHERE tenant_id = $1 AND device_id = $2 AND id = $3 AND status = $6`,
+		tenantID, deviceID, commandID, commands.StatusSent, now, commands.StatusQueued,
+	)
+	return err
 }
 
 func (s *Store) resolveTargets(ctx context.Context, tenantID string, target commands.Target) ([]string, error) {
