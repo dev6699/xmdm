@@ -112,7 +112,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 3. Fan-out worker resolves target devices.
 4. MQTT publishes the message when the device is online.
 5. HTTP polling returns pending messages from `GET /api/v1/devices/{deviceId}/commands` when MQTT is unavailable.
-6. Device acks receipt and execution.
+6. Device acks receipt and execution through `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`.
 7. Server marks the delivery complete.
 
 - MQTT command topics use `devices/{deviceId}/commands` for device-targeted delivery.

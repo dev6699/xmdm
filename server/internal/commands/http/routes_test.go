@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"xmdm/server/internal/commands"
@@ -60,8 +61,39 @@ func TestRegisterRejectsBadDeviceSecret(t *testing.T) {
 	}
 }
 
+func TestRegisterAcksCommand(t *testing.T) {
+	store := &fakeCommandStore{
+		acked: commands.Command{
+			ID:       "cmd-1",
+			Type:     "reboot",
+			Status:   commands.StatusAcked,
+			DeviceID: "device-123",
+		},
+	}
+	devices := &fakeDeviceStore{deviceID: "device-123", secret: "secret"}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), devices, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/device-123/commands/cmd-1/ack", strings.NewReader(`{"status":"acked","message":"done"}`))
+	req.Header.Set(deviceSecretHeader, "secret")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload commands.Command
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Status != commands.StatusAcked || payload.ID != "cmd-1" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
 type fakeCommandStore struct {
 	items []commands.Command
+	acked commands.Command
 }
 
 func (s *fakeCommandStore) Enqueue(context.Context, string, commands.Upsert) ([]commands.Command, error) {
@@ -70,6 +102,10 @@ func (s *fakeCommandStore) Enqueue(context.Context, string, commands.Upsert) ([]
 
 func (s *fakeCommandStore) ListPending(context.Context, string, string) ([]commands.Command, error) {
 	return append([]commands.Command(nil), s.items...), nil
+}
+
+func (s *fakeCommandStore) Acknowledge(context.Context, string, string, string, commands.Ack) (commands.Command, error) {
+	return s.acked, nil
 }
 
 type fakeDeviceStore struct {

@@ -60,9 +60,9 @@ func (s *Store) Enqueue(ctx context.Context, tenantID string, req commands.Upser
 	commandsOut := make([]commands.Command, 0, len(targets))
 	for _, deviceID := range targets {
 		row := tx.QueryRow(ctx,
-			`INSERT INTO commands (id, tenant_id, device_id, type, payload_json, status, expires_at, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $8)
-			 RETURNING id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, created_at, updated_at`,
+			`INSERT INTO commands (id, tenant_id, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, NULL, '{}'::jsonb, $8, $8)
+			 RETURNING id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at`,
 			uuid.NewString(), tenantID, deviceID, req.Type, string(rawPayload), commands.StatusQueued, expiresAt, now,
 		)
 		rec, err := scanCommand(row)
@@ -85,7 +85,7 @@ func (s *Store) ListPending(ctx context.Context, tenantID, deviceID string) ([]c
 		return nil, httpx.ErrInvalidInput
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, created_at, updated_at
+		`SELECT id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at
 		 FROM commands
 		 WHERE tenant_id = $1
 		   AND device_id = $2
@@ -111,6 +111,53 @@ func (s *Store) ListPending(ctx context.Context, tenantID, deviceID string) ([]c
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) Acknowledge(ctx context.Context, tenantID, deviceID, commandID string, req commands.Ack) (commands.Command, error) {
+	if tenantID == "" || deviceID == "" || commandID == "" || req.Status == "" {
+		return commands.Command{}, httpx.ErrInvalidInput
+	}
+	switch req.Status {
+	case commands.StatusAcked, commands.StatusFailed:
+	default:
+		return commands.Command{}, httpx.ErrInvalidInput
+	}
+	now := s.now()
+	result := map[string]any{
+		"status": req.Status,
+	}
+	if req.Message != "" {
+		result["message"] = req.Message
+	}
+	if req.Details != nil {
+		result["details"] = req.Details
+	}
+	rawResult, err := json.Marshal(result)
+	if err != nil {
+		return commands.Command{}, err
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return commands.Command{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	row := tx.QueryRow(ctx,
+		`UPDATE commands
+		 SET status = $5, acked_at = $6, result_json = $7::jsonb, updated_at = $6
+		 WHERE tenant_id = $1 AND device_id = $2 AND id = $3
+		   AND status IN ($8, $9)
+		 RETURNING id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at`,
+		tenantID, deviceID, commandID, req.Status, now, string(rawResult), commands.StatusQueued, commands.StatusSent,
+	)
+	rec, err := scanCommand(row)
+	if err != nil {
+		return commands.Command{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return commands.Command{}, err
+	}
+	return rec, nil
 }
 
 func (s *Store) resolveTargets(ctx context.Context, tenantID string, target commands.Target) ([]string, error) {
@@ -175,7 +222,9 @@ func scanCommand(scanner rowScanner) (commands.Command, error) {
 	var rec commands.Command
 	var payloadJSON []byte
 	var expiresAt pgtype.Timestamptz
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.DeviceID, &rec.Type, &payloadJSON, &rec.Status, &expiresAt, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
+	var ackedAt pgtype.Timestamptz
+	var resultJSON []byte
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.DeviceID, &rec.Type, &payloadJSON, &rec.Status, &expiresAt, &ackedAt, &resultJSON, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return commands.Command{}, httpx.ErrNotFound
 		}
@@ -189,6 +238,15 @@ func scanCommand(scanner rowScanner) (commands.Command, error) {
 	if expiresAt.Valid {
 		value := expiresAt.Time
 		rec.ExpiresAt = &value
+	}
+	if ackedAt.Valid {
+		value := ackedAt.Time
+		rec.AckedAt = &value
+	}
+	if len(resultJSON) > 0 {
+		if err := json.Unmarshal(resultJSON, &rec.Result); err != nil {
+			return commands.Command{}, err
+		}
 	}
 	return rec, nil
 }

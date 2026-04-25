@@ -60,4 +60,8 @@ func (s *fakeAdminCommandStore) ListPending(context.Context, string, string) ([]
 	return nil, nil
 }
 
+func (s *fakeAdminCommandStore) Acknowledge(context.Context, string, string, string, commands.Ack) (commands.Command, error) {
+	return commands.Command{}, nil
+}
+
 var _ commands.Repository = (*fakeAdminCommandStore)(nil)

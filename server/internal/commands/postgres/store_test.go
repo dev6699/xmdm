@@ -28,8 +28,10 @@ func TestScanCommandDecodesPayloadAndExpiry(t *testing.T) {
 			*(dest[4].(*[]byte)) = []byte(`{"force":true}`)
 			*(dest[5].(*string)) = commands.StatusQueued
 			*(dest[6].(*pgtype.Timestamptz)) = pgtype.Timestamptz{Time: expiry, Valid: true}
-			*(dest[7].(*time.Time)) = time.Date(2026, 4, 25, 14, 0, 0, 0, time.UTC)
-			*(dest[8].(*time.Time)) = time.Date(2026, 4, 25, 14, 30, 0, 0, time.UTC)
+			*(dest[7].(*pgtype.Timestamptz)) = pgtype.Timestamptz{}
+			*(dest[8].(*[]byte)) = []byte(`{}`)
+			*(dest[9].(*time.Time)) = time.Date(2026, 4, 25, 14, 0, 0, 0, time.UTC)
+			*(dest[10].(*time.Time)) = time.Date(2026, 4, 25, 14, 30, 0, 0, time.UTC)
 			return nil
 		},
 	})
@@ -41,6 +43,9 @@ func TestScanCommandDecodesPayloadAndExpiry(t *testing.T) {
 	}
 	if rec.ExpiresAt == nil || !rec.ExpiresAt.Equal(expiry) {
 		t.Fatalf("unexpected expiry: %#v", rec.ExpiresAt)
+	}
+	if rec.AckedAt != nil {
+		t.Fatalf("expected nil ackedAt, got %#v", rec.AckedAt)
 	}
 	if got := rec.Payload["force"]; got != true {
 		t.Fatalf("unexpected payload: %#v", rec.Payload)
@@ -111,6 +116,48 @@ func TestEnqueueFansOutToGroupAndBroadcast(t *testing.T) {
 	}
 	if len(broadcastCommands) != 3 {
 		t.Fatalf("expected 3 broadcast commands, got %d", len(broadcastCommands))
+	}
+}
+
+func TestAcknowledgeUpdatesCommandStatus(t *testing.T) {
+	pool := openCommandsTestPool(t)
+	t.Cleanup(pool.Close)
+	resetCommandsTestDB(t, pool)
+
+	store := New(pool)
+	now := time.Date(2026, 4, 25, 16, 0, 0, 0, time.UTC)
+	store.SetNow(func() time.Time { return now })
+
+	var deviceID string
+	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
+		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+		 RETURNING device_id`,
+		bootstrap.SeedTenantID, "device-ack", enrollment.HashToken("secret"), "active", now,
+	).Scan(&deviceID); err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	var commandID string
+	if err := pool.QueryRow(context.Background(), `INSERT INTO commands (id, tenant_id, device_id, type, payload_json, status, created_at, updated_at)
+		 VALUES (gen_random_uuid(), $1, (SELECT id FROM devices WHERE tenant_id = $1 AND device_id = $2), $3, '{}'::jsonb, $4, $5, $5)
+		 RETURNING id::text`,
+		bootstrap.SeedTenantID, deviceID, "reboot", commands.StatusQueued, now,
+	).Scan(&commandID); err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+
+	rec, err := store.Acknowledge(context.Background(), bootstrap.SeedTenantID, deviceID, commandID, commands.Ack{
+		Status:  commands.StatusAcked,
+		Message: "done",
+		Details: map[string]any{"code": 0},
+	})
+	if err != nil {
+		t.Fatalf("ack command: %v", err)
+	}
+	if rec.Status != commands.StatusAcked || rec.AckedAt == nil {
+		t.Fatalf("unexpected ack result: %#v", rec)
+	}
+	if rec.Result["message"] != "done" {
+		t.Fatalf("unexpected result: %#v", rec.Result)
 	}
 }
 

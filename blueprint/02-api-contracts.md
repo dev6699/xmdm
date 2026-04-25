@@ -74,6 +74,8 @@
 - Provides a fallback read path for pending device messages when MQTT is not active.
 - The live polling surface uses `GET /api/v1/devices/{deviceId}/commands` with the device secret in `X-XMDM-Device-Secret`.
 - The response returns a `commands` array of pending command records.
+- Device acknowledgements use `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack` with the device secret in `X-XMDM-Device-Secret`.
+- The ack body carries a terminal `status` plus optional `message` and `details`.
 
 ### Artifact Download
 
