@@ -115,6 +115,11 @@ The server must be able to start, serve admin requests, and accept device sync e
 6. Device acks receipt and execution.
 7. Server marks the delivery complete.
 
+- MQTT command topics use `devices/{deviceId}/commands` for device-targeted delivery.
+- The broker must enforce device-topic isolation with per-client authentication and ACLs, not topic names alone.
+- Device MQTT credentials are provisioned by the server at enrollment time and retired when the device is retired.
+- If broker provisioning fails, enrollment still completes and the device can fall back to polling.
+
 ## Sync Processing
 
 1. Device authenticates.

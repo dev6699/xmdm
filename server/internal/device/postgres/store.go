@@ -3,11 +3,13 @@ package devicepg
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	device "xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/mqttdynsec"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -16,8 +18,9 @@ import (
 )
 
 type Store struct {
-	pool *pgxpool.Pool
-	now  func() time.Time
+	pool        *pgxpool.Pool
+	now         func() time.Time
+	provisioner mqttdynsec.Provisioner
 }
 
 type rowScanner interface {
@@ -25,6 +28,10 @@ type rowScanner interface {
 }
 
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool, now: time.Now} }
+
+func (s *Store) SetProvisioner(provisioner mqttdynsec.Provisioner) {
+	s.provisioner = provisioner
+}
 
 func (s *Store) SetNow(now func() time.Time) { s.now = now }
 
@@ -114,6 +121,11 @@ func (s *Store) RetireDevice(ctx context.Context, tenantID, id string) (device.D
 			return device.Device{}, httpx.ErrNotFound
 		}
 		return device.Device{}, err
+	}
+	if s.provisioner != nil {
+		if err := s.provisioner.DisableDevice(context.Background(), rec.Name); err != nil {
+			log.Printf("mqtt dynsec revoke for %s failed: %v", rec.Name, err)
+		}
 	}
 	return rec, nil
 }

@@ -22,8 +22,10 @@ import (
 	grouppg "xmdm/server/internal/group/postgres"
 	identitypg "xmdm/server/internal/identity/postgres"
 	managedfilespg "xmdm/server/internal/managedfiles/postgres"
+	"xmdm/server/internal/mqttdynsec"
 	"xmdm/server/internal/plugins"
 	policypg "xmdm/server/internal/policy/postgres"
+	"xmdm/server/internal/push"
 	telemetrypg "xmdm/server/internal/telemetry/postgres"
 )
 
@@ -58,7 +60,18 @@ func openStores() v1.Dependencies {
 	if err := pool.Ping(context.Background()); err != nil {
 		log.Fatalf("ping postgres: %v", err)
 	}
+	provisioner := mustMQTTProvisioner()
+	publisherUsername := env("XMDM_MQTT_USERNAME", "xmdm-server")
+	publisherPassword := env("XMDM_MQTT_PASSWORD", "xmdm-server-secret")
+	if err := provisioner.EnsureServerPublisher(context.Background(), publisherUsername, publisherPassword); err != nil {
+		log.Printf("mqtt dynsec server publisher provisioning failed: %v", err)
+	}
 	artifactStore := mustArtifactStore()
+	pushPublisher := mustPushPublisher()
+	devicesStore := devicepg.New(pool)
+	enrollmentStore := enrollmentpg.New(pool)
+	devicesStore.SetProvisioner(provisioner)
+	enrollmentStore.SetProvisioner(provisioner)
 	return v1.Dependencies{
 		Identity:     identitypg.New(pool),
 		Apps:         appspg.New(pool),
@@ -68,12 +81,49 @@ func openStores() v1.Dependencies {
 		Artifacts:    artifactStore,
 		Groups:       grouppg.New(pool),
 		Policies:     policypg.New(pool),
-		Devices:      devicepg.New(pool),
-		Enrollment:   enrollmentpg.New(pool),
+		Devices:      devicesStore,
+		Enrollment:   enrollmentStore,
 		Telemetry:    telemetrypg.New(pool),
 		Audit:        auditpg.NewDBStore(pool),
+		Push:         pushPublisher,
 		TenantID:     bootstrap.SeedTenantID,
 	}
+}
+
+func mustMQTTProvisioner() mqttdynsec.Provisioner {
+	provisioner, err := mqttdynsec.New(mqttdynsec.Config{
+		Address:     env("XMDM_MQTT_DYNSEC_ADDRESS", "127.0.0.1:1883"),
+		ClientID:    env("XMDM_MQTT_DYNSEC_CLIENT_ID", "xmdm-dynsec"),
+		Username:    env("XMDM_MQTT_DYNSEC_ADMIN_USER", "admin"),
+		Password:    env("XMDM_MQTT_DYNSEC_PASSWORD", "xmdm-admin"),
+		KeepAlive:   envDuration("XMDM_MQTT_DYNSEC_KEEPALIVE", 30*time.Second),
+		DialTimeout: envDuration("XMDM_MQTT_DYNSEC_DIAL_TIMEOUT", 5*time.Second),
+	})
+	if err != nil {
+		log.Fatalf("init mqtt dynsec provisioner: %v", err)
+	}
+	return provisioner
+}
+
+func mustPushPublisher() push.Publisher {
+	address := env("XMDM_MQTT_ADDRESS", "127.0.0.1:1883")
+	clientID := env("XMDM_MQTT_CLIENT_ID", "xmdm-server")
+	username := env("XMDM_MQTT_USERNAME", "xmdm-server")
+	password := env("XMDM_MQTT_PASSWORD", "xmdm-server-secret")
+	keepAlive := envDuration("XMDM_MQTT_KEEPALIVE", 30*time.Second)
+	timeout := envDuration("XMDM_MQTT_DIAL_TIMEOUT", 5*time.Second)
+	pub, err := push.NewMQTTPublisher(push.MQTTConfig{
+		Address:     address,
+		ClientID:    clientID,
+		Username:    username,
+		Password:    password,
+		KeepAlive:   keepAlive,
+		DialTimeout: timeout,
+	})
+	if err != nil {
+		log.Fatalf("init mqtt publisher: %v", err)
+	}
+	return pub
 }
 
 func mustArtifactStore() artifacts.Store {

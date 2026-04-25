@@ -81,13 +81,15 @@ Note: `M4-01 App Management` is complete with app CRUD plus immutable version up
 
 | Item | State |
 | --- | --- |
-| M5-01 MQTT Transport | ☐ |
+| M5-01 MQTT Transport | ☑ |
 | M5-02 Polling Fallback | ☐ |
 | M5-03 Fan-Out Queue | ☐ |
 | M5-04 Device Acks | ☐ |
 | M5-05 Admin Targeting | ☐ |
 | M5-06 Command E2E | ☐ |
 | M5-07 Broker Outage Recovery | ☐ |
+
+Note: `M5-01 MQTT Transport` is complete with the server constructing an internal MQTT publisher in [server/cmd/server/main.go](/home/puong/xmdm/server/cmd/server/main.go) by default, using `127.0.0.1:1883` unless `XMDM_MQTT_ADDRESS` overrides it, publishing command envelopes to `devices/{deviceId}/commands` through [server/internal/push](/home/puong/xmdm/server/internal/push), and automatically provisioning device MQTT credentials through the enrollment and retire flows with Mosquitto dynamic security in [infra/mosquitto/mqtt-security.md](/home/puong/xmdm/infra/mosquitto/mqtt-security.md).
 
 ### M6 - Enterprise Controls
 

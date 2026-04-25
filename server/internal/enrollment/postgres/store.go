@@ -3,11 +3,13 @@ package enrollmentpg
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/mqttdynsec"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,8 +19,9 @@ import (
 )
 
 type Store struct {
-	pool *pgxpool.Pool
-	now  func() time.Time
+	pool        *pgxpool.Pool
+	now         func() time.Time
+	provisioner mqttdynsec.Provisioner
 }
 
 type rowScanner interface {
@@ -27,6 +30,10 @@ type rowScanner interface {
 
 func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, now: time.Now}
+}
+
+func (s *Store) SetProvisioner(provisioner mqttdynsec.Provisioner) {
+	s.provisioner = provisioner
 }
 
 func (s *Store) SetNow(now func() time.Time) {
@@ -137,7 +144,17 @@ func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string
 	if err := updateToken(ctx, tx, tokenRow); err != nil {
 		return enrollment.BoundDevice{}, err
 	}
+	if s.provisioner != nil {
+		if err := s.provisioner.UpsertDevice(ctx, deviceID, secret); err != nil {
+			log.Printf("mqtt dynsec upsert for %s failed: %v", deviceID, err)
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
+		if s.provisioner != nil {
+			if err := s.provisioner.DisableDevice(context.Background(), deviceID); err != nil {
+				log.Printf("mqtt dynsec rollback for %s failed: %v", deviceID, err)
+			}
+		}
 		return enrollment.BoundDevice{}, err
 	}
 	bound.DeviceSecret = secret

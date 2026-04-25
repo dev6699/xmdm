@@ -27,6 +27,7 @@ import (
 	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
 	policyhttp "xmdm/server/internal/policy/http"
+	"xmdm/server/internal/push"
 	"xmdm/server/internal/telemetry"
 	telemetryhttp "xmdm/server/internal/telemetry/http"
 )
@@ -44,6 +45,7 @@ type Dependencies struct {
 	Enrollment    enrollment.Repository
 	Telemetry     telemetry.Repository
 	Audit         audit.Store
+	Push          push.Publisher
 	PluginManager *plugins.Manager
 	TenantID      string
 }

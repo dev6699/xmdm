@@ -20,9 +20,18 @@ services:
 
   mqtt:
     image: eclipse-mosquitto:2.1.2-alpine
+    environment:
+      MOSQUITTO_DYNSEC_PASSWORD: xmdm-admin
+      XMDM_MQTT_USERNAME: xmdm-server
+      XMDM_MQTT_PASSWORD: xmdm-server-secret
+    command: ["/bin/sh", "/mosquitto-entrypoint.sh"]
     ports:
       - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto-entrypoint.sh:/mosquitto-entrypoint.sh:ro
+      - mqtt-data:/mosquitto/data
 
 volumes:
   postgres-data:
   seaweed-data:
+  mqtt-data:
