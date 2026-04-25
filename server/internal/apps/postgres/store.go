@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"xmdm/server/internal/apps"
+	files "xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
 
 	"github.com/google/uuid"
@@ -159,6 +160,68 @@ func (s *Store) ListVersions(ctx context.Context, tenantID, appID string) ([]app
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) GetVersion(ctx context.Context, tenantID, appID, versionID string) (apps.Version, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT v.id::text, v.tenant_id::text, v.app_id::text, v.status, v.version_name, v.version_code, v.artifact_id, v.checksum, v.published_at, v.created_at,
+		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
+		 FROM app_versions v
+		 LEFT JOIN artifacts a ON a.tenant_id = v.tenant_id AND a.id::text = v.artifact_id
+		 WHERE v.tenant_id = $1 AND v.app_id = $2 AND v.id = $3`,
+		tenantID, appID, versionID,
+	)
+	var rec apps.Version
+	var artifactID pgtype.Text
+	var publishedAt pgtype.Timestamptz
+	var artifact fieldsArtifact
+	if err := row.Scan(
+		&rec.ID, &rec.TenantID, &rec.AppID, &rec.Status, &rec.VersionName, &rec.VersionCode, &artifactID, &rec.Checksum, &publishedAt, &rec.CreatedAt,
+		&artifact.ID, &artifact.TenantID, &artifact.StorageKey, &artifact.Checksum, &artifact.SizeBytes, &artifact.MimeType, &artifact.Status, &artifact.UpdatedAt, &artifact.DeletedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apps.Version{}, httpx.ErrNotFound
+		}
+		return apps.Version{}, err
+	}
+	if artifactID.Valid {
+		value := artifactID.String
+		rec.ArtifactID = &value
+	}
+	if publishedAt.Valid {
+		rec.PublishedAt = &publishedAt.Time
+	}
+	if artifact.ID.Valid {
+		rec.Artifact = &files.Artifact{
+			RecordBase: files.RecordBase{
+				ID:        artifact.ID.String,
+				TenantID:  artifact.TenantID.String,
+				Status:    artifact.Status.String,
+				UpdatedAt: artifact.UpdatedAt.Time,
+			},
+			StorageKey: artifact.StorageKey.String,
+			Checksum:   artifact.Checksum.String,
+			SizeBytes:  artifact.SizeBytes.Int64,
+			MimeType:   artifact.MimeType.String,
+		}
+		if artifact.DeletedAt.Valid {
+			deletedAt := artifact.DeletedAt.Time
+			rec.Artifact.DeletedAt = &deletedAt
+		}
+	}
+	return rec, nil
+}
+
+type fieldsArtifact struct {
+	ID         pgtype.Text
+	TenantID   pgtype.Text
+	StorageKey pgtype.Text
+	Checksum   pgtype.Text
+	SizeBytes  pgtype.Int8
+	MimeType   pgtype.Text
+	Status     pgtype.Text
+	UpdatedAt  pgtype.Timestamptz
+	DeletedAt  pgtype.Timestamptz
 }
 
 func (s *Store) CreateVersion(ctx context.Context, tenantID, appID string, req apps.VersionUpsert) (apps.Version, error) {

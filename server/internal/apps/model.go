@@ -2,6 +2,8 @@ package apps
 
 import "time"
 
+import files "xmdm/server/internal/files"
+
 const (
 	StatusActive  = "active"
 	StatusRetired = "retired"
@@ -30,16 +32,17 @@ type AppUpsert struct {
 }
 
 type Version struct {
-	ID          string     `json:"id"`
-	TenantID    string     `json:"tenantId"`
-	AppID       string     `json:"appId"`
-	Status      string     `json:"status"`
-	VersionName string     `json:"versionName"`
-	VersionCode int64      `json:"versionCode"`
-	ArtifactID  *string    `json:"artifactId,omitempty"`
-	Checksum    string     `json:"checksum"`
-	PublishedAt *time.Time `json:"publishedAt,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
+	ID          string          `json:"id"`
+	TenantID    string          `json:"tenantId"`
+	AppID       string          `json:"appId"`
+	Status      string          `json:"status"`
+	VersionName string          `json:"versionName"`
+	VersionCode int64           `json:"versionCode"`
+	ArtifactID  *string         `json:"artifactId,omitempty"`
+	Artifact    *files.Artifact `json:"artifact,omitempty"`
+	Checksum    string          `json:"checksum"`
+	PublishedAt *time.Time      `json:"publishedAt,omitempty"`
+	CreatedAt   time.Time       `json:"createdAt"`
 }
 
 type VersionUpsert struct {

@@ -68,6 +68,20 @@ func (s *Store) Put(ctx context.Context, key string, body io.Reader, contentType
 	return err
 }
 
+func (s *Store) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	if key == "" {
+		return nil, fmt.Errorf("missing artifact key")
+	}
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out.Body, nil
+}
+
 func (s *Store) Delete(ctx context.Context, key string) error {
 	if key == "" {
 		return fmt.Errorf("missing artifact key")

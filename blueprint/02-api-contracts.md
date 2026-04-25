@@ -55,6 +55,7 @@
 - Returns the signed policy snapshot plus the app, file, certificate, and command state that the device needs to apply.
 - The sync path is deterministic and idempotent.
 - The POST variant is used when the device needs to send telemetry in the same round trip.
+- App snapshot entries include the managed package name, published version, artifact checksum, and a device-scoped download path so the launcher can fetch and install the correct APK.
 
 ### Telemetry Upload
 
@@ -75,6 +76,7 @@
 
 - Returns authorized download streams for app packages, files, and certificates.
 - Artifact access is mediated by the server rather than exposing object storage directly.
+- App package downloads are device-authenticated and live under `/api/v1/devices/{deviceId}/apps/{appId}/versions/{versionId}/artifact`.
 
 ## Admin APIs
 

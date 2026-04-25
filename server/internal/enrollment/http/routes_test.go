@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"xmdm/server/internal/apps"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/certificates"
 	"xmdm/server/internal/device"
@@ -25,7 +26,7 @@ func TestRegisterQRPng(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -62,7 +63,7 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -130,7 +131,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/qr/json", bytes.NewBufferString(`{"serverUrl":"not-a-url","deviceAdminPackageDownloadLocation":"https://cdn.example/launcher.apk","deviceAdminPackageChecksum":"abc123"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -152,7 +153,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res = httptest.NewRecorder()
 	mux = http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, "tenant-1")
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad request, got %d", res.Code)
@@ -193,7 +194,7 @@ func TestRegisterTokenLifecycleRoutes(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, nil, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens", bytes.NewBufferString(`{"ttlSeconds":3600}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -244,9 +245,36 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 			Status:       device.StatusEnrolled,
 		},
 	}
+	appStore := &fakeAppStore{
+		apps: []apps.App{
+			{
+				RecordBase: apps.RecordBase{
+					ID:       "app-1",
+					TenantID: "tenant-1",
+					Status:   apps.StatusActive,
+				},
+				PackageName: "com.example.app",
+				Name:        "Example App",
+			},
+		},
+		versions: map[string][]apps.Version{
+			"app-1": {
+				{
+					ID:          "version-1",
+					TenantID:    "tenant-1",
+					AppID:       "app-1",
+					Status:      apps.VersionStatusPublished,
+					VersionName: "1.0.0",
+					VersionCode: 100,
+					ArtifactID:  strPtr("artifact-1"),
+					Checksum:    "sha256-app-abc",
+				},
+			},
+		},
+	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, &fakeCertificateStore{
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, appStore, &fakeCertificateStore{
 		active: []certificates.Certificate{
 			{
 				RecordBase: certificates.RecordBase{
@@ -324,6 +352,109 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if len(config.Certificates) != 1 {
 		t.Fatalf("expected one certificate in config, got %d", len(config.Certificates))
 	}
+	if len(config.Apps) != 1 {
+		t.Fatalf("expected one app in config, got %d", len(config.Apps))
+	}
+	appEntry, ok := config.Apps[0].(map[string]any)
+	if !ok {
+		t.Fatalf("app entry has wrong type: %T", config.Apps[0])
+	}
+	if appEntry["downloadPath"] != "/api/v1/devices/device-123/apps/app-1/versions/version-1/artifact" {
+		t.Fatalf("unexpected download path: %#v", appEntry["downloadPath"])
+	}
+}
+
+func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
+	store := &fakeEnrollmentStore{
+		bound: enrollment.BoundDevice{
+			DeviceID:     "device-123",
+			DeviceSecret: "device-secret",
+			Status:       device.StatusEnrolled,
+		},
+	}
+	appStore := &fakeAppStore{
+		apps: []apps.App{
+			{
+				RecordBase: apps.RecordBase{
+					ID:       "app-1",
+					TenantID: "tenant-1",
+					Status:   apps.StatusActive,
+				},
+				PackageName: "com.example.app",
+				Name:        "Example App",
+			},
+		},
+		versions: map[string][]apps.Version{
+			"app-1": {
+				{
+					ID:          "version-1",
+					TenantID:    "tenant-1",
+					AppID:       "app-1",
+					Status:      apps.VersionStatusPublished,
+					VersionName: "1.0.0",
+					VersionCode: 100,
+					ArtifactID:  strPtr("artifact-1"),
+					Checksum:    "sha256-app-abc",
+				},
+				{
+					ID:          "version-2",
+					TenantID:    "tenant-1",
+					AppID:       "app-1",
+					Status:      apps.VersionStatusPublished,
+					VersionName: "1.1.0",
+					VersionCode: 110,
+					ArtifactID:  strPtr("artifact-2"),
+					Checksum:    "sha256-app-def",
+				},
+			},
+		},
+	}
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, appStore, nil, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
+		"enrollmentToken":"secret-token",
+		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected bind ok, got %d", res.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode bind response: %v", err)
+	}
+	rawConfig, ok := payload["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config has wrong type: %T", payload["config"])
+	}
+	rawConfigJSON, err := json.Marshal(rawConfig)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	var typedConfig struct {
+		Apps []any `json:"apps"`
+	}
+	if err := json.Unmarshal(rawConfigJSON, &typedConfig); err != nil {
+		t.Fatalf("decode config snapshot: %v", err)
+	}
+	if len(typedConfig.Apps) != 1 {
+		t.Fatalf("expected one app in config, got %d", len(typedConfig.Apps))
+	}
+	appEntry, ok := typedConfig.Apps[0].(map[string]any)
+	if !ok {
+		t.Fatalf("app entry has wrong type: %T", typedConfig.Apps[0])
+	}
+	if appEntry["versionId"] != "version-2" {
+		t.Fatalf("expected latest version, got %#v", appEntry["versionId"])
+	}
+	if appEntry["downloadPath"] != "/api/v1/devices/device-123/apps/app-1/versions/version-2/artifact" {
+		t.Fatalf("unexpected download path: %#v", appEntry["downloadPath"])
+	}
 }
 
 type fakeEnrollmentStore struct {
@@ -348,6 +479,11 @@ type fakeEnrollmentStore struct {
 
 type fakeCertificateStore struct {
 	active []certificates.Certificate
+}
+
+type fakeAppStore struct {
+	apps     []apps.App
+	versions map[string][]apps.Version
 }
 
 func (s *fakeEnrollmentStore) IssueToken(ctx context.Context, tenantID string, expiresAt time.Time) (enrollment.IssuedToken, error) {
@@ -399,4 +535,36 @@ func (s *fakeCertificateStore) CreateCertificate(context.Context, string, certif
 
 func (s *fakeCertificateStore) RetireCertificate(context.Context, string, string) (certificates.Certificate, error) {
 	return certificates.Certificate{}, nil
+}
+
+func (s *fakeAppStore) ListApps(context.Context, string) ([]apps.App, error) {
+	return append([]apps.App(nil), s.apps...), nil
+}
+
+func (s *fakeAppStore) CreateApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
+	return apps.App{}, nil
+}
+
+func (s *fakeAppStore) UpdateApp(context.Context, string, string, apps.AppUpsert) (apps.App, error) {
+	return apps.App{}, nil
+}
+
+func (s *fakeAppStore) RetireApp(context.Context, string, string) (apps.App, error) {
+	return apps.App{}, nil
+}
+
+func (s *fakeAppStore) ListVersions(_ context.Context, _ string, appID string) ([]apps.Version, error) {
+	return append([]apps.Version(nil), s.versions[appID]...), nil
+}
+
+func (s *fakeAppStore) GetVersion(context.Context, string, string, string) (apps.Version, error) {
+	return apps.Version{}, nil
+}
+
+func (s *fakeAppStore) CreateVersion(context.Context, string, string, apps.VersionUpsert) (apps.Version, error) {
+	return apps.Version{}, nil
+}
+
+func strPtr(value string) *string {
+	return &value
 }

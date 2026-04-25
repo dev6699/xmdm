@@ -49,6 +49,12 @@ class AgentStateStoreTest {
                 lastSyncAtEpochMillis = 123456789L,
             ),
         )
+        store.saveManagedApps(
+            ManagedAppsState(
+                snapshotJson = """{"version":"1","apps":[]}""",
+                lastAppliedAtEpochMillis = 123456999L,
+            ),
+        )
         first.scope.cancel()
 
         val reloaded = newStore(storeFile)
@@ -57,6 +63,7 @@ class AgentStateStoreTest {
         assertTrue(state.isBootstrapped)
         assertTrue(state.isEnrolled)
         assertTrue(state.hasPolicyCache)
+        assertTrue(state.hasManagedApps)
         assertEquals("https://mdm.example", state.bootstrap?.serverUrl)
         assertEquals("rest", state.bootstrap?.serverProject)
         assertEquals("enroll-token", state.bootstrap?.enrollmentToken)
@@ -68,6 +75,8 @@ class AgentStateStoreTest {
         assertEquals("""{"version":"1"}""", state.policyCache?.snapshotJson)
         assertEquals(7L, state.policyCache?.version)
         assertEquals(123456789L, state.policyCache?.lastSyncAtEpochMillis)
+        assertEquals("""{"version":"1","apps":[]}""", state.managedApps?.snapshotJson)
+        assertEquals(123456999L, state.managedApps?.lastAppliedAtEpochMillis)
 
         reloaded.scope.cancel()
     }
@@ -104,6 +113,12 @@ class AgentStateStoreTest {
                 lastSyncAtEpochMillis = 123456789L,
             ),
         )
+        store.saveManagedApps(
+            ManagedAppsState(
+                snapshotJson = """{"version":"1","apps":[]}""",
+                lastAppliedAtEpochMillis = 123456999L,
+            ),
+        )
         store.clearEnrollmentState()
         first.scope.cancel()
 
@@ -112,10 +127,62 @@ class AgentStateStoreTest {
         assertTrue(state.isBootstrapped)
         assertFalse(state.isEnrolled)
         assertFalse(state.hasPolicyCache)
+        assertFalse(state.hasManagedApps)
         assertEquals("https://mdm.example", state.bootstrap?.serverUrl)
         assertEquals("rest", state.bootstrap?.serverProject)
         assertEquals("enroll-token", state.bootstrap?.enrollmentToken)
         assertEquals("""{"BASE_URL":"https://mdm.example"}""", state.bootstrap?.rawJson)
+        second.scope.cancel()
+    }
+
+    @Test
+    fun clearProvisioningStatePreservesManagedApps() = runTest {
+        val storeFile = createTempFile("agent-state", ".preferences_pb")
+        val first = newStore(storeFile)
+        val store = first.store
+
+        store.saveBootstrap(
+            BootstrapState(
+                serverUrl = "https://mdm.example",
+                secondaryServerUrl = null,
+                serverProject = "rest",
+                enrollmentToken = "enroll-token",
+                deviceId = null,
+                deviceIdUse = null,
+                bootstrapExtrasJson = "{}",
+                rawJson = """{"BASE_URL":"https://mdm.example"}""",
+            ),
+        )
+        store.saveDeviceIdentity(
+            DeviceIdentityState(
+                deviceId = "device-123",
+                deviceIdUse = "serial",
+                deviceSecret = "secret-abc",
+            ),
+        )
+        store.savePolicyCache(
+            PolicyCacheState(
+                snapshotJson = """{"version":"1"}""",
+                version = 7,
+                lastSyncAtEpochMillis = 123456789L,
+            ),
+        )
+        store.saveManagedApps(
+            ManagedAppsState(
+                snapshotJson = """{"version":"1","apps":[{"packageName":"com.example.old"}]}""",
+                lastAppliedAtEpochMillis = 123456999L,
+            ),
+        )
+        store.clearProvisioningState()
+        first.scope.cancel()
+
+        val second = newStore(storeFile)
+        val state = second.store.state.first()
+        assertFalse(state.isBootstrapped)
+        assertFalse(state.isEnrolled)
+        assertFalse(state.hasPolicyCache)
+        assertTrue(state.hasManagedApps)
+        assertEquals("""{"version":"1","apps":[{"packageName":"com.example.old"}]}""", state.managedApps?.snapshotJson)
         second.scope.cancel()
     }
 

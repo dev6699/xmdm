@@ -6,6 +6,7 @@ import (
 	"time"
 
 	device "xmdm/server/internal/device"
+	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 
 	"github.com/google/uuid"
@@ -117,6 +118,19 @@ func (s *Store) RetireDevice(ctx context.Context, tenantID, id string) (device.D
 	return rec, nil
 }
 
+func (s *Store) Authenticate(ctx context.Context, tenantID, deviceID, secret string) (device.Device, error) {
+	if tenantID == "" || deviceID == "" || secret == "" {
+		return device.Device{}, httpx.ErrInvalidInput
+	}
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text
+		 FROM devices
+		 WHERE tenant_id = $1 AND device_id = $2 AND secret_hash = $3`,
+		tenantID, deviceID, enrollment.HashToken(secret),
+	)
+	return scanAuthenticatedDevice(row)
+}
+
 func scanDevice(scanner rowScanner) (device.Device, error) {
 	var rec device.Device
 	var deletedAt pgtype.Timestamptz
@@ -132,4 +146,27 @@ func scanDevice(scanner rowScanner) (device.Device, error) {
 		rec.PolicyID = &value
 	}
 	return rec, nil
+}
+
+func scanAuthenticatedDevice(scanner rowScanner) (device.Device, error) {
+	rec, err := scanDevice(scanner)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return device.Device{}, httpx.ErrNotFound
+		}
+		return device.Device{}, err
+	}
+	if !canAuthenticateDeviceStatus(rec.Status) {
+		return device.Device{}, httpx.ErrNotFound
+	}
+	return rec, nil
+}
+
+func canAuthenticateDeviceStatus(status string) bool {
+	switch status {
+	case device.StatusRetired, device.StatusWiped:
+		return false
+	default:
+		return true
+	}
 }

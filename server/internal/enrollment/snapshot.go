@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, bootstrapExtras map[string]any, certificates []any) ConfigSnapshot {
+func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, bootstrapExtras map[string]any, apps []any, certificates []any) ConfigSnapshot {
 	policy := map[string]any{}
 	if len(bootstrapExtras) > 0 {
 		policy["bootstrapExtras"] = bootstrapExtras
@@ -23,7 +23,7 @@ func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, bootstrapExtras ma
 			"deviceIdUse": deviceIDUse,
 		},
 		Policy:       policy,
-		Apps:         []any{},
+		Apps:         apps,
 		Files:        []any{},
 		Certificates: certificates,
 		Commands:     []any{},

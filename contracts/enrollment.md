@@ -46,7 +46,19 @@ Path prefix:
         "customer": "Acme"
       }
     },
-    "apps": [],
+    "apps": [
+      {
+        "appId": "uuid",
+        "packageName": "com.example.app",
+        "name": "Example App",
+        "versionId": "uuid",
+        "versionName": "1.0.0",
+        "versionCode": 100,
+        "artifactId": "artifact-1",
+        "checksum": "sha256-app-abc",
+        "downloadPath": "/api/v1/devices/serial-123/apps/uuid/versions/uuid/artifact"
+      }
+    ],
     "files": [],
     "certificates": [],
     "commands": [],
@@ -56,6 +68,7 @@ Path prefix:
 ```
 
 - The config snapshot is signed with the device secret and uses HMAC-SHA256 over the canonical JSON body with an empty `signature` field.
+- App entries in `config.apps` describe the managed package, the published version, the artifact checksum, and the device-scoped download path used by the launcher to fetch install bytes.
 
 - Errors:
   - `400` invalid input or malformed JSON

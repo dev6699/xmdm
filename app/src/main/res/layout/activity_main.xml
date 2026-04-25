@@ -21,6 +21,17 @@
             android:text="@string/launcher_title" />
 
         <TextView
+            android:id="@+id/launcherActivity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:padding="14dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+            android:textColor="@color/on_surface"
+            android:background="#E6EDF5"
+            android:text="@string/launcher_live_idle" />
+
+        <TextView
             android:id="@+id/launcherStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

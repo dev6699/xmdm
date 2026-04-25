@@ -10,6 +10,7 @@ import (
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
+	"xmdm/server/internal/apps"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/certificates"
 	"xmdm/server/internal/enrollment"
@@ -59,7 +60,7 @@ type EnrollmentRequest struct {
 	BootstrapExtras      map[string]any       `json:"bootstrapExtras"`
 }
 
-func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, certStore certificates.Repository, tenantID string) {
+func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, appStore apps.Repository, certStore certificates.Repository, tenantID string) {
 	enrollmentMux := httpx.WithPrefix(mux, "/enrollment")
 
 	enrollmentMux.HandleFunc("", func(w http.ResponseWriter, r *http.Request) {
@@ -82,12 +83,17 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 			writeEnrollmentError(w, err)
 			return
 		}
+		appsSnapshot, err := listPublishedApps(r.Context(), appStore, req.DeviceIdentityPolicy.DeviceID, tenantID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		certs, err := listActiveCertificates(r.Context(), certStore, tenantID)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		config := enrollment.NewBootstrapConfigSnapshot(req.DeviceIdentityPolicy.DeviceID, req.DeviceIdentityPolicy.DeviceIDUse, req.BootstrapExtras, certs)
+		config := enrollment.NewBootstrapConfigSnapshot(req.DeviceIdentityPolicy.DeviceID, req.DeviceIdentityPolicy.DeviceIDUse, req.BootstrapExtras, appsSnapshot, certs)
 		signed, err := enrollment.SignConfigSnapshot(config, bound.DeviceSecret)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -502,6 +508,49 @@ func listActiveCertificates(ctx context.Context, store certificates.Repository, 
 	out := make([]any, 0, len(items))
 	for _, item := range items {
 		out = append(out, item)
+	}
+	return out, nil
+}
+
+func listPublishedApps(ctx context.Context, store apps.Repository, deviceID, tenantID string) ([]any, error) {
+	if store == nil {
+		return []any{}, nil
+	}
+	items, err := store.ListApps(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, 0)
+	for _, appRecord := range items {
+		if appRecord.Status != apps.StatusActive {
+			continue
+		}
+		versions, err := store.ListVersions(ctx, tenantID, appRecord.ID)
+		if err != nil {
+			return nil, err
+		}
+		var published *apps.Version
+		for _, version := range versions {
+			if version.Status != apps.VersionStatusPublished || version.ArtifactID == nil {
+				continue
+			}
+			versionCopy := version
+			published = &versionCopy
+		}
+		if published == nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"appId":        appRecord.ID,
+			"packageName":  appRecord.PackageName,
+			"name":         appRecord.Name,
+			"versionId":    published.ID,
+			"versionName":  published.VersionName,
+			"versionCode":  published.VersionCode,
+			"artifactId":   *published.ArtifactID,
+			"checksum":     published.Checksum,
+			"downloadPath": "/api/v1/devices/" + deviceID + "/apps/" + appRecord.ID + "/versions/" + published.ID + "/artifact",
+		})
 	}
 	return out, nil
 }

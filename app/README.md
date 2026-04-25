@@ -136,7 +136,7 @@ This only works on a device that has not already been provisioned. On a normally
 ### Conventions
 
 - Keep the launcher UI in XML with ViewBinding.
-- Keep Android-specific build outputs ignored by [app/.gitignore](/home/puong/xmdm/app/.gitignore).
+- Keep Android-specific build outputs ignored by [app/.gitignore](app/.gitignore).
 - Keep package names aligned with the blueprint and contracts, currently `com.xmdm.launcher`.
 
 ### Current State

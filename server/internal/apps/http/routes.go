@@ -3,15 +3,24 @@ package apphttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"xmdm/server/internal/apps"
+	"xmdm/server/internal/artifacts"
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
 )
 
-func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, auditStore audit.Store, tenantID string) {
+const deviceSecretHeader = "X-XMDM-Device-Secret"
+
+func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, devices device.Repository, artifactStore artifacts.Store, auditStore audit.Store, tenantID string) {
 	httpx.RegisterCRUDFor(mux, svc, auditStore, tenantID, httpx.ResourceSpec[apps.AppUpsert, apps.App]{
 		Kind:      "apps",
 		ReadPerm:  auth.PermissionAdminRead,
@@ -35,6 +44,72 @@ func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, auditS
 				"name":        rec.Name,
 			}
 		},
+	})
+
+	mux.HandleFunc("/devices/{deviceId}/apps/{appId}/versions/{versionId}/artifact", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if devices == nil || artifactStore == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if store == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		deviceID := strings.TrimSpace(r.PathValue("deviceId"))
+		appID := strings.TrimSpace(r.PathValue("appId"))
+		versionID := strings.TrimSpace(r.PathValue("versionId"))
+		secret := strings.TrimSpace(r.Header.Get(deviceSecretHeader))
+		if deviceID == "" || appID == "" || versionID == "" || secret == "" {
+			http.Error(w, "invalid input", http.StatusBadRequest)
+			return
+		}
+		if _, err := devices.Authenticate(r.Context(), tenantID, deviceID, secret); err != nil {
+			switch err {
+			case httpx.ErrInvalidInput:
+				log.Printf("apps artifact auth invalid input: device=%s app=%s version=%s", deviceID, appID, versionID)
+				http.Error(w, "invalid input", http.StatusBadRequest)
+			case httpx.ErrNotFound:
+				log.Printf("apps artifact auth unauthorized: device=%s app=%s version=%s", deviceID, appID, versionID)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			default:
+				log.Printf("apps artifact auth failed: device=%s app=%s version=%s err=%v", deviceID, appID, versionID, err)
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
+			return
+		}
+		version, err := store.GetVersion(r.Context(), tenantID, appID, versionID)
+		if err != nil {
+			if err == httpx.ErrNotFound {
+				http.NotFound(w, r)
+				return
+			}
+			log.Printf("apps artifact version load failed: device=%s app=%s version=%s err=%v", deviceID, appID, versionID, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if version.Status != apps.VersionStatusPublished || version.ArtifactID == nil || version.Artifact == nil {
+			log.Printf("apps artifact version not downloadable: device=%s app=%s version=%s status=%s artifact_id_nil=%t artifact_nil=%t", deviceID, appID, versionID, version.Status, version.ArtifactID == nil, version.Artifact == nil)
+			http.NotFound(w, r)
+			return
+		}
+		body, err := artifactStore.Get(r.Context(), version.Artifact.StorageKey)
+		if err != nil {
+			log.Printf("apps artifact fetch failed: device=%s app=%s version=%s storage_key=%s err=%v", deviceID, appID, versionID, version.Artifact.StorageKey, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		defer body.Close()
+		w.Header().Set("Content-Type", version.Artifact.MimeType)
+		w.Header().Set("Content-Length", strconv.FormatInt(version.Artifact.SizeBytes, 10))
+		w.Header().Set("X-XMDM-Artifact-Checksum", version.Artifact.Checksum)
+		w.Header().Set("X-XMDM-Artifact-Size", strconv.FormatInt(version.Artifact.SizeBytes, 10))
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.apk"`, appID, version.VersionName))
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, body)
 	})
 
 	mux.HandleFunc("/apps/{id}/versions", func(w http.ResponseWriter, r *http.Request) {

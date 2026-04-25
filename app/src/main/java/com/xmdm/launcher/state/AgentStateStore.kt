@@ -62,8 +62,36 @@ class AgentStateStore(
         }
     }
 
+    suspend fun saveManagedApps(state: ManagedAppsState) {
+        dataStore.edit { prefs ->
+            prefs[Keys.MANAGED_APPS_SNAPSHOT_JSON] = state.snapshotJson
+            prefs[Keys.MANAGED_APPS_LAST_APPLIED_AT_EPOCH_MILLIS] = state.lastAppliedAtEpochMillis
+        }
+    }
+
     suspend fun clearEnrollmentState() {
         dataStore.edit { prefs ->
+            prefs.remove(Keys.DEVICE_ID)
+            prefs.remove(Keys.DEVICE_ID_USE)
+            prefs.remove(Keys.DEVICE_SECRET)
+            prefs.remove(Keys.POLICY_SNAPSHOT_JSON)
+            prefs.remove(Keys.POLICY_VERSION)
+            prefs.remove(Keys.POLICY_LAST_SYNC_AT_EPOCH_MILLIS)
+            prefs.remove(Keys.MANAGED_APPS_SNAPSHOT_JSON)
+            prefs.remove(Keys.MANAGED_APPS_LAST_APPLIED_AT_EPOCH_MILLIS)
+        }
+    }
+
+    suspend fun clearProvisioningState() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.BOOTSTRAP_SERVER_URL)
+            prefs.remove(Keys.BOOTSTRAP_SECONDARY_SERVER_URL)
+            prefs.remove(Keys.BOOTSTRAP_SERVER_PROJECT)
+            prefs.remove(Keys.BOOTSTRAP_ENROLLMENT_TOKEN)
+            prefs.remove(Keys.BOOTSTRAP_DEVICE_ID)
+            prefs.remove(Keys.BOOTSTRAP_DEVICE_ID_USE)
+            prefs.remove(Keys.BOOTSTRAP_EXTRAS_JSON)
+            prefs.remove(Keys.BOOTSTRAP_RAW_JSON)
             prefs.remove(Keys.DEVICE_ID)
             prefs.remove(Keys.DEVICE_ID_USE)
             prefs.remove(Keys.DEVICE_SECRET)
@@ -73,14 +101,22 @@ class AgentStateStore(
         }
     }
 
+    suspend fun clearAllState() {
+        dataStore.edit { prefs ->
+            prefs.clear()
+        }
+    }
+
     private fun readState(prefs: Preferences): AgentState {
         val bootstrap = bootstrapFromPrefs(prefs)
         val identity = identityFromPrefs(prefs)
         val policyCache = policyCacheFromPrefs(prefs)
+        val managedApps = managedAppsFromPrefs(prefs)
         return AgentState(
             bootstrap = bootstrap,
             identity = identity,
             policyCache = policyCache,
+            managedApps = managedApps,
         )
     }
 
@@ -127,6 +163,15 @@ class AgentStateStore(
         )
     }
 
+    private fun managedAppsFromPrefs(prefs: Preferences): ManagedAppsState? {
+        val snapshotJson = prefs[Keys.MANAGED_APPS_SNAPSHOT_JSON] ?: return null
+        val lastAppliedAtEpochMillis = prefs[Keys.MANAGED_APPS_LAST_APPLIED_AT_EPOCH_MILLIS] ?: return null
+        return ManagedAppsState(
+            snapshotJson = snapshotJson,
+            lastAppliedAtEpochMillis = lastAppliedAtEpochMillis,
+        )
+    }
+
     private object Keys {
         val BOOTSTRAP_SERVER_URL = stringPreferencesKey("bootstrap_server_url")
         val BOOTSTRAP_SECONDARY_SERVER_URL = stringPreferencesKey("bootstrap_secondary_server_url")
@@ -144,6 +189,8 @@ class AgentStateStore(
         val POLICY_SNAPSHOT_JSON = stringPreferencesKey("policy_snapshot_json")
         val POLICY_VERSION = longPreferencesKey("policy_version")
         val POLICY_LAST_SYNC_AT_EPOCH_MILLIS = longPreferencesKey("policy_last_sync_at_epoch_millis")
+        val MANAGED_APPS_SNAPSHOT_JSON = stringPreferencesKey("managed_apps_snapshot_json")
+        val MANAGED_APPS_LAST_APPLIED_AT_EPOCH_MILLIS = longPreferencesKey("managed_apps_last_applied_at_epoch_millis")
     }
 
     companion object {
