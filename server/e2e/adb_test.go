@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestADBFlow(t *testing.T) {
@@ -300,6 +303,20 @@ func adbChromeSnapshot(t *testing.T, serial string) string {
 		parts = append(parts, "launcher_logs="+tailLines(strings.TrimSpace(out), 8))
 	} else {
 		parts = append(parts, "launcher_logs_err="+strings.TrimSpace(err.Error()))
+	}
+	return strings.Join(parts, " | ")
+}
+
+func commandStatusSnapshot(t *testing.T, pool *pgxpool.Pool, commandID string) string {
+	t.Helper()
+	var status string
+	var resultJSON []byte
+	if err := pool.QueryRow(context.Background(), `SELECT status, result_json FROM commands WHERE id = $1`, commandID).Scan(&status, &resultJSON); err != nil {
+		return "command_err=" + strings.TrimSpace(err.Error())
+	}
+	parts := []string{"status=" + status}
+	if len(resultJSON) > 0 {
+		parts = append(parts, "result="+strings.TrimSpace(string(resultJSON)))
 	}
 	return strings.Join(parts, " | ")
 }

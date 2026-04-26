@@ -51,7 +51,11 @@ The enrollment E2E verifies:
 9. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
 10. Starts the launcher with the bootstrap payload on the physical device.
 11. Waits for the launcher to enroll, fetch policy, render the managed file, and restore Chrome for the current user.
-12. Verifies on-device state with adb reads from the launcher sandbox and package manager.
+12. Enqueues a lightweight `ping` command through the admin API.
+13. Verifies the server observes the device ACK with a `pong` response.
+14. Repeats the command flow once with MQTT bootstrap extras and once without them so both transport modes stay covered.
+15. Enqueues a short-lived `ping` command in polling mode, waits for it to expire, and verifies the server marks it `expired`.
+16. Verifies on-device state with adb reads from the launcher sandbox and package manager.
 
 Important details:
 

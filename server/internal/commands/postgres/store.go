@@ -90,6 +90,9 @@ func (s *Store) ListPending(ctx context.Context, tenantID, deviceID string) ([]c
 	if tenantID == "" || deviceID == "" {
 		return nil, httpx.ErrInvalidInput
 	}
+	if err := s.expireDueCommands(ctx, tenantID, deviceID); err != nil {
+		return nil, err
+	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at
 		 FROM commands
@@ -148,11 +151,15 @@ func (s *Store) Acknowledge(ctx context.Context, tenantID, deviceID, commandID s
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := s.expireDueCommand(ctx, tx, tenantID, deviceID, commandID); err != nil {
+		return commands.Command{}, err
+	}
 	row := tx.QueryRow(ctx,
 		`UPDATE commands
 		 SET status = $5, acked_at = $6, result_json = $7::jsonb, updated_at = $6
 		 WHERE tenant_id = $1 AND device_id = $2 AND id = $3
 		   AND status IN ($8, $9)
+		   AND (expires_at IS NULL OR expires_at > $6)
 		 RETURNING id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at`,
 		tenantID, deviceID, commandID, req.Status, now, string(rawResult), commands.StatusQueued, commands.StatusSent,
 	)
@@ -164,6 +171,37 @@ func (s *Store) Acknowledge(ctx context.Context, tenantID, deviceID, commandID s
 		return commands.Command{}, err
 	}
 	return rec, nil
+}
+
+func (s *Store) expireDueCommands(ctx context.Context, tenantID, deviceID string) error {
+	now := s.now()
+	_, err := s.pool.Exec(ctx,
+		`UPDATE commands
+		 SET status = $4, updated_at = $5
+		 WHERE tenant_id = $1
+		   AND device_id = $2
+		   AND status IN ($6, $7)
+		   AND expires_at IS NOT NULL
+		   AND expires_at <= $5`,
+		tenantID, deviceID, commands.StatusExpired, now, now, commands.StatusQueued, commands.StatusSent,
+	)
+	return err
+}
+
+func (s *Store) expireDueCommand(ctx context.Context, tx pgx.Tx, tenantID, deviceID, commandID string) error {
+	now := s.now()
+	_, err := tx.Exec(ctx,
+		`UPDATE commands
+		 SET status = $4, updated_at = $5
+		 WHERE tenant_id = $1
+		   AND device_id = $2
+		   AND id = $3
+		   AND status IN ($6, $7)
+		   AND expires_at IS NOT NULL
+		   AND expires_at <= $5`,
+		tenantID, deviceID, commandID, commands.StatusExpired, now, commands.StatusQueued, commands.StatusSent,
+	)
+	return err
 }
 
 func (s *Store) publishEnqueued(ctx context.Context, items []commands.Command) {

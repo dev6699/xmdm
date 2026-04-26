@@ -345,6 +345,8 @@ Owner roles used below:
 - Task: verify command delivery, ack, and expiry handling.
 - Done when: commands expire, ack, and retry as specified.
 
+Completed as of 2026-04-25 with adb-backed physical-device coverage for `ping` over MQTT and polling plus expiry handling that transitions commands to `expired` when they outlive `expiresAt`.
+
 ### M5-07 Broker Outage Recovery
 
 - Owner: `QA`

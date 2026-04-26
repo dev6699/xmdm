@@ -97,11 +97,61 @@ func TestRegisterCreatesGroupCommandFromForm(t *testing.T) {
 	}
 }
 
-type fakeAdminCommandStore struct {
-	items []commands.Command
+func TestRegisterRejectsInvalidExpiresAt(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Hour)
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	store := &fakeAdminCommandStore{}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/commands", strings.NewReader(`{"type":"ping","expiresAt":"not-a-timestamp","target":{"type":"device","deviceId":"device-1"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected bad request, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(store.enqueues) != 0 {
+		t.Fatalf("expected no enqueue on invalid expiresAt, got %#v", store.enqueues)
+	}
 }
 
-func (s *fakeAdminCommandStore) Enqueue(context.Context, string, commands.Upsert) ([]commands.Command, error) {
+func TestRegisterRejectsPastExpiresAt(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Hour)
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	store := &fakeAdminCommandStore{}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/commands", strings.NewReader(`{"type":"ping","expiresAt":"2024-01-01T00:00:00Z","target":{"type":"device","deviceId":"device-1"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected bad request, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(store.enqueues) != 0 {
+		t.Fatalf("expected no enqueue on past expiresAt, got %#v", store.enqueues)
+	}
+}
+
+type fakeAdminCommandStore struct {
+	items    []commands.Command
+	enqueues []commands.Upsert
+}
+
+func (s *fakeAdminCommandStore) Enqueue(_ context.Context, _ string, req commands.Upsert) ([]commands.Command, error) {
+	s.enqueues = append(s.enqueues, req)
 	return append([]commands.Command(nil), s.items...), nil
 }
 

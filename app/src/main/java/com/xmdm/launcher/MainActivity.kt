@@ -13,6 +13,12 @@ import com.xmdm.launcher.apps.AndroidManagedAppInstaller
 import com.xmdm.launcher.apps.HttpManagedAppDownloader
 import com.xmdm.launcher.apps.ManagedAppInstallCoordinator
 import com.xmdm.launcher.apps.ManagedAppInstallProgress
+import com.xmdm.launcher.commands.AndroidDeviceRebooter
+import com.xmdm.launcher.commands.DeviceCommandCoordinator
+import com.xmdm.launcher.commands.DeviceCommandExecutor
+import com.xmdm.launcher.commands.HttpDeviceCommandGateway
+import com.xmdm.launcher.commands.MqttDeviceCommandConfig
+import com.xmdm.launcher.commands.MqttDeviceCommandTransport
 import com.xmdm.launcher.files.ManagedFileInstallCoordinator
 import com.xmdm.launcher.databinding.ActivityMainBinding
 import com.xmdm.launcher.enrollment.EnrollmentCoordinator
@@ -24,11 +30,14 @@ import com.xmdm.launcher.state.LauncherEnrollmentStateMachine
 import com.xmdm.launcher.state.ManagedAppsState
 import com.xmdm.launcher.state.ManagedFilesState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -57,6 +66,14 @@ class MainActivity : AppCompatActivity() {
             rootDir = File(applicationContext.filesDir, "managed-files"),
         )
     }
+    private val deviceCommandCoordinator by lazy {
+        DeviceCommandCoordinator(
+            gateway = HttpDeviceCommandGateway(),
+            executor = DeviceCommandExecutor(
+                rebootAction = AndroidDeviceRebooter(applicationContext),
+            ),
+        )
+    }
     private val enrollmentStateMachine = LauncherEnrollmentStateMachine()
     private val managedAppProgress = MutableStateFlow<ManagedAppInstallProgress>(ManagedAppInstallProgress.Idle)
     private lateinit var binding: ActivityMainBinding
@@ -66,6 +83,8 @@ class MainActivity : AppCompatActivity() {
     private var lastManagedFilesSnapshotVersion: Long? = null
     private var lastManagedAppsSnapshotVersion: Long? = null
     private var lastEnrollmentAttemptBootstrapJson: String? = null
+    private var commandTransportJob: Job? = null
+    private var commandTransportTargetKey: String? = null
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
     private var cachedPrettySnapshotJson: String? = null
     private var cachedPrettySnapshotText: String = ""
@@ -88,6 +107,7 @@ class MainActivity : AppCompatActivity() {
                 maybeStartEnrollment(state)
                 maybeApplyManagedFiles(state)
                 maybeApplyManagedApps(state)
+                maybeStartCommandTransport(state)
             }
         }
         lifecycleScope.launch {
@@ -334,6 +354,65 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun maybeStartCommandTransport(state: AgentState) {
+        val bootstrap = state.bootstrap
+        val identity = state.identity
+        if (bootstrap == null || identity == null) {
+            commandTransportJob?.cancel()
+            commandTransportJob = null
+            commandTransportTargetKey = null
+            return
+        }
+        val mqttAddress = resolveMqttAddress(bootstrap) ?: ""
+        val targetKey = "${bootstrap.serverUrl}|${identity.deviceId}|${identity.deviceSecret}|$mqttAddress"
+        if (commandTransportJob?.isActive == true && commandTransportTargetKey == targetKey) {
+            return
+        }
+        commandTransportJob?.cancel()
+        commandTransportTargetKey = targetKey
+        commandTransportJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    val mqtt = mqttAddress.takeIf { it.isNotBlank() }
+                    if (mqtt != null) {
+                        Log.w(TAG, "command transport connecting via mqtt=$mqtt instance=$instanceId")
+                        MqttDeviceCommandTransport(
+                            MqttDeviceCommandConfig(
+                                address = mqtt,
+                                clientId = "device-${identity.deviceId}",
+                                deviceId = identity.deviceId,
+                                username = identity.deviceId,
+                                password = identity.deviceSecret,
+                            ),
+                        ).stream { command ->
+                            deviceCommandCoordinator.handleIncomingCommand(
+                                serverUrl = bootstrap.serverUrl,
+                                deviceId = identity.deviceId,
+                                deviceSecret = identity.deviceSecret,
+                                command = command,
+                            )
+                        }
+                    } else {
+                        val handled = deviceCommandCoordinator.pollAndExecute(
+                            serverUrl = bootstrap.serverUrl,
+                            deviceId = identity.deviceId,
+                            deviceSecret = identity.deviceSecret,
+                        )
+                        if (handled.isNotEmpty()) {
+                            Log.w(TAG, "command poll handled ${handled.size} commands instance=$instanceId")
+                        }
+                    }
+                } catch (t: Throwable) {
+                    if (t is kotlinx.coroutines.CancellationException) {
+                        throw t
+                    }
+                    Log.w(TAG, "command transport failed", t)
+                }
+                delay(COMMAND_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
     private fun maybeApplyManagedFiles(state: AgentState) {
         val policyCache = state.policyCache ?: return
         val identity = state.identity ?: return
@@ -514,12 +593,35 @@ class MainActivity : AppCompatActivity() {
         return intent.getStringExtra(android.content.Intent.EXTRA_TEXT)
     }
 
+    private fun resolveMqttAddress(bootstrap: com.xmdm.launcher.state.BootstrapState): String? {
+        val extras = runCatching { JsonParser.parseString(bootstrap.bootstrapExtrasJson).asJsonObject }.getOrNull()
+            ?: return null
+        return stringValue(extras, MQTT_ADDRESS_KEYS)
+    }
+
+    private fun stringValue(source: com.google.gson.JsonObject, names: Set<String>): String? {
+        for (name in names) {
+            val value = source.get(name) ?: continue
+            if (value.isJsonNull) continue
+            val stringValue = value.asString.trim()
+            if (stringValue.isNotBlank()) {
+                return stringValue
+            }
+        }
+        return null
+    }
+
     companion object {
         const val EXTRA_BOOTSTRAP_JSON = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON"
         const val EXTRA_BOOTSTRAP_JSON_B64 = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64"
         const val EXTRA_RESET_STATE = "com.xmdm.launcher.EXTRA_RESET_STATE"
         const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
+        private const val COMMAND_POLL_INTERVAL_MS = 30_000L
+        private val MQTT_ADDRESS_KEYS = setOf(
+            "com.xmdm.MQTT_ADDRESS",
+            "MQTT_ADDRESS",
+        )
         private val SAVED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
 
         fun intent(

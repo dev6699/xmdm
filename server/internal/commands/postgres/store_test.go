@@ -211,6 +211,58 @@ func TestAcknowledgeUpdatesCommandStatus(t *testing.T) {
 	}
 }
 
+func TestExpiredCommandIsNotPendingOrAckable(t *testing.T) {
+	pool := openCommandsTestPool(t)
+	t.Cleanup(pool.Close)
+	resetCommandsTestDB(t, pool)
+
+	store := New(pool)
+	now := time.Date(2026, 4, 25, 16, 0, 0, 0, time.UTC)
+	store.SetNow(func() time.Time { return now })
+
+	var deviceID string
+	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
+		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+		 RETURNING device_id`,
+		bootstrap.SeedTenantID, "device-expired", enrollment.HashToken("secret"), "active", now,
+	).Scan(&deviceID); err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	var commandID string
+	expiredAt := now.Add(-time.Minute)
+	if err := pool.QueryRow(context.Background(), `INSERT INTO commands (id, tenant_id, device_id, type, payload_json, status, expires_at, created_at, updated_at)
+		 VALUES (gen_random_uuid(), $1, (SELECT id FROM devices WHERE tenant_id = $1 AND device_id = $2), $3, '{}'::jsonb, $4, $5, $6, $6)
+		 RETURNING id::text`,
+		bootstrap.SeedTenantID, deviceID, "ping", commands.StatusQueued, expiredAt, now,
+	).Scan(&commandID); err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+
+	pending, err := store.ListPending(context.Background(), bootstrap.SeedTenantID, deviceID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no pending commands, got %#v", pending)
+	}
+
+	var status string
+	if err := pool.QueryRow(context.Background(), `SELECT status FROM commands WHERE id = $1`, commandID).Scan(&status); err != nil {
+		t.Fatalf("load command status: %v", err)
+	}
+	if status != commands.StatusExpired {
+		t.Fatalf("expected expired status, got %s", status)
+	}
+
+	_, err = store.Acknowledge(context.Background(), bootstrap.SeedTenantID, deviceID, commandID, commands.Ack{
+		Status:  commands.StatusAcked,
+		Message: "late",
+	})
+	if !errors.Is(err, httpx.ErrNotFound) {
+		t.Fatalf("expected not found on ack, got %v", err)
+	}
+}
+
 type fakeRowScanner struct {
 	scan func(...any) error
 }

@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+	"time"
 
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
@@ -24,9 +25,10 @@ func Register(mux httpx.Router, svc *auth.Service, pluginManager *plugins.Manage
 }
 
 type commandCreateRequest struct {
-	Type    string          `json:"type"`
-	Payload map[string]any  `json:"payload,omitempty"`
-	Target  commands.Target `json:"target"`
+	Type      string          `json:"type"`
+	Payload   map[string]any  `json:"payload,omitempty"`
+	ExpiresAt string          `json:"expiresAt,omitempty"`
+	Target    commands.Target `json:"target"`
 }
 
 var commandFormTemplate = template.Must(template.New("admin-commands").Parse(`<!doctype html>
@@ -36,6 +38,7 @@ var commandFormTemplate = template.Must(template.New("admin-commands").Parse(`<!
 <h1>Create Command</h1>
 <form method="post">
   <label>Type <input name="type" value="reboot"></label><br>
+  <label>Expires At <input name="expiresAt" placeholder="2026-04-25T10:30:00Z"></label><br>
   <label>Target
     <select name="targetType">
       <option value="broadcast">Broadcast</option>
@@ -154,10 +157,16 @@ func registerCommandRoutes(mux httpx.Router, svc *auth.Service, auditStore audit
 				http.Error(w, "invalid input", http.StatusBadRequest)
 				return
 			}
+			expiresAt, err := parseCommandExpiresAt(req.ExpiresAt)
+			if err != nil {
+				http.Error(w, "invalid input", http.StatusBadRequest)
+				return
+			}
 			created, err := commandStore.Enqueue(r.Context(), tenantID, commands.Upsert{
-				Type:    req.Type,
-				Payload: req.Payload,
-				Target:  req.Target,
+				Type:      req.Type,
+				Payload:   req.Payload,
+				ExpiresAt: expiresAt,
+				Target:    req.Target,
 			})
 			if err != nil {
 				switch err {
@@ -213,6 +222,7 @@ func decodeCommandCreateRequest(r *http.Request) (commandCreateRequest, error) {
 			return commandCreateRequest{}, httpx.ErrInvalidInput
 		}
 	}
+	req.ExpiresAt = strings.TrimSpace(r.FormValue("expiresAt"))
 	req.Target = commands.Target{
 		Type:     strings.TrimSpace(r.FormValue("targetType")),
 		DeviceID: strings.TrimSpace(r.FormValue("targetDeviceId")),
@@ -222,6 +232,24 @@ func decodeCommandCreateRequest(r *http.Request) (commandCreateRequest, error) {
 		req.Target.Type = commands.TargetBroadcast
 	}
 	return req, nil
+}
+
+func parseCommandExpiresAt(raw string) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		parsed, err = time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return nil, httpx.ErrInvalidInput
+		}
+	}
+	if !parsed.After(time.Now().UTC()) {
+		return nil, httpx.ErrInvalidInput
+	}
+	return &parsed, nil
 }
 
 func sessionFromRequest(r *http.Request, svc *auth.Service) (*auth.Session, bool) {

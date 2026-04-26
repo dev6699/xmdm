@@ -66,6 +66,7 @@ flowchart TD
 
 - `BASE_URL`
 - `SECONDARY_BASE_URL`
+- optional `MQTT_ADDRESS` in bootstrap extras for direct broker subscription
 - `SERVER_PROJECT`
 - `DEVICE_ID` and `DEVICE_ID_USE`
 - optional customer, config, group, and cert fields
@@ -131,6 +132,8 @@ flowchart TD
 
 - MQTT is the primary push transport.
 - HTTP polling is the fallback transport.
+- The agent uses the broker address from bootstrap extras when present and otherwise keeps polling as the safe path.
+- The agent polls pending commands, executes supported ones, and acks the result back to the server.
 - WorkManager keeps telemetry, sync, and retry jobs alive across reboots.
 - The agent must recover from Wi-Fi changes, device restarts, and service kills.
 

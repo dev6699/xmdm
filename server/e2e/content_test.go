@@ -151,28 +151,124 @@ func TestContentE2E(t *testing.T) {
 		t.Fatalf("expected 0 devices after reset, got %d", deviceCount)
 	}
 
-	enrollmentToken := postJSON(t, client, baseURL+"/api/v1/enrollment/tokens", `{"ttlSeconds":3600}`)
-	token, _ := enrollmentToken["token"].(string)
-	if token == "" {
-		t.Fatalf("enrollment token response did not include token: %#v", enrollmentToken)
+	deviceID := "content-e2e-" + uuid.NewString()
+
+	runCommandScenario := func(t *testing.T, name string, mqttAddress string) {
+		t.Helper()
+		if mqttAddress != "" {
+			if _, err := adb(serial, "reverse", "tcp:1883", "tcp:1883"); err != nil {
+				t.Fatalf("adb reverse mqtt: %v", err)
+			}
+			t.Cleanup(func() {
+				_, _ = adb(serial, "reverse", "--remove", "tcp:1883", "tcp:1883")
+			})
+		}
+
+		enrollmentToken := postJSON(t, client, baseURL+"/api/v1/enrollment/tokens", `{"ttlSeconds":3600}`)
+		token, _ := enrollmentToken["token"].(string)
+		if token == "" {
+			t.Fatalf("enrollment token response did not include token: %#v", enrollmentToken)
+		}
+
+		extras := `{"CUSTOMER":"Acme"}`
+		if mqttAddress != "" {
+			extras = `{"CUSTOMER":"Acme","MQTT_ADDRESS":"` + mqttAddress + `"}`
+		}
+		qrJSON := postJSON(t, client, baseURL+"/api/v1/enrollment/qr/json", `{
+			"serverUrl":"`+baseURL+`",
+			"serverProject":"rest",
+			"enrollmentToken":"`+token+`",
+			"deviceAdminPackageDownloadLocation":"`+baseURL+`/launcher.apk",
+			"deviceAdminPackageChecksum":"`+launcherChecksum+`",
+			"deviceIdentityPolicy":{
+				"deviceId":"`+deviceID+`",
+				"deviceIdUse":"serial"
+			},
+			"bootstrapExtras":`+extras+`
+		}`)
+		transportBootstrapURI := encodeBootstrapURI(t, qrJSON)
+
+		runADBFlow(t, serial, baseURL, transportBootstrapURI, launcherAPKPath, deviceID, "admin", "secret")
+
+		command := postJSON(t, client, baseURL+"/api/v1/admin/commands", `{
+			"type":"ping",
+			"target":{
+				"type":"device",
+				"deviceId":"`+deviceID+`"
+			}
+		}`)
+		createdCommands, _ := command["commands"].([]any)
+		if len(createdCommands) != 1 {
+			t.Fatalf("%s: expected one command row, got %#v", name, command["commands"])
+		}
+		createdCommand, _ := createdCommands[0].(map[string]any)
+		commandID, _ := createdCommand["id"].(string)
+		if commandID == "" {
+			t.Fatalf("%s: command response did not include an id: %#v", name, createdCommand)
+		}
+		if createdCommand["type"] != "ping" {
+			t.Fatalf("%s: unexpected command type: %#v", name, createdCommand["type"])
+		}
+		if createdCommand["deviceId"] != deviceID {
+			t.Fatalf("%s: unexpected command device: %#v", name, createdCommand["deviceId"])
+		}
+
+		waitForADBCondition(t, 4*time.Minute, name+" command ack to reach the server", func() string {
+			return commandStatusSnapshot(t, pool, commandID)
+		}, func() (bool, error) {
+			var status string
+			var resultJSON []byte
+			if err := pool.QueryRow(context.Background(), `SELECT status, result_json FROM commands WHERE id = $1`, commandID).Scan(&status, &resultJSON); err != nil {
+				return false, nil
+			}
+			return status == "acked" && strings.Contains(string(resultJSON), `"message":"pong"`), nil
+		})
+
+		if mqttAddress == "" {
+			if _, err := adb(serial, "shell", "am", "force-stop", "com.xmdm.launcher"); err != nil {
+				t.Fatalf("%s: force-stop launcher before expiry test: %v", name, err)
+			}
+
+			expiryAt := time.Now().Add(2 * time.Second).UTC().Format(time.RFC3339Nano)
+			expiryCommand := postJSON(t, client, baseURL+"/api/v1/admin/commands", `{
+				"type":"ping",
+				"expiresAt":"`+expiryAt+`",
+				"target":{
+					"type":"device",
+					"deviceId":"`+deviceID+`"
+				}
+			}`)
+			expiryCommands, _ := expiryCommand["commands"].([]any)
+			if len(expiryCommands) != 1 {
+				t.Fatalf("%s: expected one expiring command row, got %#v", name, expiryCommand["commands"])
+			}
+			expiryRow, _ := expiryCommands[0].(map[string]any)
+			expiryCommandID, _ := expiryRow["id"].(string)
+			if expiryCommandID == "" {
+				t.Fatalf("%s: expiring command response did not include an id: %#v", name, expiryRow)
+			}
+
+			time.Sleep(3 * time.Second)
+			if _, err := adb(serial, "shell", "am", "start", "-S", "-n", "com.xmdm.launcher/.MainActivity", "-d", transportBootstrapURI); err != nil {
+				t.Fatalf("%s: restart launcher for expiry test: %v", name, err)
+			}
+
+			waitForADBCondition(t, 2*time.Minute, name+" command to expire on the server", func() string {
+				return commandStatusSnapshot(t, pool, expiryCommandID)
+			}, func() (bool, error) {
+				var status string
+				if err := pool.QueryRow(context.Background(), `SELECT status FROM commands WHERE id = $1`, expiryCommandID).Scan(&status); err != nil {
+					return false, nil
+				}
+				return status == "expired", nil
+			})
+		}
 	}
 
-	deviceID := "content-e2e-" + uuid.NewString()
-	qrJSON := postJSON(t, client, baseURL+"/api/v1/enrollment/qr/json", `{
-		"serverUrl":"`+baseURL+`",
-		"serverProject":"rest",
-		"enrollmentToken":"`+token+`",
-		"deviceAdminPackageDownloadLocation":"`+baseURL+`/launcher.apk",
-		"deviceAdminPackageChecksum":"`+launcherChecksum+`",
-		"deviceIdentityPolicy":{
-			"deviceId":"`+deviceID+`",
-			"deviceIdUse":"serial"
-		},
-		"bootstrapExtras":{
-			"CUSTOMER":"Acme"
-		}
-	}`)
-	bootstrapURI := encodeBootstrapURI(t, qrJSON)
-
-	runADBFlow(t, serial, baseURL, bootstrapURI, launcherAPKPath, deviceID, "admin", "secret")
+	t.Run("mqtt", func(t *testing.T) {
+		runCommandScenario(t, "mqtt", "127.0.0.1:1883")
+	})
+	t.Run("polling", func(t *testing.T) {
+		runCommandScenario(t, "polling", "")
+	})
 }
