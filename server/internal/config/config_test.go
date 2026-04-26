@@ -1,0 +1,171 @@
+package config
+
+import (
+	"os"
+	"testing"
+	"time"
+)
+
+func TestLoadConfigDefaults(t *testing.T) {
+	// Clear any existing environment variables
+	unsetEnvVars()
+
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	// Verify defaults
+	if cfg.Server.Address != ":8080" {
+		t.Errorf("Expected Server.Address ':8080', got '%s'", cfg.Server.Address)
+	}
+	if cfg.Server.SessionTTL != 24*time.Hour {
+		t.Errorf("Expected Server.SessionTTL 24h, got %v", cfg.Server.SessionTTL)
+	}
+	if cfg.Postgres.DSN != "postgres://xmdm:xmdm@127.0.0.1:5432/xmdm?sslmode=disable" {
+		t.Errorf("Unexpected Postgres.DSN: %s", cfg.Postgres.DSN)
+	}
+	if cfg.MQTT.Address != "127.0.0.1:1883" {
+		t.Errorf("Expected MQTT.Address '127.0.0.1:1883', got '%s'", cfg.MQTT.Address)
+	}
+}
+
+func TestLoadConfigFromEnv(t *testing.T) {
+	unsetEnvVars()
+
+	os.Setenv("XMDM_ADDR", ":9090")
+	os.Setenv("XMDM_ADMIN_USERNAME", "customuser")
+	os.Setenv("XMDM_ADMIN_PASSWORD", "custompass")
+	os.Setenv("XMDM_POSTGRES_DSN", "postgres://custom:custom@localhost:5432/test")
+	defer unsetEnvVars()
+
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	if cfg.Server.Address != ":9090" {
+		t.Errorf("Expected Server.Address ':9090', got '%s'", cfg.Server.Address)
+	}
+	if cfg.Admin.Username != "customuser" {
+		t.Errorf("Expected Admin.Username 'customuser', got '%s'", cfg.Admin.Username)
+	}
+	if cfg.Admin.Password != "custompass" {
+		t.Errorf("Expected Admin.Password 'custompass', got '%s'", cfg.Admin.Password)
+	}
+	if cfg.Postgres.DSN != "postgres://custom:custom@localhost:5432/test" {
+		t.Errorf("Expected Postgres.DSN 'postgres://custom:custom@localhost:5432/test', got '%s'", cfg.Postgres.DSN)
+	}
+}
+
+func TestLoadConfigFromYAML(t *testing.T) {
+	unsetEnvVars()
+
+	// Create a temporary YAML file
+	content := `
+server:
+  address: ":9091"
+  sessionTTL: 48h
+
+postgres:
+  dsn: "postgres://yamluser:yamlpass@localhost:5432/yamltest"
+
+admin:
+  username: "yamluser"
+  password: "yamlpass"
+`
+	tmpfile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpfile.Close()
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig from YAML failed: %v", err)
+	}
+
+	if cfg.Server.Address != ":9091" {
+		t.Errorf("Expected Server.Address ':9091', got '%s'", cfg.Server.Address)
+	}
+	if cfg.Server.SessionTTL != 48*time.Hour {
+		t.Errorf("Expected Server.SessionTTL 48h, got %v", cfg.Server.SessionTTL)
+	}
+	if cfg.Admin.Username != "yamluser" {
+		t.Errorf("Expected Admin.Username 'yamluser', got '%s'", cfg.Admin.Username)
+	}
+}
+
+func TestEnvOverrideYAML(t *testing.T) {
+	unsetEnvVars()
+
+	// Create YAML with admin user
+	content := `
+admin:
+  username: "yamluser"
+  password: "yamlpass"
+`
+	tmpfile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpfile.Close()
+
+	// Override username with env var
+	os.Setenv("XMDM_ADMIN_USERNAME", "envuser")
+	defer unsetEnvVars()
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig from YAML failed: %v", err)
+	}
+
+	// Username should be overridden by env var
+	if cfg.Admin.Username != "envuser" {
+		t.Errorf("Expected Admin.Username 'envuser' (from env), got '%s'", cfg.Admin.Username)
+	}
+	// Password should remain from YAML
+	if cfg.Admin.Password != "yamlpass" {
+		t.Errorf("Expected Admin.Password 'yamlpass' (from YAML), got '%s'", cfg.Admin.Password)
+	}
+}
+
+func unsetEnvVars() {
+	envVars := []string{
+		"XMDM_ADDR",
+		"XMDM_ADMIN_USERNAME",
+		"XMDM_ADMIN_PASSWORD",
+		"XMDM_SESSION_TTL",
+		"XMDM_POSTGRES_DSN",
+		"XMDM_MQTT_ADDRESS",
+		"XMDM_MQTT_CLIENT_ID",
+		"XMDM_MQTT_USERNAME",
+		"XMDM_MQTT_PASSWORD",
+		"XMDM_MQTT_DYNSEC_ADDRESS",
+		"XMDM_MQTT_DYNSEC_CLIENT_ID",
+		"XMDM_MQTT_DYNSEC_ADMIN_USER",
+		"XMDM_MQTT_DYNSEC_PASSWORD",
+		"XMDM_MQTT_KEEPALIVE",
+		"XMDM_MQTT_DIAL_TIMEOUT",
+		"XMDM_MQTT_DYNSEC_KEEPALIVE",
+		"XMDM_MQTT_DYNSEC_DIAL_TIMEOUT",
+		"XMDM_OBJECT_STORAGE_ENDPOINT",
+		"XMDM_OBJECT_STORAGE_REGION",
+		"XMDM_OBJECT_STORAGE_ACCESS_KEY",
+		"XMDM_OBJECT_STORAGE_SECRET_KEY",
+		"XMDM_OBJECT_STORAGE_BUCKET",
+	}
+	for _, v := range envVars {
+		os.Unsetenv(v)
+	}
+}

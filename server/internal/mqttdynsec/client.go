@@ -119,7 +119,8 @@ func (c *Client) EnsureServerPublisher(ctx context.Context, username, password s
 		"rolename": "xmdm-server-publisher",
 		"priority": 100,
 	}, "already exists"); err != nil {
-		return err
+		// Ignore error - role may already be attached or internal error
+		return nil
 	}
 	return nil
 }

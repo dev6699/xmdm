@@ -1,0 +1,31 @@
+server:
+  address: ":8080"
+  sessionTTL: 24h
+
+postgres:
+  dsn: "postgres://xmdm:xmdm@127.0.0.1:5432/xmdm?sslmode=disable"
+
+mqtt:
+  address: "127.0.0.1:1883"
+  clientID: "xmdm-server"
+  username: "xmdm-server"
+  password: "xmdm-server-secret"
+  dynsecAddress: "127.0.0.1:1883"
+  dynsecClientID: "xmdm-dynsec"
+  dynsecAdminUser: "admin"
+  dynsecPassword: "xmdm-admin"
+  keepAlive: "30s"
+  dialTimeout: "5s"
+  dynsecKeepAlive: "30s"
+  dynsecDialTimeout: "5s"
+
+objectStorage:
+  endpoint: "http://127.0.0.1:8333"
+  region: "us-east-1"
+  accessKeyID: "xmdm"
+  secretAccessKey: "xmdm"
+  bucket: "xmdm"
+
+admin:
+  username: "admin"
+  password: "admin"

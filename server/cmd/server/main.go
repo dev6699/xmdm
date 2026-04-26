@@ -1,170 +1,35 @@
 package main
 
 import (
-	"context"
+	"flag"
 	"log"
 	"net/http"
-	"os"
-	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	v1 "xmdm/server/internal/api/v1"
-	appspg "xmdm/server/internal/apps/postgres"
-	"xmdm/server/internal/artifacts"
-	s3store "xmdm/server/internal/artifacts/s3"
-	auditpg "xmdm/server/internal/audit/postgres"
+	"xmdm/server/internal/api/v1"
 	"xmdm/server/internal/auth"
-	"xmdm/server/internal/bootstrap"
-	certificatesspg "xmdm/server/internal/certificates/postgres"
-	commandspg "xmdm/server/internal/commands/postgres"
-	devicepg "xmdm/server/internal/device/postgres"
-	enrollmentpg "xmdm/server/internal/enrollment/postgres"
-	filespg "xmdm/server/internal/files/postgres"
-	grouppg "xmdm/server/internal/group/postgres"
-	identitypg "xmdm/server/internal/identity/postgres"
-	managedfilespg "xmdm/server/internal/managedfiles/postgres"
-	"xmdm/server/internal/mqttdynsec"
-	"xmdm/server/internal/plugins"
-	policypg "xmdm/server/internal/policy/postgres"
-	"xmdm/server/internal/push"
-	telemetrypg "xmdm/server/internal/telemetry/postgres"
+	"xmdm/server/internal/config"
 )
 
 func main() {
-	addr := env("XMDM_ADDR", ":8080")
-	username := env("XMDM_ADMIN_USERNAME", bootstrap.DefaultAdminUsername)
-	password := env("XMDM_ADMIN_PASSWORD", bootstrap.DefaultAdminPassword)
-	sessionTTL := envDuration("XMDM_SESSION_TTL", 24*time.Hour)
+	configPath := flag.String("config", "", "Path to YAML configuration file")
+	flag.Parse()
+
+	cfg, err := config.LoadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	username := cfg.Admin.Username
+	password := cfg.Admin.Password
+	sessionTTL := cfg.Server.SessionTTL
 
 	svc := auth.NewService(username, password, sessionTTL)
-	deps := openStores()
-	pluginManager := plugins.Disabled()
-	deps.PluginManager = pluginManager
-	mux := newMux(svc, deps)
+	deps := v1.NewDeps(cfg)
+	mux := v1.NewMux(svc, deps)
 
+	addr := cfg.Server.Address
 	log.Printf("xmdm server listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func newMux(svc *auth.Service, deps v1.Dependencies) http.Handler {
-	return v1.NewMux(svc, deps)
-}
-
-func openStores() v1.Dependencies {
-	dsn := env("XMDM_POSTGRES_DSN", bootstrap.DefaultPostgresDSN)
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		log.Fatalf("connect postgres: %v", err)
-	}
-	if err := pool.Ping(context.Background()); err != nil {
-		log.Fatalf("ping postgres: %v", err)
-	}
-	provisioner := mustMQTTProvisioner()
-	publisherUsername := env("XMDM_MQTT_USERNAME", "xmdm-server")
-	publisherPassword := env("XMDM_MQTT_PASSWORD", "xmdm-server-secret")
-	if err := provisioner.EnsureServerPublisher(context.Background(), publisherUsername, publisherPassword); err != nil {
-		log.Printf("mqtt dynsec server publisher provisioning failed: %v", err)
-	}
-	artifactStore := mustArtifactStore()
-	pushPublisher := mustPushPublisher()
-	devicesStore := devicepg.New(pool)
-	enrollmentStore := enrollmentpg.New(pool)
-	commandStore := commandspg.New(pool)
-	commandStore.SetPublisher(pushPublisher)
-	devicesStore.SetProvisioner(provisioner)
-	enrollmentStore.SetProvisioner(provisioner)
-	return v1.Dependencies{
-		Identity:     identitypg.New(pool),
-		Apps:         appspg.New(pool),
-		Files:        filespg.New(pool),
-		ManagedFiles: managedfilespg.New(pool),
-		Commands:     commandStore,
-		Certificates: certificatesspg.New(pool),
-		Artifacts:    artifactStore,
-		Groups:       grouppg.New(pool),
-		Policies:     policypg.New(pool),
-		Devices:      devicesStore,
-		Enrollment:   enrollmentStore,
-		Telemetry:    telemetrypg.New(pool),
-		Audit:        auditpg.NewDBStore(pool),
-		Push:         pushPublisher,
-		TenantID:     bootstrap.SeedTenantID,
-	}
-}
-
-func mustMQTTProvisioner() mqttdynsec.Provisioner {
-	provisioner, err := mqttdynsec.New(mqttdynsec.Config{
-		Address:     env("XMDM_MQTT_DYNSEC_ADDRESS", "127.0.0.1:1883"),
-		ClientID:    env("XMDM_MQTT_DYNSEC_CLIENT_ID", "xmdm-dynsec"),
-		Username:    env("XMDM_MQTT_DYNSEC_ADMIN_USER", "admin"),
-		Password:    env("XMDM_MQTT_DYNSEC_PASSWORD", "xmdm-admin"),
-		KeepAlive:   envDuration("XMDM_MQTT_DYNSEC_KEEPALIVE", 30*time.Second),
-		DialTimeout: envDuration("XMDM_MQTT_DYNSEC_DIAL_TIMEOUT", 5*time.Second),
-	})
-	if err != nil {
-		log.Fatalf("init mqtt dynsec provisioner: %v", err)
-	}
-	return provisioner
-}
-
-func mustPushPublisher() push.Publisher {
-	address := env("XMDM_MQTT_ADDRESS", "127.0.0.1:1883")
-	clientID := env("XMDM_MQTT_CLIENT_ID", "xmdm-server")
-	username := env("XMDM_MQTT_USERNAME", "xmdm-server")
-	password := env("XMDM_MQTT_PASSWORD", "xmdm-server-secret")
-	keepAlive := envDuration("XMDM_MQTT_KEEPALIVE", 30*time.Second)
-	timeout := envDuration("XMDM_MQTT_DIAL_TIMEOUT", 5*time.Second)
-	pub, err := push.NewMQTTPublisher(push.MQTTConfig{
-		Address:     address,
-		ClientID:    clientID,
-		Username:    username,
-		Password:    password,
-		KeepAlive:   keepAlive,
-		DialTimeout: timeout,
-	})
-	if err != nil {
-		log.Fatalf("init mqtt publisher: %v", err)
-	}
-	return pub
-}
-
-func mustArtifactStore() artifacts.Store {
-	endpoint := env("XMDM_OBJECT_STORAGE_ENDPOINT", "http://127.0.0.1:8333")
-	region := env("XMDM_OBJECT_STORAGE_REGION", "us-east-1")
-	accessKey := env("XMDM_OBJECT_STORAGE_ACCESS_KEY", "xmdm")
-	secretKey := env("XMDM_OBJECT_STORAGE_SECRET_KEY", "xmdm")
-	bucket := env("XMDM_OBJECT_STORAGE_BUCKET", "xmdm")
-	store, err := s3store.New(context.Background(), s3store.Config{
-		Endpoint:        endpoint,
-		Region:          region,
-		AccessKeyID:     accessKey,
-		SecretAccessKey: secretKey,
-		Bucket:          bucket,
-		UsePathStyle:    true,
-	})
-	if err != nil {
-		log.Fatalf("init object storage: %v", err)
-	}
-	return store
-}
-
-func env(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func envDuration(key string, fallback time.Duration) time.Duration {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
-		return fallback
-	}
-	return parsed
 }

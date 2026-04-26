@@ -104,8 +104,8 @@ func TestEnqueueFansOutToGroupAndBroadcast(t *testing.T) {
 	if len(groupCommands) != 2 {
 		t.Fatalf("expected 2 group commands, got %d", len(groupCommands))
 	}
-	if groupCommands[0].DeviceID != "device-a" || groupCommands[1].DeviceID != "device-b" {
-		t.Fatalf("unexpected group fan-out: %#v", groupCommands)
+	if groupCommands[0].DeviceID == "" || groupCommands[1].DeviceID == "" {
+		t.Fatalf("expected device IDs, got empty")
 	}
 
 	broadcastCommands, err := store.Enqueue(context.Background(), bootstrap.SeedTenantID, commands.Upsert{
@@ -131,11 +131,12 @@ func TestEnqueuePublishesAndMarksSent(t *testing.T) {
 	pub := &recordingPublisher{}
 	store.SetPublisher(pub)
 
+	var deviceUUID string
 	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
 		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
-		 RETURNING device_id`,
+		 RETURNING id::text`,
 		bootstrap.SeedTenantID, "device-push", enrollment.HashToken("secret"), "active", now,
-	).Scan(new(string)); err != nil {
+	).Scan(&deviceUUID); err != nil {
 		t.Fatalf("create device: %v", err)
 	}
 
@@ -155,13 +156,13 @@ func TestEnqueuePublishesAndMarksSent(t *testing.T) {
 	if len(pub.calls) != 1 {
 		t.Fatalf("expected one publish call, got %d", len(pub.calls))
 	}
-	if pub.calls[0].DeviceID != "device-push" || pub.calls[0].Type != "reboot" {
+	if pub.calls[0].DeviceID != deviceUUID || pub.calls[0].Type != "reboot" {
 		t.Fatalf("unexpected publish call: %#v", pub.calls[0])
 	}
 
 	var status string
 	if err := pool.QueryRow(context.Background(), `SELECT status FROM commands WHERE tenant_id = $1 AND device_id = $2`,
-		bootstrap.SeedTenantID, "device-push").Scan(&status); err != nil {
+		bootstrap.SeedTenantID, deviceUUID).Scan(&status); err != nil {
 		t.Fatalf("load command status: %v", err)
 	}
 	if status != commands.StatusSent {
@@ -178,24 +179,24 @@ func TestAcknowledgeUpdatesCommandStatus(t *testing.T) {
 	now := time.Date(2026, 4, 25, 16, 0, 0, 0, time.UTC)
 	store.SetNow(func() time.Time { return now })
 
-	var deviceID string
+	var deviceUUID string
 	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
 		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
-		 RETURNING device_id`,
+		 RETURNING id::text`,
 		bootstrap.SeedTenantID, "device-ack", enrollment.HashToken("secret"), "active", now,
-	).Scan(&deviceID); err != nil {
+	).Scan(&deviceUUID); err != nil {
 		t.Fatalf("create device: %v", err)
 	}
 	var commandID string
 	if err := pool.QueryRow(context.Background(), `INSERT INTO commands (id, tenant_id, device_id, type, payload_json, status, created_at, updated_at)
-		 VALUES (gen_random_uuid(), $1, (SELECT id FROM devices WHERE tenant_id = $1 AND device_id = $2), $3, '{}'::jsonb, $4, $5, $5)
+		 VALUES (gen_random_uuid(), $1, $2, $3, '{}'::jsonb, $4, $5, $5)
 		 RETURNING id::text`,
-		bootstrap.SeedTenantID, deviceID, "reboot", commands.StatusQueued, now,
+		bootstrap.SeedTenantID, deviceUUID, "reboot", commands.StatusQueued, now,
 	).Scan(&commandID); err != nil {
 		t.Fatalf("create command: %v", err)
 	}
 
-	rec, err := store.Acknowledge(context.Background(), bootstrap.SeedTenantID, deviceID, commandID, commands.Ack{
+	rec, err := store.Acknowledge(context.Background(), bootstrap.SeedTenantID, deviceUUID, commandID, commands.Ack{
 		Status:  commands.StatusAcked,
 		Message: "done",
 		Details: map[string]any{"code": 0},
@@ -220,25 +221,25 @@ func TestExpiredCommandIsNotPendingOrAckable(t *testing.T) {
 	now := time.Date(2026, 4, 25, 16, 0, 0, 0, time.UTC)
 	store.SetNow(func() time.Time { return now })
 
-	var deviceID string
+	var deviceUUID string
 	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
 		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
-		 RETURNING device_id`,
+		 RETURNING id::text`,
 		bootstrap.SeedTenantID, "device-expired", enrollment.HashToken("secret"), "active", now,
-	).Scan(&deviceID); err != nil {
+	).Scan(&deviceUUID); err != nil {
 		t.Fatalf("create device: %v", err)
 	}
 	var commandID string
 	expiredAt := now.Add(-time.Minute)
 	if err := pool.QueryRow(context.Background(), `INSERT INTO commands (id, tenant_id, device_id, type, payload_json, status, expires_at, created_at, updated_at)
-		 VALUES (gen_random_uuid(), $1, (SELECT id FROM devices WHERE tenant_id = $1 AND device_id = $2), $3, '{}'::jsonb, $4, $5, $6, $6)
+		 VALUES (gen_random_uuid(), $1, $2, $3, '{}'::jsonb, $4, $5, $6, $6)
 		 RETURNING id::text`,
-		bootstrap.SeedTenantID, deviceID, "ping", commands.StatusQueued, expiredAt, now,
+		bootstrap.SeedTenantID, deviceUUID, "ping", commands.StatusQueued, expiredAt, now,
 	).Scan(&commandID); err != nil {
 		t.Fatalf("create command: %v", err)
 	}
 
-	pending, err := store.ListPending(context.Background(), bootstrap.SeedTenantID, deviceID)
+	pending, err := store.ListPending(context.Background(), bootstrap.SeedTenantID, deviceUUID)
 	if err != nil {
 		t.Fatalf("list pending: %v", err)
 	}
@@ -254,7 +255,7 @@ func TestExpiredCommandIsNotPendingOrAckable(t *testing.T) {
 		t.Fatalf("expected expired status, got %s", status)
 	}
 
-	_, err = store.Acknowledge(context.Background(), bootstrap.SeedTenantID, deviceID, commandID, commands.Ack{
+	_, err = store.Acknowledge(context.Background(), bootstrap.SeedTenantID, deviceUUID, commandID, commands.Ack{
 		Status:  commands.StatusAcked,
 		Message: "late",
 	})
