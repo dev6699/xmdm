@@ -9,6 +9,7 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestManagedAppsAndFiles` covers adb-backed managed app and managed file delivery on a physical device.
 - `TestCommandMQTT` covers MQTT command transport on a physical device.
 - `TestCommandPolling` covers HTTP polling command transport on a physical device.
+- `TestCommandBrokerOutageRecovery` covers MQTT outage fallback and recovery on a physical device.
 
 ## Test Strategy
 
@@ -58,6 +59,7 @@ Current coverage:
 - `TestManagedAppsAndFiles`
 - `TestCommandMQTT`
 - `TestCommandPolling`
+- `TestCommandBrokerOutageRecovery`
 
 ### Recommended Taxonomy
 
@@ -66,6 +68,7 @@ Current coverage:
 - [`TestManagedAppsAndFiles`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app delivery.
 - [`TestCommandMQTT`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command transport.
 - [`TestCommandPolling`](/home/puong/xmdm/server/e2e/content_test.go) for real-device HTTP polling command transport.
+- [`TestCommandBrokerOutageRecovery`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT outage fallback and recovery.
 
 ## Admin Flow
 
@@ -180,6 +183,27 @@ XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestCommandPolling -count
 ```
 
 `TestCommandPolling` uses a short bootstrap override for the launcher poll interval so it completes faster than the production 30-second default.
+
+### MQTT Outage Recovery Flow
+
+`TestCommandBrokerOutageRecovery` does the following:
+
+1. Boots the launcher with MQTT enabled and a short polling interval.
+2. Verifies the device enrolls and receives an initial command over MQTT.
+3. Stops the local MQTT broker container.
+4. Verifies the next command falls back to HTTP polling and still gets acknowledged.
+5. Restarts the MQTT broker container.
+6. Verifies the launcher resumes MQTT command delivery without re-enrollment.
+
+This test uses the local `infra/docker-compose.yml` broker container as the outage control point.
+
+For the MQTT outage recovery test:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestCommandBrokerOutageRecovery -count=1 ./e2e
+```
 
 ```sh
 cd server

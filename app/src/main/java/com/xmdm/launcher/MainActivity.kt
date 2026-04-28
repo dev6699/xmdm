@@ -384,23 +384,38 @@ class MainActivity : AppCompatActivity() {
                             )
                         }
                     } else {
-                        val handled = deviceCommandCoordinator.pollAndExecute(
-                            serverUrl = bootstrap.serverUrl,
-                            deviceId = identity.deviceId,
-                            deviceSecret = identity.deviceSecret,
-                        )
-                        if (handled.isNotEmpty()) {
-                            Log.w(TAG, "command poll handled ${handled.size} commands instance=$instanceId")
-                        }
+                        pollCommands(bootstrap, identity)
                     }
                 } catch (t: Throwable) {
                     if (t is kotlinx.coroutines.CancellationException) {
                         throw t
                     }
                     Log.w(TAG, "command transport failed", t)
+                    if (mqttAddress.isNotBlank()) {
+                        try {
+                            Log.w(TAG, "command transport falling back to polling instance=$instanceId")
+                            pollCommands(bootstrap, identity)
+                        } catch (pollFailure: Throwable) {
+                            if (pollFailure is kotlinx.coroutines.CancellationException) {
+                                throw pollFailure
+                            }
+                            Log.w(TAG, "command polling fallback failed", pollFailure)
+                        }
+                    }
                 }
                 delay(commandPollIntervalMs(bootstrap))
             }
+        }
+    }
+
+    private suspend fun pollCommands(bootstrap: com.xmdm.launcher.state.BootstrapState, identity: com.xmdm.launcher.state.DeviceIdentityState) {
+        val handled = deviceCommandCoordinator.pollAndExecute(
+            serverUrl = bootstrap.serverUrl,
+            deviceId = identity.deviceId,
+            deviceSecret = identity.deviceSecret,
+        )
+        if (handled.isNotEmpty()) {
+            Log.w(TAG, "command poll handled ${handled.size} commands instance=$instanceId")
         }
     }
 

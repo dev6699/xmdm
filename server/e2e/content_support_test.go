@@ -148,6 +148,26 @@ func newPollingCommandTestEnv(t *testing.T) commandTestEnv {
 	return commandTestEnv{baseTestEnv: newBaseTestEnv(t, false)}
 }
 
+// ensureMQTTBrokerRunning makes sure the local broker container is up before a
+// device-backed command transport test starts.
+func ensureMQTTBrokerRunning(t *testing.T) {
+	t.Helper()
+	runDockerCompose(t, "up", "-d", "mqtt")
+}
+
+// stopMQTTBroker stops the local MQTT broker container so launcher traffic
+// must fall back to HTTP polling.
+func stopMQTTBroker(t *testing.T) {
+	t.Helper()
+	runDockerCompose(t, "stop", "mqtt")
+}
+
+// startMQTTBroker starts the local MQTT broker container again after an outage.
+func startMQTTBroker(t *testing.T) {
+	t.Helper()
+	runDockerCompose(t, "start", "mqtt")
+}
+
 // ── commandTestEnv methods ───────────────────────────────────────────────────
 
 func (e *commandTestEnv) reverseMQTTPort(t *testing.T) {
@@ -322,6 +342,39 @@ func (r *requestRecorder) assertNever(t *testing.T, description string, match fu
 		if match(req) {
 			t.Fatalf("unexpected %s request: %s %s", description, req.method, req.path)
 		}
+	}
+}
+
+func (r *requestRecorder) len() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.requests)
+}
+
+func (r *requestRecorder) assertNeverAfter(t *testing.T, start int, description string, match func(requestRecord) bool) {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if start < 0 {
+		start = 0
+	}
+	if start > len(r.requests) {
+		start = len(r.requests)
+	}
+	for _, req := range r.requests[start:] {
+		if match(req) {
+			t.Fatalf("unexpected %s request after index %d: %s %s", description, start, req.method, req.path)
+		}
+	}
+}
+
+func runDockerCompose(t *testing.T, args ...string) {
+	t.Helper()
+	cmd := exec.Command("docker", append([]string{"compose"}, args...)...)
+	cmd.Dir = filepath.Join("..", "..", "infra")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker compose %s failed: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 }
 

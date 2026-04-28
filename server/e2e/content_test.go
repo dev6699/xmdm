@@ -93,3 +93,57 @@ func TestCommandPolling(t *testing.T) {
 	})
 	env.waitForCommandAck(t, commandID)
 }
+
+// TestCommandBrokerOutageRecovery verifies that the launcher falls back to HTTP
+// polling when MQTT goes away, then resumes MQTT command delivery after the
+// broker comes back.
+func TestCommandBrokerOutageRecovery(t *testing.T) {
+	env := newCommandTestEnv(t)
+	ensureMQTTBrokerRunning(t)
+	env.reverseMQTTPort(t)
+
+	token := env.mustCreateEnrollmentToken(t)
+	bootstrapURI := env.mustBuildBootstrapURIWithExtras(t, token, "127.0.0.1:1883", map[string]string{
+		"COMMAND_POLL_INTERVAL_MS": "1000",
+	})
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+
+	initialCommandID := env.mustIssuePingCommand(t)
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
+	})
+	env.waitForCommandAck(t, initialCommandID)
+
+	stopMQTTBroker(t)
+	time.Sleep(2 * time.Second)
+
+	outageCommandID := env.mustIssuePingCommand(t)
+	env.requests.waitFor(t, time.Minute, "HTTP polling command fetch during broker outage", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			r.path == "/api/v1/devices/"+env.deviceID+"/commands"
+	})
+	env.requests.waitFor(t, time.Minute, "HTTP polling command ack during broker outage", func(r requestRecord) bool {
+		return r.method == http.MethodPost &&
+			r.path == "/api/v1/devices/"+env.deviceID+"/commands/"+outageCommandID+"/ack"
+	})
+	env.waitForCommandAck(t, outageCommandID)
+
+	startMQTTBroker(t)
+	time.Sleep(2 * time.Second)
+
+	recoveryMarker := env.requests.len()
+	recoveryCommandID := env.mustIssuePingCommand(t)
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands after broker recovery", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
+	})
+	env.waitForCommandAck(t, recoveryCommandID)
+	env.requests.assertNeverAfter(t, recoveryMarker, "HTTP polling after broker recovery", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			r.path == "/api/v1/devices/"+env.deviceID+"/commands"
+	})
+}
