@@ -25,7 +25,7 @@ func TestEnrollmentE2E(t *testing.T) {
 	svc.SetNow(func() time.Time { return now })
 
 	auditStore := auditpg.NewDBStore(pool)
-	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled(), newTestArtifactStore(t)))
+	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled(), newTestArtifactStore(t), false))
 	client := newE2EClient(t, handler)
 	baseURL := "http://xmdm.local"
 	deviceID := "device-" + uuid.NewString()

@@ -54,7 +54,7 @@ type Dependencies struct {
 }
 
 // NewMux builds the versioned HTTP surface under /api/v1.
-func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
+func NewMux(svc *auth.Service, deps Dependencies) *http.ServeMux {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
 	enrollmenthttp.Register(apiMux, svc, deps.Enrollment, deps.Apps, deps.ManagedFiles, deps.Certificates, deps.TenantID)

@@ -5,8 +5,67 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 ## What Is Covered
 
 - `TestAdminE2E` covers the admin console flow.
-- `TestEnrollmentE2E` covers the enrollment and first-sync flow.
-- `TestContentE2E` covers adb-backed managed app and managed file delivery on a physical device.
+- `TestEnrollmentE2E` covers server-simulated enrollment and first-sync behavior.
+- `TestManagedAppsAndFiles` covers adb-backed managed app and managed file delivery on a physical device.
+- `TestCommandMQTT` covers MQTT command transport on a physical device.
+- `TestCommandPolling` covers HTTP polling command transport on a physical device.
+
+## Test Strategy
+
+Keep the e2e suite split by intent:
+
+- `Admin API` tests cover pure admin CRUD and session behavior with no adb.
+- `Server-simulated device` tests cover enrollment and related device API behavior through HTTP only.
+- `Real-device launcher` tests cover adb-backed launcher behavior on a physical Android device.
+
+Do not mix these intents in a single test unless the overlap is intentional and clearly documented.
+
+## Test Plan
+
+The e2e suite is split into two different intentions:
+
+### Server-Simulated Flows
+
+These tests exercise server APIs with a synthetic device actor. They do not use adb or a real launcher.
+
+Use this bucket for:
+
+- enrollment token issuance
+- `/api/v1/enrollment` response shape
+- telemetry upload with the device secret
+- duplicate enrollment handling
+- command enqueue, ack, and expiry behavior
+
+Current coverage:
+
+- `TestEnrollmentE2E`
+
+### Device-Backed Flows
+
+These tests run against a real Android device and verify launcher behavior end to end.
+
+Use this bucket for:
+
+- launcher bootstrap
+- real device enrollment
+- managed file rendering
+- managed app install
+- MQTT command transport
+- HTTP polling command transport
+
+Current coverage:
+
+- `TestManagedAppsAndFiles`
+- `TestCommandMQTT`
+- `TestCommandPolling`
+
+### Recommended Taxonomy
+
+- [`TestAdminE2E`](/home/puong/xmdm/server/e2e/admin_test.go) for admin API coverage.
+- [`TestEnrollmentE2E`](/home/puong/xmdm/server/e2e/enrollment_test.go) for server-simulated device enrollment and sync behavior.
+- [`TestManagedAppsAndFiles`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app delivery.
+- [`TestCommandMQTT`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command transport.
+- [`TestCommandPolling`](/home/puong/xmdm/server/e2e/content_test.go) for real-device HTTP polling command transport.
 
 ## Admin Flow
 
@@ -21,7 +80,7 @@ The admin E2E verifies:
 
 ## Enrollment Flow
 
-The enrollment E2E verifies:
+`TestEnrollmentE2E` verifies server-side enrollment behavior:
 
 - enrollment token issuance through the admin API
 - device binding through `/api/v1/enrollment`
@@ -30,15 +89,9 @@ The enrollment E2E verifies:
 - device state promotion from `enrolled` to `active`
 - duplicate enrollment handling for the same device ID
 
-## Scope Note
-
-- This suite is server-side and HTTP-driven today.
-- The enrollment flow remains HTTP-driven here.
-- The content flow now includes a physical-device adb-backed path.
-
 ## Content Flow
 
-`TestContentE2E` is the physical-device content test. It does all of the following in one run:
+`TestManagedAppsAndFiles` is the physical-device content test. It does all of the following in one run:
 
 1. Starts a real HTTP handler stack with a real Postgres test database.
 2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
@@ -51,11 +104,34 @@ The enrollment E2E verifies:
 9. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
 10. Starts the launcher with the bootstrap payload on the physical device.
 11. Waits for the launcher to enroll, fetch policy, render the managed file, and restore Chrome for the current user.
-12. Enqueues a lightweight `ping` command through the admin API.
-13. Verifies the server observes the device ACK with a `pong` response.
-14. Repeats the command flow once with MQTT bootstrap extras and once without them so both transport modes stay covered.
-15. Enqueues a short-lived `ping` command in polling mode, waits for it to expire, and verifies the server marks it `expired`.
-16. Verifies on-device state with adb reads from the launcher sandbox and package manager.
+12. Verifies on-device state with adb reads from the launcher sandbox and package manager.
+
+## Command Flows
+
+The command transport tests share the same device bootstrap and server setup, then split by transport:
+
+### MQTT Command Flow
+
+`TestCommandMQTT` does the following:
+
+1. Boots the launcher with MQTT bootstrap extras.
+2. Waits for `POST /api/v1/enrollment`.
+3. Verifies the server marks the device enrolled through the API.
+4. Enqueues a `ping` command through `POST /api/v1/admin/commands`.
+5. Verifies the device receives the command over MQTT and acknowledges it.
+6. Verifies the device does not fall back to the HTTP polling command endpoint.
+
+### HTTP Polling Command Flow
+
+`TestCommandPolling` does the following:
+
+1. Boots the launcher without MQTT bootstrap extras.
+2. Overrides the launcher command poll interval with `COMMAND_POLL_INTERVAL_MS=1000`.
+3. Waits for `POST /api/v1/enrollment`.
+4. Verifies the server marks the device enrolled through the API.
+5. Enqueues a `ping` command through `POST /api/v1/admin/commands`.
+6. Verifies the device polls `GET /api/v1/devices/{deviceId}/commands`.
+7. Verifies the device acknowledges the command with `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`.
 
 Important details:
 
@@ -72,8 +148,38 @@ Important details:
 - Assertions must prefer API responses over direct database reads.
 - Do not add raw SQL checks for behavior that is already observable through the HTTP surface.
 - The adb helper reinstalls the launcher APK and clears launcher-private state before the run.
+- Keep server-simulated flows free of adb dependencies.
+- Keep device-backed flows focused on launcher and transport behavior, not pure server API coverage.
 
 ## Running
+
+For the adb-backed content test on a physical device:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestManagedAppsAndFiles -count=1 ./e2e
+```
+
+The test uses `XMDM_TEST_POSTGRES_DSN` from `../infra/test-db-env.sh` and requires a connected device serial in `XMDM_ADB_SERIAL`.
+
+For the MQTT command transport test:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestCommandMQTT -count=1 ./e2e
+```
+
+For the HTTP polling command transport test:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestCommandPolling -count=1 ./e2e
+```
+
+`TestCommandPolling` uses a short bootstrap override for the launcher poll interval so it completes faster than the production 30-second default.
 
 ```sh
 cd server

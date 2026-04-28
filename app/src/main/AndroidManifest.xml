@@ -33,10 +33,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".recovery.RecoveryActivity"
-            android:exported="true" />
-
         <receiver
             android:name=".apps.ManagedAppInstallResultReceiver"
             android:exported="false" />

@@ -78,42 +78,6 @@ class AgentStateStore(
         }
     }
 
-    suspend fun clearEnrollmentState() {
-        dataStore.edit { prefs ->
-            prefs.remove(Keys.DEVICE_ID)
-            prefs.remove(Keys.DEVICE_ID_USE)
-            prefs.remove(Keys.DEVICE_SECRET)
-            prefs.remove(Keys.POLICY_SNAPSHOT_JSON)
-            prefs.remove(Keys.POLICY_VERSION)
-            prefs.remove(Keys.POLICY_LAST_SYNC_AT_EPOCH_MILLIS)
-            prefs.remove(Keys.MANAGED_APPS_SNAPSHOT_JSON)
-            prefs.remove(Keys.MANAGED_APPS_VERSION)
-            prefs.remove(Keys.MANAGED_APPS_LAST_APPLIED_AT_EPOCH_MILLIS)
-            prefs.remove(Keys.MANAGED_FILES_SNAPSHOT_JSON)
-            prefs.remove(Keys.MANAGED_FILES_VERSION)
-            prefs.remove(Keys.MANAGED_FILES_LAST_APPLIED_AT_EPOCH_MILLIS)
-        }
-    }
-
-    suspend fun clearProvisioningState() {
-        dataStore.edit { prefs ->
-            prefs.remove(Keys.BOOTSTRAP_SERVER_URL)
-            prefs.remove(Keys.BOOTSTRAP_SECONDARY_SERVER_URL)
-            prefs.remove(Keys.BOOTSTRAP_SERVER_PROJECT)
-            prefs.remove(Keys.BOOTSTRAP_ENROLLMENT_TOKEN)
-            prefs.remove(Keys.BOOTSTRAP_DEVICE_ID)
-            prefs.remove(Keys.BOOTSTRAP_DEVICE_ID_USE)
-            prefs.remove(Keys.BOOTSTRAP_EXTRAS_JSON)
-            prefs.remove(Keys.BOOTSTRAP_RAW_JSON)
-            prefs.remove(Keys.DEVICE_ID)
-            prefs.remove(Keys.DEVICE_ID_USE)
-            prefs.remove(Keys.DEVICE_SECRET)
-            prefs.remove(Keys.POLICY_SNAPSHOT_JSON)
-            prefs.remove(Keys.POLICY_VERSION)
-            prefs.remove(Keys.POLICY_LAST_SYNC_AT_EPOCH_MILLIS)
-        }
-    }
-
     suspend fun clearAllState() {
         dataStore.edit { prefs ->
             prefs.clear()

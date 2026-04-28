@@ -15,7 +15,7 @@ class LauncherEnrollmentStateMachineTest {
         assertSame(bootstrap, machine.nextEnrollmentBootstrap(agentState(bootstrap)))
         assertNull(machine.nextEnrollmentBootstrap(agentState(bootstrap)))
 
-        machine.onEnrollmentFailed("enrollment", "boom", bootstrap.rawJson)
+        machine.reset()
         machine.onBootstrapReceived("""{"run":"one"}""")
         assertNotNull(machine.nextEnrollmentBootstrap(agentState(bootstrap)))
     }

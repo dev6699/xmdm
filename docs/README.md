@@ -6,4 +6,4 @@ Blueprint decisions remain under `/blueprint`; this directory is for repo-level 
 
 Useful runbooks:
 
-- None at the moment.
+- [Agent App Lifecycle](agent-app-lifecycle.md)

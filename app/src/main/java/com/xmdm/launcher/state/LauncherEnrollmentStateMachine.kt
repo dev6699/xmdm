@@ -5,7 +5,7 @@ sealed interface EnrollmentFlowState {
     data class BootstrapReady(val rawBootstrapJson: String) : EnrollmentFlowState
     data class Enrolling(val rawBootstrapJson: String) : EnrollmentFlowState
     data object Enrolled : EnrollmentFlowState
-    data class Recovery(val stage: String, val message: String, val bootstrapJson: String?) : EnrollmentFlowState
+    data class Failed(val message: String) : EnrollmentFlowState
 }
 
 class LauncherEnrollmentStateMachine {
@@ -13,6 +13,9 @@ class LauncherEnrollmentStateMachine {
 
     val isEnrollmentInFlight: Boolean
         get() = state is EnrollmentFlowState.Enrolling
+
+    val enrollmentError: String?
+        get() = (state as? EnrollmentFlowState.Failed)?.message
 
     fun onBootstrapReceived(rawBootstrapJson: String) {
         val normalized = rawBootstrapJson.trim()
@@ -39,7 +42,7 @@ class LauncherEnrollmentStateMachine {
             }
             is EnrollmentFlowState.Enrolling -> null
             is EnrollmentFlowState.Enrolled -> null
-            is EnrollmentFlowState.Recovery -> null
+            is EnrollmentFlowState.Failed -> null
         }
     }
 
@@ -47,8 +50,8 @@ class LauncherEnrollmentStateMachine {
         state = EnrollmentFlowState.Enrolled
     }
 
-    fun onEnrollmentFailed(stage: String, message: String, bootstrapJson: String?) {
-        state = EnrollmentFlowState.Recovery(stage = stage, message = message, bootstrapJson = bootstrapJson)
+    fun onEnrollmentFailed(message: String) {
+        state = EnrollmentFlowState.Failed(message)
     }
 
     fun reset() {

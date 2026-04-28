@@ -9,12 +9,10 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	v1 "xmdm/server/internal/api/v1"
 	appspg "xmdm/server/internal/apps/postgres"
 	"xmdm/server/internal/artifacts"
@@ -32,9 +30,13 @@ import (
 	grouppg "xmdm/server/internal/group/postgres"
 	identitypg "xmdm/server/internal/identity/postgres"
 	managedfilespg "xmdm/server/internal/managedfiles/postgres"
+	"xmdm/server/internal/mqttdynsec"
 	"xmdm/server/internal/plugins"
 	policypg "xmdm/server/internal/policy/postgres"
+	"xmdm/server/internal/push"
 	telemetrypg "xmdm/server/internal/telemetry/postgres"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestAdminE2E(t *testing.T) {
@@ -48,7 +50,7 @@ func TestAdminE2E(t *testing.T) {
 	auditStore := auditpg.NewDBStore(pool)
 	artifactStore := newTestArtifactStore(t)
 	defer func() { _ = artifactStore.Delete(context.Background(), "artifacts/launcher.apk") }()
-	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled(), artifactStore))
+	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled(), artifactStore, false))
 	client := newE2EClient(t, handler)
 	baseURL := "http://xmdm.local"
 
@@ -288,30 +290,6 @@ func (t handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return res, nil
 }
 
-func login(client *http.Client, t *testing.T, baseURL, username, password string) {
-	t.Helper()
-	form := url.Values{}
-	form.Set("username", username)
-	form.Set("password", password)
-
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/admin/login", strings.NewReader(form.Encode()))
-	if err != nil {
-		t.Fatalf("build login request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	res, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("login request: %v", err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusSeeOther {
-		body, _ := io.ReadAll(res.Body)
-		t.Fatalf("expected login redirect, got %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
-	}
-}
-
 func assertStatus(t *testing.T, client *http.Client, method, url, body string, want int) {
 	t.Helper()
 	req, err := http.NewRequest(method, url, strings.NewReader(body))
@@ -392,24 +370,47 @@ func doJSON(t *testing.T, client *http.Client, method, url, body string, want in
 	return payload
 }
 
-func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins.Manager, artifactStore artifacts.Store) v1.Dependencies {
-	return v1.Dependencies{
+func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins.Manager, artifactStore artifacts.Store, enableMQTT bool) v1.Dependencies {
+	devicesStore := devicepg.New(pool)
+	enrollmentStore := enrollmentpg.New(pool)
+	commandStore := commandspg.New(pool)
+	deps := v1.Dependencies{
 		Identity:      identitypg.New(pool),
 		Apps:          appspg.New(pool),
 		Files:         filespg.New(pool),
 		ManagedFiles:  managedfilespg.New(pool),
-		Commands:      commandspg.New(pool),
+		Commands:      commandStore,
 		Certificates:  certificatesspg.New(pool),
 		Groups:        grouppg.New(pool),
 		Policies:      policypg.New(pool),
-		Devices:       devicepg.New(pool),
-		Enrollment:    enrollmentpg.New(pool),
+		Devices:       devicesStore,
+		Enrollment:    enrollmentStore,
 		Telemetry:     telemetrypg.New(pool),
 		Audit:         auditStore,
 		PluginManager: pluginManager,
 		Artifacts:     artifactStore,
 		TenantID:      bootstrap.SeedTenantID,
 	}
+	if enableMQTT {
+		if pub, err := push.NewMQTTPublisher(push.MQTTConfig{
+			Address:  "127.0.0.1:1883",
+			ClientID: "xmdm-server",
+			Username: "xmdm-server",
+			Password: "xmdm-server-secret",
+		}); err == nil {
+			commandStore.SetPublisher(pub)
+		}
+		if provisioner, err := mqttdynsec.New(mqttdynsec.Config{
+			Address:  "127.0.0.1:1883",
+			ClientID: "xmdm-dynsec",
+			Username: "admin",
+			Password: "xmdm-admin",
+		}); err == nil {
+			devicesStore.SetProvisioner(provisioner)
+			enrollmentStore.SetProvisioner(provisioner)
+		}
+	}
+	return deps
 }
 
 func postMultipartFile(t *testing.T, client *http.Client, url string, fields map[string]string, fileField, fileName string, content []byte) map[string]any {

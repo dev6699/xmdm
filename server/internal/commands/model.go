@@ -25,9 +25,9 @@ type Command struct {
 	ExpiresAt *time.Time     `json:"expiresAt,omitempty"`
 	AckedAt   *time.Time     `json:"ackedAt,omitempty"`
 	Result    map[string]any `json:"result,omitempty"`
+	DeviceID  string         `json:"deviceId,omitempty"`
 
 	TenantID  string    `json:"-"`
-	DeviceID  string    `json:"-"`
 	CreatedAt time.Time `json:"-"`
 	UpdatedAt time.Time `json:"-"`
 }

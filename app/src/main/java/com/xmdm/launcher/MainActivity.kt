@@ -23,7 +23,6 @@ import com.xmdm.launcher.files.ManagedFileInstallCoordinator
 import com.xmdm.launcher.databinding.ActivityMainBinding
 import com.xmdm.launcher.enrollment.EnrollmentCoordinator
 import com.xmdm.launcher.enrollment.HttpEnrollmentGateway
-import com.xmdm.launcher.recovery.RecoveryActivity
 import com.xmdm.launcher.state.AgentState
 import com.xmdm.launcher.state.AgentStateStore
 import com.xmdm.launcher.state.LauncherEnrollmentStateMachine
@@ -88,7 +87,6 @@ class MainActivity : AppCompatActivity() {
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
     private var cachedPrettySnapshotJson: String? = null
     private var cachedPrettySnapshotText: String = ""
-    private var recoveryVisible = false
     private var latestState: AgentState = AgentState.empty()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -136,10 +134,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderLauncherStatus() {
-        binding.launcherStatus.text = renderStatus(latestState, enrollmentStateMachine.isEnrollmentInFlight)
+        binding.launcherStatus.text = renderStatus(latestState, enrollmentStateMachine.isEnrollmentInFlight, enrollmentStateMachine.enrollmentError)
     }
 
-    private fun renderStatus(state: AgentState, enrollmentInFlight: Boolean): CharSequence {
+    private fun renderStatus(state: AgentState, enrollmentInFlight: Boolean, enrollmentError: String?): CharSequence {
         val bootstrapLine = if (state.isBootstrapped) {
             "bootstrap: restored"
         } else {
@@ -148,11 +146,13 @@ class MainActivity : AppCompatActivity() {
         val enrollmentLine = when {
             state.isEnrolled -> getString(R.string.launcher_enrollment_success)
             enrollmentInFlight -> getString(R.string.launcher_enrollment_in_progress)
+            enrollmentError != null -> getString(R.string.launcher_enrollment_failed, enrollmentError)
             else -> getString(R.string.launcher_enrollment_empty)
         }
         val identityLine = when {
             state.isEnrolled -> "device identity: restored"
             enrollmentInFlight -> "device identity: enrolling"
+            enrollmentError != null -> "device identity: failed"
             else -> "device identity: empty"
         }
         val deviceOwnerLine = if (isDeviceOwnerApp()) {
@@ -340,16 +340,7 @@ class MainActivity : AppCompatActivity() {
                 enrollmentStateMachine.onEnrollmentSucceeded()
             } catch (t: Throwable) {
                 Log.w(TAG, "enrollment failed", t)
-                enrollmentStateMachine.onEnrollmentFailed(
-                    stage = "enrollment",
-                    message = t.message ?: t.javaClass.simpleName,
-                    bootstrapJson = bootstrap.rawJson,
-                )
-                showRecovery(
-                    stage = "enrollment",
-                    message = t.message ?: t.javaClass.simpleName,
-                    bootstrapJson = bootstrap.rawJson,
-                )
+                enrollmentStateMachine.onEnrollmentFailed(t.message ?: t.javaClass.simpleName)
             }
         }
     }
@@ -379,7 +370,7 @@ class MainActivity : AppCompatActivity() {
                         MqttDeviceCommandTransport(
                             MqttDeviceCommandConfig(
                                 address = mqtt,
-                                clientId = "device-${identity.deviceId}",
+                                clientId = identity.deviceId,
                                 deviceId = identity.deviceId,
                                 username = identity.deviceId,
                                 password = identity.deviceSecret,
@@ -408,7 +399,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     Log.w(TAG, "command transport failed", t)
                 }
-                delay(COMMAND_POLL_INTERVAL_MS)
+                delay(commandPollIntervalMs(bootstrap))
             }
         }
     }
@@ -449,13 +440,6 @@ class MainActivity : AppCompatActivity() {
                 lastManagedFilesSnapshotVersion = policyCache.version
             } catch (t: Throwable) {
                 Log.w(TAG, "managed file install failed", t)
-                withContext(Dispatchers.Main) {
-                    showRecovery(
-                        stage = "file-install",
-                        message = t.message ?: t.javaClass.simpleName,
-                        bootstrapJson = bootstrap.rawJson,
-                    )
-                }
             } finally {
                 withContext(Dispatchers.Main) {
                     fileInstallInFlight = false
@@ -513,13 +497,6 @@ class MainActivity : AppCompatActivity() {
             } catch (t: Throwable) {
                 Log.w(TAG, "managed app install failed", t)
                 managedAppProgress.value = ManagedAppInstallProgress.Failed(t.message ?: t.javaClass.simpleName)
-                withContext(Dispatchers.Main) {
-                    showRecovery(
-                        stage = "app-install",
-                        message = t.message ?: t.javaClass.simpleName,
-                        bootstrapJson = bootstrap.rawJson,
-                    )
-                }
             } finally {
                 withContext(Dispatchers.Main) {
                     appInstallInFlight = false
@@ -532,12 +509,15 @@ class MainActivity : AppCompatActivity() {
     private suspend fun consumeBootstrapIntent() {
         val rawBootstrapJson = resolveBootstrapJson()
             ?: return
-        Log.w(TAG, "consumeBootstrapIntent instance=$instanceId reset=${intent.getBooleanExtra(EXTRA_RESET_STATE, false)} bootstrap=${rawBootstrapJson.hashCode()}")
+        Log.w(TAG, "consumeBootstrapIntent instance=$instanceId bootstrap=${rawBootstrapJson.hashCode()}")
 
         try {
-            if (intent.getBooleanExtra(EXTRA_RESET_STATE, false)) {
+            val normalizedBootstrap = rawBootstrapJson.trim()
+            val shouldReset = normalizedBootstrap.isNotEmpty()
+
+            if (shouldReset) {
                 withContext(Dispatchers.IO) {
-                    stateStore.clearProvisioningState()
+                    stateStore.clearAllState()
                 }
                 lastManagedFilesSnapshotVersion = null
                 lastManagedAppsSnapshotVersion = null
@@ -548,32 +528,12 @@ class MainActivity : AppCompatActivity() {
                 renderManagedAppProgress()
             }
             enrollmentStateMachine.reset()
-            enrollmentStateMachine.onBootstrapReceived(rawBootstrapJson)
+            enrollmentStateMachine.onBootstrapReceived(normalizedBootstrap)
             BootstrapProvisioner(stateStore).persist(rawBootstrapJson)
             maybeStartEnrollment(stateStore.state.first())
         } catch (t: Throwable) {
             Log.w(TAG, "bootstrap parsing failed", t)
-            showRecovery(
-                stage = "bootstrap",
-                message = t.message ?: t.javaClass.simpleName,
-                bootstrapJson = rawBootstrapJson,
-            )
         }
-    }
-
-    private fun showRecovery(stage: String, message: String, bootstrapJson: String? = null) {
-        if (recoveryVisible) {
-            return
-        }
-        recoveryVisible = true
-        startActivity(
-            RecoveryActivity.intent(
-                context = this,
-                stage = stage,
-                message = message,
-                bootstrapJson = bootstrapJson,
-            ),
-        )
     }
 
     private fun resolveBootstrapJson(): String? {
@@ -599,6 +559,16 @@ class MainActivity : AppCompatActivity() {
         return stringValue(extras, MQTT_ADDRESS_KEYS)
     }
 
+    private fun commandPollIntervalMs(bootstrap: com.xmdm.launcher.state.BootstrapState): Long {
+        val extras = runCatching { JsonParser.parseString(bootstrap.bootstrapExtrasJson).asJsonObject }.getOrNull()
+            ?: return DEFAULT_COMMAND_POLL_INTERVAL_MS
+        val raw = extras.get(COMMAND_POLL_INTERVAL_KEY) ?: return DEFAULT_COMMAND_POLL_INTERVAL_MS
+        return runCatching { raw.asLong }
+            .getOrNull()
+            ?.takeIf { it > 0 }
+            ?: DEFAULT_COMMAND_POLL_INTERVAL_MS
+    }
+
     private fun stringValue(source: com.google.gson.JsonObject, names: Set<String>): String? {
         for (name in names) {
             val value = source.get(name) ?: continue
@@ -614,10 +584,10 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_BOOTSTRAP_JSON = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON"
         const val EXTRA_BOOTSTRAP_JSON_B64 = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64"
-        const val EXTRA_RESET_STATE = "com.xmdm.launcher.EXTRA_RESET_STATE"
-        const val BOOTSTRAP_DATA_PREFIX = "base64url:"
+const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
-        private const val COMMAND_POLL_INTERVAL_MS = 30_000L
+        private const val DEFAULT_COMMAND_POLL_INTERVAL_MS = 30_000L
+        private const val COMMAND_POLL_INTERVAL_KEY = "COMMAND_POLL_INTERVAL_MS"
         private val MQTT_ADDRESS_KEYS = setOf(
             "com.xmdm.MQTT_ADDRESS",
             "MQTT_ADDRESS",
@@ -627,14 +597,10 @@ class MainActivity : AppCompatActivity() {
         fun intent(
             context: android.content.Context,
             bootstrapJson: String? = null,
-            resetState: Boolean = false,
         ): android.content.Intent {
             return android.content.Intent(context, MainActivity::class.java).apply {
                 if (bootstrapJson != null) {
                     putExtra(EXTRA_BOOTSTRAP_JSON, bootstrapJson)
-                }
-                if (resetState) {
-                    putExtra(EXTRA_RESET_STATE, true)
                 }
             }
         }

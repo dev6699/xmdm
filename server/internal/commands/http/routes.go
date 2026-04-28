@@ -38,7 +38,8 @@ func Register(mux httpx.Router, devices device.Repository, store commands.Reposi
 			http.Error(w, "invalid input", http.StatusBadRequest)
 			return
 		}
-		if _, err := devices.Authenticate(r.Context(), tenantID, deviceID, secret); err != nil {
+		authDevice, err := devices.Authenticate(r.Context(), tenantID, deviceID, secret)
+		if err != nil {
 			switch err {
 			case httpx.ErrInvalidInput:
 				http.Error(w, "invalid input", http.StatusBadRequest)
@@ -49,7 +50,7 @@ func Register(mux httpx.Router, devices device.Repository, store commands.Reposi
 			}
 			return
 		}
-		items, err := store.ListPending(r.Context(), tenantID, deviceID)
+		items, err := store.ListPending(r.Context(), tenantID, authDevice.RecordID())
 		if err != nil {
 			switch err {
 			case httpx.ErrInvalidInput:
@@ -79,7 +80,8 @@ func Register(mux httpx.Router, devices device.Repository, store commands.Reposi
 			http.Error(w, "invalid input", http.StatusBadRequest)
 			return
 		}
-		if _, err := devices.Authenticate(r.Context(), tenantID, deviceID, secret); err != nil {
+		authDevice, err := devices.Authenticate(r.Context(), tenantID, deviceID, secret)
+		if err != nil {
 			switch err {
 			case httpx.ErrInvalidInput:
 				http.Error(w, "invalid input", http.StatusBadRequest)
@@ -95,7 +97,7 @@ func Register(mux httpx.Router, devices device.Repository, store commands.Reposi
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		updated, err := store.Acknowledge(r.Context(), tenantID, deviceID, commandID, commands.Ack{
+		updated, err := store.Acknowledge(r.Context(), tenantID, authDevice.RecordID(), commandID, commands.Ack{
 			Status:  req.Status,
 			Message: req.Message,
 			Details: req.Details,

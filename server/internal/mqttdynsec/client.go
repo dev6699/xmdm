@@ -57,16 +57,17 @@ func (c *Client) UpsertDevice(ctx context.Context, deviceID, deviceSecret string
 	if strings.TrimSpace(deviceID) == "" || strings.TrimSpace(deviceSecret) == "" {
 		return fmt.Errorf("missing device credentials")
 	}
+	commandTopic := fmt.Sprintf("devices/%s/commands", deviceID)
 	if err := c.ensureRole(ctx, "xmdm-device-command",
 		map[string]any{
-			"acltype":  "subscribePattern",
-			"topic":    "devices/%u/commands",
+			"acltype":  "subscribeLiteral",
+			"topic":    commandTopic,
 			"allow":    true,
 			"priority": 100,
 		},
 		map[string]any{
 			"acltype":  "publishClientReceive",
-			"topic":    "devices/%u/commands",
+			"topic":    commandTopic,
 			"allow":    true,
 			"priority": 100,
 		},
@@ -112,15 +113,6 @@ func (c *Client) EnsureServerPublisher(ctx context.Context, username, password s
 	}
 	if err := c.ensureClient(ctx, username, password); err != nil {
 		return err
-	}
-	if err := c.runCommand(ctx, map[string]any{
-		"command":  "addClientRole",
-		"username": username,
-		"rolename": "xmdm-server-publisher",
-		"priority": 100,
-	}, "already exists"); err != nil {
-		// Ignore error - role may already be attached or internal error
-		return nil
 	}
 	return nil
 }

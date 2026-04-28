@@ -105,9 +105,13 @@ class MqttDeviceCommandTransport(
     }
 
     private fun readSuback(input: BufferedInputStream) {
-        val packet = readPacket(input)
-        if (packet.size < 5 || packet[0].toInt() != 0x90) {
-            error("mqtt suback rejected")
+        while (true) {
+            val packet = readPacket(input)
+            when (packet.firstOrNull()?.toInt()?.and(0xF0)) {
+                0x90 -> if (packet.size >= 5) return else error("mqtt suback rejected")
+                0xE0 -> error("mqtt suback rejected")
+                else -> continue
+            }
         }
     }
 
