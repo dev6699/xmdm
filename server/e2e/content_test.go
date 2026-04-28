@@ -147,3 +147,34 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 			r.path == "/api/v1/devices/"+env.deviceID+"/commands"
 	})
 }
+
+// TestKioskMode verifies that a kiosk policy snapshot pushes the launcher into
+// lock-task mode on a physical device.
+func TestKioskMode(t *testing.T) {
+	env := newBaseTestEnv(t, false)
+
+	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, "", map[string]string{
+		"kioskMode": "true",
+	})
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForKioskModeOnDevice(t, env.serial)
+}
+
+// TestPackageRules verifies that the launcher suspends packages that are
+// blocked by the signed policy snapshot on a physical device.
+func TestPackageRules(t *testing.T) {
+	env := newPackageRulesTestEnv(t)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForChromeInstalled(t, env.serial)
+	waitForPackageSuspendedOnDevice(t, env.serial, chromePackage)
+}

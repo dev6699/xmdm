@@ -23,6 +23,10 @@ import com.xmdm.launcher.files.ManagedFileInstallCoordinator
 import com.xmdm.launcher.databinding.ActivityMainBinding
 import com.xmdm.launcher.enrollment.EnrollmentCoordinator
 import com.xmdm.launcher.enrollment.HttpEnrollmentGateway
+import com.xmdm.launcher.kiosk.AndroidKioskModeHost
+import com.xmdm.launcher.kiosk.KioskModeController
+import com.xmdm.launcher.packages.AndroidPackageRulesHost
+import com.xmdm.launcher.packages.PackageRulesController
 import com.xmdm.launcher.state.AgentState
 import com.xmdm.launcher.state.AgentStateStore
 import com.xmdm.launcher.state.LauncherEnrollmentStateMachine
@@ -73,6 +77,12 @@ class MainActivity : AppCompatActivity() {
             ),
         )
     }
+    private val kioskModeController by lazy {
+        KioskModeController(AndroidKioskModeHost(this))
+    }
+    private val packageRulesController by lazy {
+        PackageRulesController(AndroidPackageRulesHost(this))
+    }
     private val enrollmentStateMachine = LauncherEnrollmentStateMachine()
     private val managedAppProgress = MutableStateFlow<ManagedAppInstallProgress>(ManagedAppInstallProgress.Idle)
     private lateinit var binding: ActivityMainBinding
@@ -105,6 +115,8 @@ class MainActivity : AppCompatActivity() {
                 maybeStartEnrollment(state)
                 maybeApplyManagedFiles(state)
                 maybeApplyManagedApps(state)
+                packageRulesController.apply(state)
+                kioskModeController.apply(state)
                 maybeStartCommandTransport(state)
             }
         }
@@ -122,6 +134,12 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             consumeBootstrapIntent()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        packageRulesController.apply(latestState)
+        kioskModeController.apply(latestState)
     }
 
     private fun renderUi() {

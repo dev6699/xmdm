@@ -15,6 +15,7 @@ import (
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/policy"
 
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -62,7 +63,7 @@ type EnrollmentRequest struct {
 	BootstrapExtras      map[string]any       `json:"bootstrapExtras"`
 }
 
-func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, certStore certificates.Repository, tenantID string) {
+func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, certStore certificates.Repository, policyStore policy.Repository, tenantID string) {
 	enrollmentMux := httpx.WithPrefix(mux, "/enrollment")
 
 	enrollmentMux.HandleFunc("", func(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +101,12 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		config := enrollment.NewBootstrapConfigSnapshot(req.DeviceIdentityPolicy.DeviceID, req.DeviceIdentityPolicy.DeviceIDUse, req.BootstrapExtras, appsSnapshot, filesSnapshot, certs)
+		policySnapshot, err := latestPolicySnapshot(r.Context(), policyStore, tenantID, req.BootstrapExtras)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		config := enrollment.NewBootstrapConfigSnapshot(req.DeviceIdentityPolicy.DeviceID, req.DeviceIdentityPolicy.DeviceIDUse, policySnapshot, appsSnapshot, filesSnapshot, certs)
 		signed, err := enrollment.SignConfigSnapshot(config, bound.DeviceSecret)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -283,6 +289,46 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 
 		writeJSON(w, toPayload(payload))
 	})
+}
+
+func latestPolicySnapshot(ctx context.Context, store policy.Repository, tenantID string, bootstrapExtras map[string]any) (map[string]any, error) {
+	snapshot := map[string]any{}
+	if len(bootstrapExtras) > 0 {
+		snapshot["bootstrapExtras"] = bootstrapExtras
+	}
+	if store == nil {
+		return snapshot, nil
+	}
+	policies, err := store.ListPolicies(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	var selected *policy.Policy
+	for i := range policies {
+		rec := policies[i]
+		if rec.Status != "active" {
+			continue
+		}
+		if selected == nil || rec.Version > selected.Version || (rec.Version == selected.Version && rec.UpdatedAt.After(selected.UpdatedAt)) {
+			selected = &rec
+		}
+	}
+	if selected == nil {
+		return snapshot, nil
+	}
+	snapshot["name"] = selected.Name
+	snapshot["version"] = selected.Version
+	snapshot["kioskMode"] = selected.KioskMode
+	if len(selected.Restrictions) > 0 {
+		var restrictions any
+		if err := json.Unmarshal(selected.Restrictions, &restrictions); err != nil {
+			return nil, err
+		}
+		snapshot["restrictions"] = restrictions
+	} else {
+		snapshot["restrictions"] = map[string]any{}
+	}
+	return snapshot, nil
 }
 
 func decodeTokenIssueRequest(r *http.Request, dst *TokenIssueRequest) error {

@@ -95,8 +95,8 @@ Note: `M5-01 MQTT Transport` is complete with the server constructing an interna
 
 | Item | State |
 | --- | --- |
-| M6-01 Kiosk Enforcement | ☐ |
-| M6-02 Package Rules | ☐ |
+| M6-01 Kiosk Enforcement | ☑ |
+| M6-02 Package Rules | ☑ |
 | M6-03 Foreground Enforcement | ☐ |
 | M6-04 Device Logs | ☐ |
 | M6-05 Device Info | ☐ |

@@ -50,6 +50,36 @@ func waitForChromeInstalled(t *testing.T, serial string) {
 	)
 }
 
+// waitForPackageSuspendedOnDevice polls until the package manager reports the package as suspended.
+func waitForPackageSuspendedOnDevice(t *testing.T, serial, packageName string) {
+	t.Helper()
+	waitForCondition(t, time.Minute, packageName+" to be suspended on device",
+		func() string { return adbPackageSnapshot(t, serial, packageName) },
+		func() (bool, error) {
+			out, err := adbShellOutput(serial, "dumpsys", "package", packageName)
+			if err != nil {
+				return false, nil
+			}
+			return isPackageSuspendedDump(out), nil
+		},
+	)
+}
+
+// waitForKioskModeOnDevice polls until the launcher enters lock-task mode.
+func waitForKioskModeOnDevice(t *testing.T, serial string) {
+	t.Helper()
+	waitForCondition(t, time.Minute, "launcher to enter kiosk mode",
+		func() string { return adbKioskSnapshot(t, serial) },
+		func() (bool, error) {
+			out, err := adbShellOutput(serial, "dumpsys", "activity", "activities")
+			if err != nil {
+				return false, nil
+			}
+			return isKioskModeDump(out), nil
+		},
+	)
+}
+
 // reverseADBPort sets up port forwarding from the device to the host for the given server URL's port.
 func reverseADBPort(t *testing.T, serial, baseURL string) {
 	t.Helper()
@@ -162,4 +192,72 @@ func adb(serial string, args ...string) (string, error) {
 // adbShellOutput is a convenience wrapper that prepends "shell" to the args list.
 func adbShellOutput(serial string, args ...string) (string, error) {
 	return adb(serial, append([]string{"shell"}, args...)...)
+}
+
+func adbKioskSnapshot(t *testing.T, serial string) string {
+	t.Helper()
+	out, err := adbShellOutput(serial, "dumpsys", "activity", "activities")
+	if err != nil {
+		return "kiosk_err=" + strings.TrimSpace(err.Error())
+	}
+	lines := strings.Split(out, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "locktask") || strings.Contains(lower, "lock task") {
+			filtered = append(filtered, line)
+			continue
+		}
+		if strings.Contains(lower, "mlocktaskmodestate") {
+			filtered = append(filtered, line)
+		}
+	}
+	if len(filtered) == 0 {
+		return "kiosk=unknown"
+	}
+	return strings.Join(filtered, " | ")
+}
+
+func adbPackageSnapshot(t *testing.T, serial, packageName string) string {
+	t.Helper()
+	out, err := adbShellOutput(serial, "dumpsys", "package", packageName)
+	if err != nil {
+		return "package_err=" + strings.TrimSpace(err.Error())
+	}
+	lines := strings.Split(out, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "suspended") || strings.Contains(lower, "hidden") || strings.Contains(lower, "enabled") {
+			filtered = append(filtered, line)
+		}
+	}
+	if len(filtered) == 0 {
+		return "package=unknown"
+	}
+	return strings.Join(filtered, " | ")
+}
+
+func isKioskModeDump(out string) bool {
+	lower := strings.ToLower(out)
+	if strings.Contains(lower, "mlocktaskmodestate=locked") || strings.Contains(lower, "mlocktaskmodestate=1") {
+		return true
+	}
+	if strings.Contains(lower, "locktaskmode=locked") || strings.Contains(lower, "lock task mode: locked") {
+		return true
+	}
+	return false
+}
+
+func isPackageSuspendedDump(out string) bool {
+	lower := strings.ToLower(out)
+	return strings.Contains(lower, "suspended=true")
 }

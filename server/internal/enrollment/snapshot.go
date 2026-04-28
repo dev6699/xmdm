@@ -12,8 +12,8 @@ import (
 
 func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, bootstrapExtras map[string]any, apps []any, files []ManagedFileSnapshot, certificates []any) ConfigSnapshot {
 	policy := map[string]any{}
-	if len(bootstrapExtras) > 0 {
-		policy["bootstrapExtras"] = bootstrapExtras
+	for key, value := range bootstrapExtras {
+		policy[key] = value
 	}
 	if certificates == nil {
 		certificates = []any{}

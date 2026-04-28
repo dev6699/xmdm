@@ -18,6 +18,7 @@ import (
 	"xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/policy"
 )
 
 func TestRegisterQRPng(t *testing.T) {
@@ -28,7 +29,7 @@ func TestRegisterQRPng(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -65,7 +66,7 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -125,6 +126,82 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 	}
 }
 
+func TestRegisterEnrollmentIncludesLatestActivePolicy(t *testing.T) {
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
+	store := &fakeEnrollmentStore{
+		bound: enrollment.BoundDevice{
+			DeviceID:     "device-123",
+			DeviceSecret: "device-secret",
+			Status:       device.StatusEnrolled,
+		},
+	}
+	policyStore := &fakePolicyStore{
+		policies: []policy.Policy{
+			{
+				RecordBase: policy.RecordBase{
+					ID:       "policy-old",
+					TenantID: "tenant-1",
+					Status:   "active",
+				},
+				Name:         "old",
+				Version:      1,
+				KioskMode:    false,
+				Restrictions: json.RawMessage(`{"blockPackages":["com.example.old"]}`),
+			},
+			{
+				RecordBase: policy.RecordBase{
+					ID:       "policy-new",
+					TenantID: "tenant-1",
+					Status:   "active",
+				},
+				Name:         "new",
+				Version:      2,
+				KioskMode:    true,
+				Restrictions: json.RawMessage(`{"blockPackages":["com.example.bad"],"allowPackages":["com.example.good"]}`),
+			},
+		},
+	}
+
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, nil, nil, nil, policyStore, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
+		"enrollmentToken":"secret-token",
+		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"},
+		"bootstrapExtras":{"customer":"Acme"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected bind ok, got %d", res.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode bind response: %v", err)
+	}
+	rawConfig, _ := payload["config"].(map[string]any)
+	policyValue, _ := rawConfig["policy"].(map[string]any)
+	if policyValue["kioskMode"] != true {
+		t.Fatalf("unexpected kioskMode: %#v", policyValue["kioskMode"])
+	}
+	if policyValue["name"] != "new" {
+		t.Fatalf("unexpected policy name: %#v", policyValue["name"])
+	}
+	if policyValue["version"] != float64(2) {
+		t.Fatalf("unexpected policy version: %#v", policyValue["version"])
+	}
+	restrictions, _ := policyValue["restrictions"].(map[string]any)
+	if restrictions["blockPackages"] == nil {
+		t.Fatalf("missing blockPackages: %#v", restrictions)
+	}
+	bootstrapExtras, _ := policyValue["bootstrapExtras"].(map[string]any)
+	if bootstrapExtras["customer"] != "Acme" {
+		t.Fatalf("missing bootstrapExtras passthrough: %#v", policyValue)
+	}
+}
+
 func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionAdminRead})
 	session, err := svc.Login("admin", "secret")
@@ -133,7 +210,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/qr/json", bytes.NewBufferString(`{"serverUrl":"not-a-url","deviceAdminPackageDownloadLocation":"https://cdn.example/launcher.apk","deviceAdminPackageChecksum":"abc123"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -155,7 +232,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res = httptest.NewRecorder()
 	mux = http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, "tenant-1")
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad request, got %d", res.Code)
@@ -196,7 +273,7 @@ func TestRegisterTokenLifecycleRoutes(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, nil, nil, nil, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens", bytes.NewBufferString(`{"ttlSeconds":3600}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -325,7 +402,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 				Checksum:   "sha256-cert-abc",
 			},
 		},
-	}, "tenant-1")
+	}, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
@@ -498,7 +575,7 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, appStore, fileStore, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, appStore, fileStore, nil, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
@@ -575,6 +652,10 @@ type fakeFileStore struct {
 type fakeAppStore struct {
 	apps     []apps.App
 	versions map[string][]apps.Version
+}
+
+type fakePolicyStore struct {
+	policies []policy.Policy
 }
 
 func (s *fakeEnrollmentStore) IssueToken(ctx context.Context, tenantID string, expiresAt time.Time) (enrollment.IssuedToken, error) {
@@ -670,6 +751,22 @@ func (s *fakeAppStore) GetVersion(context.Context, string, string, string) (apps
 
 func (s *fakeAppStore) CreateVersion(context.Context, string, string, apps.VersionUpsert) (apps.Version, error) {
 	return apps.Version{}, nil
+}
+
+func (s *fakePolicyStore) ListPolicies(context.Context, string) ([]policy.Policy, error) {
+	return append([]policy.Policy(nil), s.policies...), nil
+}
+
+func (s *fakePolicyStore) CreatePolicy(context.Context, string, policy.PolicyUpsert) (policy.Policy, error) {
+	return policy.Policy{}, nil
+}
+
+func (s *fakePolicyStore) UpdatePolicy(context.Context, string, string, policy.PolicyUpsert) (policy.Policy, error) {
+	return policy.Policy{}, nil
+}
+
+func (s *fakePolicyStore) RetirePolicy(context.Context, string, string) (policy.Policy, error) {
+	return policy.Policy{}, nil
 }
 
 func strPtr(value string) *string {

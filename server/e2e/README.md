@@ -7,6 +7,8 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestAdminE2E` covers the admin console flow.
 - `TestEnrollmentE2E` covers server-simulated enrollment and first-sync behavior.
 - `TestManagedAppsAndFiles` covers adb-backed managed app and managed file delivery on a physical device.
+- `TestKioskMode` covers adb-backed kiosk enforcement on a physical device.
+- `TestPackageRules` covers adb-backed package suspension enforcement on a physical device.
 - `TestCommandMQTT` covers MQTT command transport on a physical device.
 - `TestCommandPolling` covers HTTP polling command transport on a physical device.
 - `TestCommandBrokerOutageRecovery` covers MQTT outage fallback and recovery on a physical device.
@@ -49,6 +51,8 @@ Use this bucket for:
 
 - launcher bootstrap
 - real device enrollment
+- kiosk enforcement
+- package suspension enforcement
 - managed file rendering
 - managed app install
 - MQTT command transport
@@ -57,6 +61,8 @@ Use this bucket for:
 Current coverage:
 
 - `TestManagedAppsAndFiles`
+- `TestKioskMode`
+- `TestPackageRules`
 - `TestCommandMQTT`
 - `TestCommandPolling`
 - `TestCommandBrokerOutageRecovery`
@@ -66,6 +72,8 @@ Current coverage:
 - [`TestAdminE2E`](/home/puong/xmdm/server/e2e/admin_test.go) for admin API coverage.
 - [`TestEnrollmentE2E`](/home/puong/xmdm/server/e2e/enrollment_test.go) for server-simulated device enrollment and sync behavior.
 - [`TestManagedAppsAndFiles`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app delivery.
+- [`TestKioskMode`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk enforcement.
+- [`TestPackageRules`](/home/puong/xmdm/server/e2e/content_test.go) for real-device package suspension enforcement.
 - [`TestCommandMQTT`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command transport.
 - [`TestCommandPolling`](/home/puong/xmdm/server/e2e/content_test.go) for real-device HTTP polling command transport.
 - [`TestCommandBrokerOutageRecovery`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT outage fallback and recovery.
@@ -108,6 +116,32 @@ The admin E2E verifies:
 10. Starts the launcher with the bootstrap payload on the physical device.
 11. Waits for the launcher to enroll, fetch policy, render the managed file, and restore Chrome for the current user.
 12. Verifies on-device state with adb reads from the launcher sandbox and package manager.
+
+## Kiosk Flow
+
+`TestKioskMode` is the physical-device kiosk test. It does all of the following in one run:
+
+1. Starts a real HTTP handler stack with a real Postgres test database.
+2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
+3. Resets server-side enrollment state for the chosen device ID.
+4. Builds an enrollment QR payload that includes `kioskMode=true` in bootstrap extras.
+5. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
+6. Starts the launcher with the bootstrap payload on the physical device.
+7. Waits for the launcher to enroll and fetch the signed policy snapshot.
+8. Verifies on-device kiosk state with `dumpsys activity activities`.
+
+## Package Rules Flow
+
+`TestPackageRules` is the physical-device package policy test. It does all of the following in one run:
+
+1. Starts a real HTTP handler stack with a real Postgres test database.
+2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
+3. Uploads the Chrome APK artifact and publishes it as a managed app.
+4. Creates an active policy that blocks `com.android.chrome` through the policy restrictions JSON.
+5. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
+6. Starts the launcher with the bootstrap payload on the physical device.
+7. Waits for the launcher to enroll, fetch policy, restore Chrome, and suspend the package on-device.
+8. Verifies the package suspension state with `dumpsys package com.android.chrome`.
 
 ## Command Flows
 
@@ -165,6 +199,22 @@ XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestManagedAppsAndFiles -
 ```
 
 The test uses `XMDM_TEST_POSTGRES_DSN` from `../infra/test-db-env.sh` and requires a connected device serial in `XMDM_ADB_SERIAL`.
+
+For the adb-backed kiosk enforcement test:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestKioskMode -count=1 ./e2e
+```
+
+For the adb-backed package rules test:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestPackageRules -count=1 ./e2e
+```
 
 For the MQTT command transport test:
 

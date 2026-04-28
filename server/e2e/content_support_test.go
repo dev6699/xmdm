@@ -104,6 +104,12 @@ type contentTestEnv struct {
 	managedFile managedFileFixture
 }
 
+// packageRulesTestEnv extends baseTestEnv with the managed app and policy
+// fixtures required by TestPackageRules.
+type packageRulesTestEnv struct {
+	baseTestEnv
+}
+
 // newContentTestEnv builds a baseTestEnv, uploads the managed file and Chrome
 // app fixtures, then starts the launcher so device assertions can begin
 // immediately after this call returns.
@@ -124,6 +130,32 @@ func newContentTestEnv(t *testing.T) contentTestEnv {
 		baseTestEnv: base,
 		managedFile: mf,
 	}
+}
+
+// newPackageRulesTestEnv builds a baseTestEnv, uploads Chrome, creates a
+// blocking policy, then starts the launcher so device assertions can begin
+// immediately after this call returns.
+func newPackageRulesTestEnv(t *testing.T) packageRulesTestEnv {
+	t.Helper()
+
+	base := newBaseTestEnv(t, false)
+	artifactStore := newTestArtifactStore(t)
+
+	mustRegisterChromeApp(t, base.client, base.baseURL, artifactStore)
+	mustCreatePolicy(t, base.client, base.baseURL, `{
+		"name":"package-rules",
+		"version":1,
+		"kioskMode":false,
+		"restrictions":{
+			"blockPackages":["com.android.chrome"]
+		}
+	}`)
+
+	token := mustCreateEnrollmentToken(t, base.client, base.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, base.client, base.baseURL, base.launcherChecksum, base.deviceID, token, "", nil)
+	startLauncher(t, base.serial, bootstrapURI)
+
+	return packageRulesTestEnv{baseTestEnv: base}
 }
 
 // commandTestEnv extends baseTestEnv with helpers for issuing and inspecting
@@ -166,6 +198,11 @@ func stopMQTTBroker(t *testing.T) {
 func startMQTTBroker(t *testing.T) {
 	t.Helper()
 	runDockerCompose(t, "start", "mqtt")
+}
+
+func mustCreatePolicy(t *testing.T, client *http.Client, baseURL, body string) map[string]any {
+	t.Helper()
+	return postJSON(t, client, baseURL+"/api/v1/policies", body)
 }
 
 // ── commandTestEnv methods ───────────────────────────────────────────────────
