@@ -16,8 +16,7 @@ class ConfigSnapshotVerifierTest {
               "policy":{"bootstrapExtras":{"customer":"Acme"}},
               "apps":[],
               "files":[],
-              "certificates":[],
-              "commands":[]
+              "certificates":[]
             }
         """.trimIndent()
         val signature = verifier.sign(unsigned, "secret-abc")
@@ -29,7 +28,6 @@ class ConfigSnapshotVerifierTest {
               "apps":[],
               "files":[],
               "certificates":[],
-              "commands":[],
               "signature":"$signature"
             }
         """.trimIndent()
@@ -50,7 +48,6 @@ class ConfigSnapshotVerifierTest {
               "apps":[],
               "files":[],
               "certificates":[],
-              "commands":[],
               "signature":"bogus"
             }
             """.trimIndent(),

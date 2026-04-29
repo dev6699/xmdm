@@ -43,8 +43,7 @@ class ConfigSyncEngineTest {
               "policy":{"bootstrapExtras":{"customer":"Acme"}},
               "apps":[],
               "files":[],
-              "certificates":[],
-              "commands":[]
+              "certificates":[]
             }
         """.trimIndent()
         val signed = """
@@ -55,7 +54,6 @@ class ConfigSyncEngineTest {
               "apps":[],
               "files":[],
               "certificates":[],
-              "commands":[],
               "signature":"${verifier.sign(unsigned, "secret-abc")}"
             }
         """.trimIndent()
@@ -130,8 +128,7 @@ class ConfigSyncEngineTest {
               "policy":{"bootstrapExtras":{"customer":"Acme"}},
               "apps":[],
               "files":[],
-              "certificates":[],
-              "commands":[]
+              "certificates":[]
             }
         """.trimIndent()
         val signed = """
@@ -142,7 +139,6 @@ class ConfigSyncEngineTest {
               "apps":[],
               "files":[],
               "certificates":[],
-              "commands":[],
               "signature":"${verifier.sign(unsigned, "secret-abc")}"
             }
         """.trimIndent()
@@ -217,7 +213,6 @@ class ConfigSyncEngineTest {
                           "apps":[],
                           "files":[],
                           "certificates":[],
-                          "commands":[],
                           "signature":"bogus"
                         }
                     """.trimIndent()

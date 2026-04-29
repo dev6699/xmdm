@@ -37,8 +37,7 @@ class ManagedFileInstallCoordinatorTest {
                   "replaceVariables":true
                 }
               ],
-              "certificates":[],
-              "commands":[]
+              "certificates":[]
             }
         """.trimIndent()
         val unsignedPrevious = """
@@ -60,8 +59,7 @@ class ManagedFileInstallCoordinatorTest {
                   "replaceVariables":false
                 }
               ],
-              "certificates":[],
-              "commands":[]
+              "certificates":[]
             }
         """.trimIndent()
         val current = """
@@ -84,7 +82,6 @@ class ManagedFileInstallCoordinatorTest {
                 }
               ],
               "certificates":[],
-              "commands":[],
               "signature":"${verifier.sign(unsignedCurrent, "secret-abc")}"
             }
         """.trimIndent()
@@ -108,7 +105,6 @@ class ManagedFileInstallCoordinatorTest {
                 }
               ],
               "certificates":[],
-              "commands":[],
               "signature":"${verifier.sign(unsignedPrevious, "secret-abc")}"
             }
         """.trimIndent()

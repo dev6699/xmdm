@@ -125,7 +125,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 1. Device authenticates.
 2. Server loads the active device state and policy.
 3. Server computes a signed snapshot.
-4. Server includes pending artifacts and commands.
+4. Server includes pending artifacts and config state.
 5. Device applies the snapshot and reports acknowledgements.
 6. Server persists the new device state and telemetry.
 

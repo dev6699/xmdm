@@ -291,17 +291,19 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 	})
 }
 
-func latestPolicySnapshot(ctx context.Context, store policy.Repository, tenantID string, bootstrapExtras map[string]any) (map[string]any, error) {
-	snapshot := map[string]any{}
-	if len(bootstrapExtras) > 0 {
-		snapshot["bootstrapExtras"] = bootstrapExtras
+func latestPolicySnapshot(ctx context.Context, store policy.Repository, tenantID string, bootstrapExtras map[string]any) (enrollment.PolicySnapshot, error) {
+	snapshot := enrollment.PolicySnapshot{
+		BootstrapExtras: map[string]any{},
+	}
+	for key, value := range bootstrapExtras {
+		snapshot.BootstrapExtras[key] = value
 	}
 	if store == nil {
 		return snapshot, nil
 	}
 	policies, err := store.ListPolicies(ctx, tenantID)
 	if err != nil {
-		return nil, err
+		return enrollment.PolicySnapshot{}, err
 	}
 	var selected *policy.Policy
 	for i := range policies {
@@ -316,17 +318,15 @@ func latestPolicySnapshot(ctx context.Context, store policy.Repository, tenantID
 	if selected == nil {
 		return snapshot, nil
 	}
-	snapshot["name"] = selected.Name
-	snapshot["version"] = selected.Version
-	snapshot["kioskMode"] = selected.KioskMode
+	snapshot.Name = selected.Name
+	snapshot.Version = selected.Version
+	snapshot.KioskMode = selected.KioskMode
 	if len(selected.Restrictions) > 0 {
-		var restrictions any
+		var restrictions enrollment.PolicyRestrictions
 		if err := json.Unmarshal(selected.Restrictions, &restrictions); err != nil {
-			return nil, err
+			return enrollment.PolicySnapshot{}, err
 		}
-		snapshot["restrictions"] = restrictions
-	} else {
-		snapshot["restrictions"] = map[string]any{}
+		snapshot.Restrictions = restrictions
 	}
 	return snapshot, nil
 }
@@ -550,17 +550,22 @@ func writeJSON(w http.ResponseWriter, value any) {
 	_, _ = w.Write(bytes.TrimSpace(buf.Bytes()))
 }
 
-func listActiveCertificates(ctx context.Context, store certificates.Repository, tenantID string) ([]any, error) {
+func listActiveCertificates(ctx context.Context, store certificates.Repository, tenantID string) ([]enrollment.CertificateSnapshot, error) {
 	if store == nil {
-		return []any{}, nil
+		return []enrollment.CertificateSnapshot{}, nil
 	}
 	items, err := store.ListActiveCertificates(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]any, 0, len(items))
+	out := make([]enrollment.CertificateSnapshot, 0, len(items))
 	for _, item := range items {
-		out = append(out, item)
+		out = append(out, enrollment.CertificateSnapshot{
+			ID:         item.ID,
+			Name:       item.Name,
+			ArtifactID: item.ArtifactID,
+			Checksum:   item.Checksum,
+		})
 	}
 	return out, nil
 }
@@ -594,15 +599,15 @@ func listManagedFiles(ctx context.Context, store managedfiles.Repository, device
 	return out, nil
 }
 
-func listPublishedApps(ctx context.Context, store apps.Repository, deviceID, tenantID string) ([]any, error) {
+func listPublishedApps(ctx context.Context, store apps.Repository, deviceID, tenantID string) ([]enrollment.AppSnapshot, error) {
 	if store == nil {
-		return []any{}, nil
+		return []enrollment.AppSnapshot{}, nil
 	}
 	items, err := store.ListApps(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]any, 0)
+	out := make([]enrollment.AppSnapshot, 0)
 	for _, appRecord := range items {
 		if appRecord.Status != apps.StatusActive {
 			continue
@@ -622,16 +627,16 @@ func listPublishedApps(ctx context.Context, store apps.Repository, deviceID, ten
 		if published == nil {
 			continue
 		}
-		out = append(out, map[string]any{
-			"appId":        appRecord.ID,
-			"packageName":  appRecord.PackageName,
-			"name":         appRecord.Name,
-			"versionId":    published.ID,
-			"versionName":  published.VersionName,
-			"versionCode":  published.VersionCode,
-			"artifactId":   *published.ArtifactID,
-			"checksum":     published.Checksum,
-			"downloadPath": "/api/v1/devices/" + deviceID + "/apps/" + appRecord.ID + "/versions/" + published.ID + "/artifact",
+		out = append(out, enrollment.AppSnapshot{
+			AppID:        appRecord.ID,
+			PackageName:  appRecord.PackageName,
+			Name:         appRecord.Name,
+			VersionID:    published.ID,
+			VersionName:  published.VersionName,
+			VersionCode:  published.VersionCode,
+			ArtifactID:   *published.ArtifactID,
+			Checksum:     published.Checksum,
+			DownloadPath: "/api/v1/devices/" + deviceID + "/apps/" + appRecord.ID + "/versions/" + published.ID + "/artifact",
 		})
 	}
 	return out, nil

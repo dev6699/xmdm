@@ -41,8 +41,7 @@ class EnrollmentCoordinatorTest {
               "policy":{"bootstrapExtras":{"customer":"Acme"}},
               "apps":[],
               "files":[],
-              "certificates":[],
-              "commands":[]
+              "certificates":[]
             }
         """.trimIndent()
         val config = Gson().fromJson(
@@ -54,7 +53,6 @@ class EnrollmentCoordinatorTest {
               "apps":[],
               "files":[],
               "certificates":[],
-              "commands":[],
               "signature":"${verifier.sign(unsigned, "secret-abc")}"
             }
             """.trimIndent(),
@@ -121,8 +119,7 @@ class EnrollmentCoordinatorTest {
               "policy":{},
               "apps":[],
               "files":[],
-              "certificates":[],
-              "commands":[]
+              "certificates":[]
             }
         """.trimIndent()
         val config = Gson().fromJson(
@@ -134,7 +131,6 @@ class EnrollmentCoordinatorTest {
               "apps":[],
               "files":[],
               "certificates":[],
-              "commands":[],
               "signature":"${verifier.sign(unsigned, "secret-abc")}"
             }
             """.trimIndent(),

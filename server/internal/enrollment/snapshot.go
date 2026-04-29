@@ -10,25 +10,23 @@ import (
 	"strings"
 )
 
-func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, bootstrapExtras map[string]any, apps []any, files []ManagedFileSnapshot, certificates []any) ConfigSnapshot {
-	policy := map[string]any{}
-	for key, value := range bootstrapExtras {
-		policy[key] = value
+func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, policy PolicySnapshot, apps []AppSnapshot, files []ManagedFileSnapshot, certificates []CertificateSnapshot) ConfigSnapshot {
+	if apps == nil {
+		apps = []AppSnapshot{}
 	}
 	if certificates == nil {
-		certificates = []any{}
+		certificates = []CertificateSnapshot{}
 	}
 	return ConfigSnapshot{
 		Version: "1",
-		Device: map[string]any{
-			"deviceId":    deviceID,
-			"deviceIdUse": deviceIDUse,
+		Device: DeviceSnapshot{
+			DeviceID:    deviceID,
+			DeviceIDUse: deviceIDUse,
 		},
 		Policy:       policy,
 		Apps:         apps,
 		Files:        files,
 		Certificates: certificates,
-		Commands:     []any{},
 	}
 }
 
@@ -180,6 +178,5 @@ var snapshotFieldOrder = []string{
 	"apps",
 	"files",
 	"certificates",
-	"commands",
 	"signature",
 }

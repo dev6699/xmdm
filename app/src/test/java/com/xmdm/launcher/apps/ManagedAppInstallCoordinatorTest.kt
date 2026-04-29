@@ -34,8 +34,7 @@ class ManagedAppInstallCoordinatorTest {
                 }
               ],
               "files":[],
-              "certificates":[],
-              "commands":[]
+              "certificates":[]
             }
         """.trimIndent()
         val unsignedPrevious = """
@@ -55,8 +54,7 @@ class ManagedAppInstallCoordinatorTest {
                 }
               ],
               "files":[],
-              "certificates":[],
-              "commands":[]
+              "certificates":[]
             }
         """.trimIndent()
         val current = """
@@ -77,7 +75,6 @@ class ManagedAppInstallCoordinatorTest {
               ],
               "files":[],
               "certificates":[],
-              "commands":[],
               "signature":"${verifier.sign(unsignedCurrent, "secret-abc")}"
             }
         """.trimIndent()
@@ -99,7 +96,6 @@ class ManagedAppInstallCoordinatorTest {
               ],
               "files":[],
               "certificates":[],
-              "commands":[],
               "signature":"${verifier.sign(unsignedPrevious, "secret-abc")}"
             }
         """.trimIndent()
@@ -180,8 +176,7 @@ class ManagedAppInstallCoordinatorTest {
                 }
               ],
               "files":[],
-              "certificates":[],
-              "commands":[]
+              "certificates":[]
             }
         """.trimIndent()
         val signed = """
@@ -202,7 +197,6 @@ class ManagedAppInstallCoordinatorTest {
               ],
               "files":[],
               "certificates":[],
-              "commands":[],
               "signature":"${verifier.sign(unsigned, "secret-abc")}"
             }
         """.trimIndent()

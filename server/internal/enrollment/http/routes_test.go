@@ -182,23 +182,30 @@ func TestRegisterEnrollmentIncludesLatestActivePolicy(t *testing.T) {
 		t.Fatalf("decode bind response: %v", err)
 	}
 	rawConfig, _ := payload["config"].(map[string]any)
-	policyValue, _ := rawConfig["policy"].(map[string]any)
-	if policyValue["kioskMode"] != true {
-		t.Fatalf("unexpected kioskMode: %#v", policyValue["kioskMode"])
+	rawConfigJSON, err := json.Marshal(rawConfig)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
 	}
-	if policyValue["name"] != "new" {
-		t.Fatalf("unexpected policy name: %#v", policyValue["name"])
+	var typedConfig struct {
+		Policy enrollment.PolicySnapshot `json:"policy"`
 	}
-	if policyValue["version"] != float64(2) {
-		t.Fatalf("unexpected policy version: %#v", policyValue["version"])
+	if err := json.Unmarshal(rawConfigJSON, &typedConfig); err != nil {
+		t.Fatalf("decode policy snapshot: %v", err)
 	}
-	restrictions, _ := policyValue["restrictions"].(map[string]any)
-	if restrictions["blockPackages"] == nil {
-		t.Fatalf("missing blockPackages: %#v", restrictions)
+	if !typedConfig.Policy.KioskMode {
+		t.Fatalf("unexpected kioskMode: %#v", typedConfig.Policy.KioskMode)
 	}
-	bootstrapExtras, _ := policyValue["bootstrapExtras"].(map[string]any)
-	if bootstrapExtras["customer"] != "Acme" {
-		t.Fatalf("missing bootstrapExtras passthrough: %#v", policyValue)
+	if typedConfig.Policy.Name != "new" {
+		t.Fatalf("unexpected policy name: %#v", typedConfig.Policy.Name)
+	}
+	if typedConfig.Policy.Version != 2 {
+		t.Fatalf("unexpected policy version: %#v", typedConfig.Policy.Version)
+	}
+	if len(typedConfig.Policy.Restrictions.BlockPackages) == 0 {
+		t.Fatalf("missing blockPackages: %#v", typedConfig.Policy.Restrictions)
+	}
+	if typedConfig.Policy.BootstrapExtras["customer"] != "Acme" {
+		t.Fatalf("missing bootstrapExtras passthrough: %#v", typedConfig.Policy)
 	}
 }
 
@@ -435,28 +442,24 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	}
 	var typedConfig struct {
 		Version      string                           `json:"version"`
-		Device       map[string]any                   `json:"device"`
-		Policy       map[string]any                   `json:"policy"`
-		Apps         []any                            `json:"apps"`
+		Device       enrollment.DeviceSnapshot        `json:"device"`
+		Policy       enrollment.PolicySnapshot        `json:"policy"`
+		Apps         []enrollment.AppSnapshot         `json:"apps"`
 		Files        []enrollment.ManagedFileSnapshot `json:"files"`
-		Certificates []certificates.Certificate       `json:"certificates"`
-		Commands     []any                            `json:"commands"`
+		Certificates []enrollment.CertificateSnapshot `json:"certificates"`
 		Signature    string                           `json:"signature"`
 	}
 	if err := json.Unmarshal(rawConfigJSON, &typedConfig); err != nil {
 		t.Fatalf("decode config snapshot: %v", err)
 	}
 	config := enrollment.ConfigSnapshot{
-		Version:   typedConfig.Version,
-		Device:    typedConfig.Device,
-		Policy:    typedConfig.Policy,
-		Apps:      typedConfig.Apps,
-		Files:     typedConfig.Files,
-		Commands:  typedConfig.Commands,
-		Signature: typedConfig.Signature,
-	}
-	for _, cert := range typedConfig.Certificates {
-		config.Certificates = append(config.Certificates, cert)
+		Version:      typedConfig.Version,
+		Device:       typedConfig.Device,
+		Policy:       typedConfig.Policy,
+		Apps:         typedConfig.Apps,
+		Files:        typedConfig.Files,
+		Certificates: typedConfig.Certificates,
+		Signature:    typedConfig.Signature,
 	}
 	if config.Version != "1" {
 		t.Fatalf("unexpected config version: %q", config.Version)
@@ -473,12 +476,8 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if len(config.Files) != 1 {
 		t.Fatalf("expected one file in config, got %d", len(config.Files))
 	}
-	appEntry, ok := config.Apps[0].(map[string]any)
-	if !ok {
-		t.Fatalf("app entry has wrong type: %T", config.Apps[0])
-	}
-	if appEntry["downloadPath"] != "/api/v1/devices/device-123/apps/app-1/versions/version-1/artifact" {
-		t.Fatalf("unexpected download path: %#v", appEntry["downloadPath"])
+	if config.Apps[0].DownloadPath != "/api/v1/devices/device-123/apps/app-1/versions/version-1/artifact" {
+		t.Fatalf("unexpected download path: %#v", config.Apps[0].DownloadPath)
 	}
 	fileEntry := config.Files[0]
 	if fileEntry.Path != "device-config.txt" {
@@ -601,7 +600,7 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 		t.Fatalf("marshal config: %v", err)
 	}
 	var typedConfig struct {
-		Apps []any `json:"apps"`
+		Apps []enrollment.AppSnapshot `json:"apps"`
 	}
 	if err := json.Unmarshal(rawConfigJSON, &typedConfig); err != nil {
 		t.Fatalf("decode config snapshot: %v", err)
@@ -609,15 +608,11 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 	if len(typedConfig.Apps) != 1 {
 		t.Fatalf("expected one app in config, got %d", len(typedConfig.Apps))
 	}
-	appEntry, ok := typedConfig.Apps[0].(map[string]any)
-	if !ok {
-		t.Fatalf("app entry has wrong type: %T", typedConfig.Apps[0])
+	if typedConfig.Apps[0].VersionID != "version-2" {
+		t.Fatalf("expected latest version, got %#v", typedConfig.Apps[0].VersionID)
 	}
-	if appEntry["versionId"] != "version-2" {
-		t.Fatalf("expected latest version, got %#v", appEntry["versionId"])
-	}
-	if appEntry["downloadPath"] != "/api/v1/devices/device-123/apps/app-1/versions/version-2/artifact" {
-		t.Fatalf("unexpected download path: %#v", appEntry["downloadPath"])
+	if typedConfig.Apps[0].DownloadPath != "/api/v1/devices/device-123/apps/app-1/versions/version-2/artifact" {
+		t.Fatalf("unexpected download path: %#v", typedConfig.Apps[0].DownloadPath)
 	}
 }
 

@@ -110,7 +110,6 @@ class ConfigSnapshotVerifier(
             "apps",
             "files",
             "certificates",
-            "commands",
             "signature",
         )
     }

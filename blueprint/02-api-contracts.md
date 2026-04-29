@@ -126,7 +126,6 @@
     "apps": [],
     "files": [],
     "certificates": [],
-    "commands": [],
     "signature": "string"
   }
 }
@@ -145,7 +144,6 @@
   "apps": [],
   "files": [],
   "certificates": [],
-  "commands": [],
   "signature": "string"
 }
 ```
