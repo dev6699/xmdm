@@ -94,7 +94,41 @@ func TestCommandMQTT(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
 	})
-	env.waitForCommandAck(t, commandID)
+	env.waitForCommandAck(t, commandID, "pong")
+	env.requests.assertNever(t, "polling command fetch", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			strings.Contains(r.path, "/api/v1/devices/") &&
+			strings.HasSuffix(r.path, "/commands")
+	})
+}
+
+// TestCommandMQTTSyncConfig verifies that a pushed sync_config command causes
+// the launcher to fetch the latest config snapshot immediately over MQTT.
+func TestCommandMQTTSyncConfig(t *testing.T) {
+	env := newCommandTestEnv(t)
+
+	env.reverseMQTTPort(t)
+
+	token := env.mustCreateEnrollmentToken(t)
+	bootstrapURI := env.mustBuildBootstrapURI(t, token, "127.0.0.1:1883")
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+
+	initialMarker := env.requests.len()
+	commandID := env.mustIssueSyncConfigCommand(t)
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
+	})
+	env.waitForCommandAck(t, commandID, "config refreshed")
+	env.requests.waitForAfter(t, initialMarker, time.Minute, "config snapshot fetch after sync_config command", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			r.path == "/api/v1/devices/"+env.deviceID+"/config"
+	})
 	env.requests.assertNever(t, "polling command fetch", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
 			strings.Contains(r.path, "/api/v1/devices/") &&
@@ -131,7 +165,7 @@ func TestCommandPolling(t *testing.T) {
 		return r.method == http.MethodPost &&
 			r.path == "/api/v1/devices/"+env.deviceID+"/commands/"+commandID+"/ack"
 	})
-	env.waitForCommandAck(t, commandID)
+	env.waitForCommandAck(t, commandID, "pong")
 }
 
 // TestCommandBrokerOutageRecovery verifies that the launcher falls back to HTTP
@@ -157,7 +191,7 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
 	})
-	env.waitForCommandAck(t, initialCommandID)
+	env.waitForCommandAck(t, initialCommandID, "pong")
 
 	stopMQTTBroker(t)
 	time.Sleep(2 * time.Second)
@@ -171,7 +205,7 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 		return r.method == http.MethodPost &&
 			r.path == "/api/v1/devices/"+env.deviceID+"/commands/"+outageCommandID+"/ack"
 	})
-	env.waitForCommandAck(t, outageCommandID)
+	env.waitForCommandAck(t, outageCommandID, "pong")
 
 	startMQTTBroker(t)
 	time.Sleep(2 * time.Second)
@@ -181,7 +215,7 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands after broker recovery", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
 	})
-	env.waitForCommandAck(t, recoveryCommandID)
+	env.waitForCommandAck(t, recoveryCommandID, "pong")
 	env.requests.assertNeverAfter(t, recoveryMarker, "HTTP polling after broker recovery", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
 			r.path == "/api/v1/devices/"+env.deviceID+"/commands"

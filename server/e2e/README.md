@@ -12,6 +12,7 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestPackageRules` covers adb-backed package suspension enforcement on a physical device.
 - `TestPolicySync` covers adb-backed policy refresh after an admin update on a physical device.
 - `TestCommandMQTT` covers MQTT command transport on a physical device.
+- `TestCommandMQTTSyncConfig` covers MQTT command-triggered config sync on a physical device.
 - `TestCommandPolling` covers HTTP polling command transport on a physical device.
 - `TestCommandBrokerOutageRecovery` covers MQTT outage fallback and recovery on a physical device.
 
@@ -58,6 +59,7 @@ Use this bucket for:
 - managed file rendering
 - managed app install
 - MQTT command transport
+- MQTT command-triggered config sync
 - HTTP polling command transport
 
 Current coverage:
@@ -80,6 +82,7 @@ Current coverage:
 - [`TestKioskMode`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk enforcement.
 - [`TestPackageRules`](/home/puong/xmdm/server/e2e/content_test.go) for real-device package suspension enforcement.
 - [`TestCommandMQTT`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command transport.
+- [`TestCommandMQTTSyncConfig`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command-triggered config sync.
 - [`TestCommandPolling`](/home/puong/xmdm/server/e2e/content_test.go) for real-device HTTP polling command transport.
 - [`TestCommandBrokerOutageRecovery`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT outage fallback and recovery.
 
@@ -187,6 +190,18 @@ The command transport tests share the same device bootstrap and server setup, th
 5. Verifies the device receives the command over MQTT and acknowledges it.
 6. Verifies the device does not fall back to the HTTP polling command endpoint.
 
+### MQTT Command-Triggered Config Sync
+
+`TestCommandMQTTSyncConfig` does the following:
+
+1. Boots the launcher with MQTT bootstrap extras.
+2. Waits for `POST /api/v1/enrollment`.
+3. Verifies the server marks the device enrolled through the API.
+4. Enqueues a `sync_config` command through `POST /api/v1/admin/commands`.
+5. Verifies the device receives the command over MQTT and acknowledges it after refreshing config.
+6. Verifies the device fetches `GET /api/v1/devices/{deviceId}/config` again after the command.
+7. Verifies the device does not fall back to the HTTP polling command endpoint.
+
 ### HTTP Polling Command Flow
 
 `TestCommandPolling` does the following:
@@ -279,6 +294,14 @@ For the HTTP polling command transport test:
 eval "$(../infra/test-db-env.sh)"
 cd server
 XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestCommandPolling -count=1 ./e2e
+```
+
+For the MQTT command-triggered config sync test:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestCommandMQTTSyncConfig -count=1 ./e2e
 ```
 
 `TestCommandPolling` uses a short bootstrap override for the launcher poll interval so it completes faster than the production 30-second default.

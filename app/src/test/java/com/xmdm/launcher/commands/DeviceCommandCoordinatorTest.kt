@@ -77,6 +77,48 @@ class DeviceCommandCoordinatorTest {
     }
 
     @Test
+    fun executesAndAcksConfigSyncCommands() = runTest {
+        val command = DeviceCommandRecord(
+            id = "cmd-sync",
+            type = "sync_config",
+            status = "queued",
+            payload = null,
+            expiresAt = null,
+        )
+        val gateway = RecordingGateway(commands = listOf(command))
+        var syncRequested = false
+        val coordinator = DeviceCommandCoordinator(
+            gateway = gateway,
+            executor = DeviceCommandExecutor(
+                rebootAction = object : DeviceRebooter {
+                    override fun reboot() = error("not expected")
+                },
+                configSyncAction = {
+                    syncRequested = true
+                    DeviceCommandExecutionResult(
+                        status = "acked",
+                        message = "config refreshed",
+                        details = mapOf("configRevision" to 9L),
+                    )
+                },
+            ),
+        )
+
+        val handled = coordinator.pollAndExecute(
+            serverUrl = "https://mdm.example",
+            deviceId = "device-123",
+            deviceSecret = "secret-abc",
+        )
+
+        assertTrue(syncRequested)
+        assertEquals(listOf("cmd-sync"), handled.map { it.id })
+        assertEquals(1, gateway.acks.size)
+        assertEquals("acked", gateway.acks[0].request.status)
+        assertEquals("config refreshed", gateway.acks[0].request.message)
+        assertEquals(9L, gateway.acks[0].request.details?.get("configRevision"))
+    }
+
+    @Test
     fun acksExecutionFailures() = runTest {
         val command = DeviceCommandRecord(
             id = "cmd-2",

@@ -16,6 +16,7 @@ import com.xmdm.launcher.apps.ManagedAppInstallProgress
 import com.xmdm.launcher.commands.AndroidDeviceRebooter
 import com.xmdm.launcher.commands.DeviceCommandCoordinator
 import com.xmdm.launcher.commands.DeviceCommandExecutor
+import com.xmdm.launcher.commands.DeviceCommandExecutionResult
 import com.xmdm.launcher.commands.HttpDeviceCommandGateway
 import com.xmdm.launcher.commands.MqttDeviceCommandConfig
 import com.xmdm.launcher.commands.MqttDeviceCommandTransport
@@ -82,6 +83,9 @@ class MainActivity : AppCompatActivity() {
             gateway = HttpDeviceCommandGateway(),
             executor = DeviceCommandExecutor(
                 rebootAction = AndroidDeviceRebooter(applicationContext),
+                configSyncAction = {
+                    requestConfigSyncFromCommand()
+                },
             ),
         )
     }
@@ -501,6 +505,21 @@ class MainActivity : AppCompatActivity() {
         if (handled.isNotEmpty()) {
             Log.w(TAG, "command poll handled ${handled.size} commands instance=$instanceId")
         }
+    }
+
+    private suspend fun requestConfigSyncFromCommand(): DeviceCommandExecutionResult {
+        val state = stateStore.state.first()
+        val bootstrap = state.bootstrap ?: error("bootstrap state unavailable")
+        val identity = state.identity ?: error("device identity unavailable")
+        val cached = configSyncEngine.sync(bootstrap, identity)
+        return DeviceCommandExecutionResult(
+            status = "acked",
+            message = "config refreshed",
+            details = mapOf(
+                "configRevision" to cached.version,
+                "syncedAtEpochMillis" to cached.lastSyncAtEpochMillis,
+            ),
+        )
     }
 
     private fun maybeApplyManagedFiles(state: AgentState) {

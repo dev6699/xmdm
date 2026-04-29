@@ -148,6 +148,9 @@ Relevant code:
   - `GET /api/v1/devices/{deviceId}/commands`
 - Supported commands are executed locally and acknowledged back to the server:
   - `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`
+- A `sync_config` command is handled like any other command, but its side effect is to call the config sync endpoint immediately:
+  - `GET /api/v1/devices/{deviceId}/config`
+- The command ack is sent only after the config refresh succeeds.
 
 Relevant code:
 - [`HttpDeviceCommandGateway`](../app/src/main/java/com/xmdm/launcher/commands/HttpDeviceCommandGateway.kt)
@@ -188,6 +191,13 @@ These are the HTTP paths the launcher calls during the lifecycle.
   - Used when MQTT is not configured in bootstrap extras.
 - `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`
   - Used to report execution results for supported commands.
+
+### Command-Triggered Config Sync
+
+- `sync_config` command
+  - Delivered through MQTT when available, otherwise through HTTP polling.
+  - Triggers the launcher to fetch `GET /api/v1/devices/{deviceId}/config` immediately.
+  - Useful for push-driven refresh when admin updates policy, apps, files, or certificates.
 
 ### Not Called By The Device During Provisioning
 
@@ -244,6 +254,7 @@ If any later step fails, the earlier successful state remains on disk and the la
 - Managed files must precede managed apps so the launcher can stabilize content state first.
 - Managed apps can proceed immediately when the config snapshot has no managed files.
 - Command transport must wait for device identity so requests can be authenticated.
+- A command can request an immediate config refresh without changing the sync contract.
 - Persistent local state is required so reboot does not force manual reprovisioning.
 
 ## Config Buckets

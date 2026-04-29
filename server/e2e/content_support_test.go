@@ -267,7 +267,33 @@ func (e *commandTestEnv) mustIssuePingCommand(t *testing.T) string {
 	return id
 }
 
-func (e *commandTestEnv) waitForCommandAck(t *testing.T, commandID string) {
+func (e *commandTestEnv) mustIssueSyncConfigCommand(t *testing.T) string {
+	t.Helper()
+
+	resp := postJSON(t, e.client, e.baseURL+"/api/v1/admin/commands", fmt.Sprintf(`{
+		"type":"sync_config",
+		"target":{
+			"type":"device",
+			"deviceId":"%s"
+		}
+	}`, e.deviceID))
+
+	commands, _ := resp["commands"].([]any)
+	if len(commands) != 1 {
+		t.Fatalf("expected one command row, got %#v", resp["commands"])
+	}
+	cmd, _ := commands[0].(map[string]any)
+	id, _ := cmd["id"].(string)
+	if id == "" {
+		t.Fatalf("command response did not include an id: %#v", cmd)
+	}
+	if cmd["type"] != "sync_config" {
+		t.Fatalf("unexpected command type: %#v", cmd["type"])
+	}
+	return id
+}
+
+func (e *commandTestEnv) waitForCommandAck(t *testing.T, commandID, expectedMessage string) {
 	t.Helper()
 	waitForCondition(t, time.Minute, "command ack to reach the server",
 		func() string { return commandStatusSnapshot(t, e.pool, commandID) },
@@ -286,7 +312,7 @@ func (e *commandTestEnv) waitForCommandAck(t *testing.T, commandID string) {
 			if err := json.Unmarshal(resultJSON, &result); err != nil {
 				return false, nil
 			}
-			return result["message"] == "pong", nil
+			return result["message"] == expectedMessage, nil
 		},
 	)
 }

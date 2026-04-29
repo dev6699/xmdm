@@ -12,6 +12,7 @@ interface DeviceCommandActionExecutor {
 
 class DeviceCommandExecutor(
     private val rebootAction: DeviceRebooter,
+    private val configSyncAction: (suspend () -> DeviceCommandExecutionResult)? = null,
 ) : DeviceCommandActionExecutor {
     override suspend fun execute(command: DeviceCommandRecord): DeviceCommandExecutionResult {
         return when (command.type.lowercase()) {
@@ -28,6 +29,11 @@ class DeviceCommandExecutor(
                     details = command.details("command" to "reboot"),
                 )
             }
+            "sync_config", "refresh_config" -> configSyncAction?.invoke() ?: DeviceCommandExecutionResult(
+                status = "failed",
+                message = "config sync unavailable",
+                details = command.details("command" to command.type),
+            )
             else -> DeviceCommandExecutionResult(
                 status = "failed",
                 message = "unsupported command type: ${command.type}",
