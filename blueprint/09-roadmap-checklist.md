@@ -374,8 +374,9 @@ Completed as of 2026-04-25 with adb-backed physical-device coverage for `ping` o
 
 - Owner: `AE`
 - Depends on: M6-01
+- State: Not Planned
 - Task: implement foreground-app enforcement.
-- Done when: the agent can detect and react to restricted foreground apps.
+- Note: kiosk and package rules cover the intended control surface, so this item stays listed but is not scheduled.
 
 ### M6-04 Device Logs
 
