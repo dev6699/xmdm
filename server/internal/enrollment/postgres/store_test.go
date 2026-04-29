@@ -73,7 +73,7 @@ func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue bind token: %v", err)
 	}
-	bound, err := store.BindDevice(context.Background(), bootstrap.SeedTenantID, bindIssued.Secret, deviceID)
+	bound, err := store.BindDevice(context.Background(), bootstrap.SeedTenantID, bindIssued.Secret, deviceID, map[string]any{"customer": "Acme"})
 	if err != nil {
 		t.Fatalf("bind device: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue duplicate token: %v", err)
 	}
-	if _, err := store.BindDevice(context.Background(), bootstrap.SeedTenantID, dupIssued.Secret, deviceID); !errors.Is(err, enrollment.ErrDeviceConflict) {
+	if _, err := store.BindDevice(context.Background(), bootstrap.SeedTenantID, dupIssued.Secret, deviceID, nil); !errors.Is(err, enrollment.ErrDeviceConflict) {
 		t.Fatalf("expected duplicate device conflict, got %v", err)
 	}
 

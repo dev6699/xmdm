@@ -54,7 +54,8 @@ flowchart TD
 
 - QR payload contains server URL, enrollment token, device identity policy, and optional bootstrap extras.
 - The agent parses the payload and persists the bootstrap state locally.
-- The first sync call binds the device to the server and receives the device secret and initial policy snapshot.
+- Enrollment binds the device to the server and returns the device secret.
+- The agent fetches the signed config snapshot after enrollment and keeps refreshing it during runtime.
 
 ### Manual Or ADB Provisioning
 
@@ -105,7 +106,7 @@ flowchart TD
 ## What The Agent Downloads
 
 - app APKs and version manifests
-- managed files and generated file variants
+- managed files rendered on the server and delivered to the launcher
 - certificates and trust bundles
 - optional images and attachments uploaded from the server
 - push-delivered payloads that reference a command or artifact

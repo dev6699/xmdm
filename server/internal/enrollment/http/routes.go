@@ -4,14 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"xmdm/server/internal/apps"
+	"xmdm/server/internal/artifacts"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/certificates"
+	"xmdm/server/internal/checksum"
+	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/managedfiles"
@@ -63,7 +67,7 @@ type EnrollmentRequest struct {
 	BootstrapExtras      map[string]any       `json:"bootstrapExtras"`
 }
 
-func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, certStore certificates.Repository, policyStore policy.Repository, tenantID string) {
+func Register(mux httpx.Router, svc *auth.Service, devices device.Repository, store enrollment.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, artifactStore artifacts.Store, certStore certificates.Repository, policyStore policy.Repository, tenantID string) {
 	enrollmentMux := httpx.WithPrefix(mux, "/enrollment")
 
 	enrollmentMux.HandleFunc("", func(w http.ResponseWriter, r *http.Request) {
@@ -81,39 +85,47 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 			writeRequestError(w, err)
 			return
 		}
-		bound, err := store.BindDevice(r.Context(), tenantID, req.EnrollmentToken, req.DeviceIdentityPolicy.DeviceID)
+		bound, err := store.BindDevice(r.Context(), tenantID, req.EnrollmentToken, req.DeviceIdentityPolicy.DeviceID, req.BootstrapExtras)
 		if err != nil {
 			writeEnrollmentError(w, err)
 			return
 		}
-		appsSnapshot, err := listPublishedApps(r.Context(), appStore, req.DeviceIdentityPolicy.DeviceID, tenantID)
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		filesSnapshot, err := listManagedFiles(r.Context(), managedFileStore, req.DeviceIdentityPolicy.DeviceID, tenantID)
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		certs, err := listActiveCertificates(r.Context(), certStore, tenantID)
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		policySnapshot, err := latestPolicySnapshot(r.Context(), policyStore, tenantID, req.BootstrapExtras)
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		config := enrollment.NewBootstrapConfigSnapshot(req.DeviceIdentityPolicy.DeviceID, req.DeviceIdentityPolicy.DeviceIDUse, policySnapshot, appsSnapshot, filesSnapshot, certs)
-		signed, err := enrollment.SignConfigSnapshot(config, bound.DeviceSecret)
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		bound.Config = signed
 		writeJSON(w, bound)
+	})
+
+	mux.HandleFunc("/devices/{deviceId}/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if devices == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		deviceID := strings.TrimSpace(r.PathValue("deviceId"))
+		secret := strings.TrimSpace(r.Header.Get("X-XMDM-Device-Secret"))
+		if deviceID == "" || secret == "" {
+			http.Error(w, "invalid input", http.StatusBadRequest)
+			return
+		}
+		authDevice, err := devices.Authenticate(r.Context(), tenantID, deviceID, secret)
+		if err != nil {
+			switch err {
+			case httpx.ErrInvalidInput:
+				http.Error(w, "invalid input", http.StatusBadRequest)
+			case httpx.ErrNotFound:
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			default:
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
+			return
+		}
+		config, err := buildSignedConfigSnapshot(r.Context(), policyStore, appStore, managedFileStore, artifactStore, certStore, tenantID, authDevice.Name, authDevice.BootstrapExtras, secret)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, config)
 	})
 
 	enrollmentMux.HandleFunc("/tokens", func(w http.ResponseWriter, r *http.Request) {
@@ -291,13 +303,91 @@ func Register(mux httpx.Router, svc *auth.Service, store enrollment.Repository, 
 	})
 }
 
-func latestPolicySnapshot(ctx context.Context, store policy.Repository, tenantID string, bootstrapExtras map[string]any) (enrollment.PolicySnapshot, error) {
-	snapshot := enrollment.PolicySnapshot{
-		BootstrapExtras: map[string]any{},
+func buildSignedConfigSnapshot(ctx context.Context, policyStore policy.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, artifactStore artifacts.Store, certStore certificates.Repository, tenantID, deviceID string, bootstrapExtras map[string]any, secret string) (enrollment.ConfigSnapshot, error) {
+	appsSnapshot, err := listPublishedApps(ctx, appStore, deviceID, tenantID)
+	if err != nil {
+		return enrollment.ConfigSnapshot{}, err
 	}
-	for key, value := range bootstrapExtras {
-		snapshot.BootstrapExtras[key] = value
+	deviceIDUse := managedfiles.TemplateValues(deviceID, bootstrapExtras)["DEVICE_ID_USE"]
+	filesSnapshot, err := listManagedFiles(ctx, managedFileStore, artifactStore, deviceID, tenantID, bootstrapExtras)
+	if err != nil {
+		return enrollment.ConfigSnapshot{}, err
 	}
+	certs, err := listActiveCertificates(ctx, certStore, tenantID)
+	if err != nil {
+		return enrollment.ConfigSnapshot{}, err
+	}
+	policySnapshot, err := latestPolicySnapshot(ctx, policyStore, tenantID)
+	if err != nil {
+		return enrollment.ConfigSnapshot{}, err
+	}
+	config := enrollment.NewBootstrapConfigSnapshot(deviceID, deviceIDUse, policySnapshot, appsSnapshot, filesSnapshot, certs)
+	return enrollment.SignConfigSnapshot(config, secret)
+}
+
+func listManagedFiles(ctx context.Context, store managedfiles.Repository, artifactStore artifacts.Store, deviceID, tenantID string, bootstrapExtras map[string]any) ([]enrollment.ManagedFileSnapshot, error) {
+	if store == nil {
+		return []enrollment.ManagedFileSnapshot{}, nil
+	}
+	files, err := store.ListManagedFiles(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	snapshots := make([]enrollment.ManagedFileSnapshot, 0, len(files))
+	for _, file := range files {
+		if file.Status != managedfiles.StatusActive {
+			continue
+		}
+		if file.File == nil || file.File.Artifact == nil {
+			continue
+		}
+		name := file.File.Name
+		if name == "" {
+			name = file.ID
+		}
+		snapshot := enrollment.ManagedFileSnapshot{
+			FileID:           file.ID,
+			Name:             name,
+			Path:             file.Path,
+			DownloadPath:     managedFileDownloadPath(deviceID, file.ID),
+			Checksum:         file.File.Checksum,
+			MimeType:         file.File.MimeType,
+			ReplaceVariables: file.ReplaceVariables,
+		}
+		if file.ReplaceVariables {
+			rendered, err := renderedManagedFileContent(ctx, artifactStore, file, deviceID, bootstrapExtras)
+			if err != nil {
+				return nil, err
+			}
+			snapshot.Checksum = checksum.SHA256Base64URL(rendered)
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots, nil
+}
+
+func managedFileDownloadPath(deviceID, managedFileID string) string {
+	return "/api/v1/devices/" + deviceID + "/managed-files/" + managedFileID + "/artifact"
+}
+
+func renderedManagedFileContent(ctx context.Context, artifactStore artifacts.Store, file managedfiles.ManagedFile, deviceID string, bootstrapExtras map[string]any) ([]byte, error) {
+	if artifactStore == nil || file.File == nil || file.File.Artifact == nil {
+		return nil, httpx.ErrNotFound
+	}
+	body, err := artifactStore.Get(ctx, file.File.Artifact.StorageKey)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	content, err := io.ReadAll(body)
+	if err != nil {
+		return nil, err
+	}
+	return managedfiles.RenderTemplate(content, deviceID, bootstrapExtras), nil
+}
+
+func latestPolicySnapshot(ctx context.Context, store policy.Repository, tenantID string) (enrollment.PolicySnapshot, error) {
+	snapshot := enrollment.PolicySnapshot{}
 	if store == nil {
 		return snapshot, nil
 	}
@@ -565,35 +655,6 @@ func listActiveCertificates(ctx context.Context, store certificates.Repository, 
 			Name:       item.Name,
 			ArtifactID: item.ArtifactID,
 			Checksum:   item.Checksum,
-		})
-	}
-	return out, nil
-}
-
-func listManagedFiles(ctx context.Context, store managedfiles.Repository, deviceID, tenantID string) ([]enrollment.ManagedFileSnapshot, error) {
-	if store == nil {
-		return []enrollment.ManagedFileSnapshot{}, nil
-	}
-	items, err := store.ListManagedFiles(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]enrollment.ManagedFileSnapshot, 0)
-	for _, fileRecord := range items {
-		if fileRecord.Status != managedfiles.StatusActive {
-			continue
-		}
-		if fileRecord.File == nil || fileRecord.File.Artifact == nil {
-			continue
-		}
-		out = append(out, enrollment.ManagedFileSnapshot{
-			FileID:           fileRecord.ID,
-			Name:             fileRecord.File.Name,
-			Path:             fileRecord.Path,
-			DownloadPath:     "/api/v1/devices/" + deviceID + "/managed-files/" + fileRecord.ID + "/artifact",
-			Checksum:         fileRecord.File.Artifact.Checksum,
-			MimeType:         fileRecord.File.Artifact.MimeType,
-			ReplaceVariables: fileRecord.ReplaceVariables,
 		})
 	}
 	return out, nil

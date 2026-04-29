@@ -2,6 +2,7 @@ package enrollmentpg
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"time"
@@ -73,7 +74,7 @@ func (s *Store) ConsumeToken(ctx context.Context, tenantID, secret string) (enro
 	return s.inspectToken(ctx, tenantID, secret, true)
 }
 
-func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string) (enrollment.BoundDevice, error) {
+func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string, bootstrapExtras map[string]any) (enrollment.BoundDevice, error) {
 	if tenantID == "" || token == "" || deviceID == "" {
 		return enrollment.BoundDevice{}, httpx.ErrInvalidInput
 	}
@@ -123,11 +124,19 @@ func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string
 		}
 	}
 
+	var bootstrapExtrasJSON []byte
+	if bootstrapExtras != nil {
+		bootstrapExtrasJSON, err = json.Marshal(bootstrapExtras)
+		if err != nil {
+			return enrollment.BoundDevice{}, err
+		}
+	}
+
 	row := tx.QueryRow(ctx,
-		`INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, bootstrap_extras, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING device_id, status`,
-		uuid.NewString(), tenantID, deviceID, enrollment.HashToken(secret), device.StatusEnrolled, now,
+		uuid.NewString(), tenantID, deviceID, enrollment.HashToken(secret), device.StatusEnrolled, bootstrapExtrasJSON, now,
 	)
 	var bound enrollment.BoundDevice
 	if err := row.Scan(&bound.DeviceID, &bound.Status); err != nil {

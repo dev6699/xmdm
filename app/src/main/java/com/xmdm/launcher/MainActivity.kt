@@ -32,6 +32,8 @@ import com.xmdm.launcher.state.AgentStateStore
 import com.xmdm.launcher.state.LauncherEnrollmentStateMachine
 import com.xmdm.launcher.state.ManagedAppsState
 import com.xmdm.launcher.state.ManagedFilesState
+import com.xmdm.launcher.sync.ConfigSyncEngine
+import com.xmdm.launcher.sync.HttpConfigSnapshotFetcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
@@ -69,6 +71,12 @@ class MainActivity : AppCompatActivity() {
             rootDir = File(applicationContext.filesDir, "managed-files"),
         )
     }
+    private val configSyncEngine by lazy {
+        ConfigSyncEngine(
+            stateStore = stateStore,
+            fetcher = HttpConfigSnapshotFetcher(),
+        )
+    }
     private val deviceCommandCoordinator by lazy {
         DeviceCommandCoordinator(
             gateway = HttpDeviceCommandGateway(),
@@ -94,6 +102,8 @@ class MainActivity : AppCompatActivity() {
     private var lastEnrollmentAttemptBootstrapJson: String? = null
     private var commandTransportJob: Job? = null
     private var commandTransportTargetKey: String? = null
+    private var configSyncJob: Job? = null
+    private var configSyncTargetKey: String? = null
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
     private var cachedPrettySnapshotJson: String? = null
     private var cachedPrettySnapshotText: String = ""
@@ -109,12 +119,15 @@ class MainActivity : AppCompatActivity() {
         binding.launcherTitle.text = getString(R.string.launcher_title)
         lifecycleScope.launch {
             consumeBootstrapIntent()
+        }
+        lifecycleScope.launch {
             stateStore.state.collectLatest { state ->
                 latestState = state
                 renderLauncherStatus()
                 maybeStartEnrollment(state)
                 maybeApplyManagedFiles(state)
                 maybeApplyManagedApps(state)
+                maybeStartConfigSync(state)
                 packageRulesController.apply(state)
                 kioskModeController.apply(state)
                 maybeStartCommandTransport(state)
@@ -354,8 +367,17 @@ class MainActivity : AppCompatActivity() {
         Log.w(TAG, "mark enrollment attempted instance=$instanceId bootstrap=${bootstrapJson.hashCode()}")
         lifecycleScope.launch {
             try {
-                enrollmentCoordinator.enroll(bootstrap)
+                val result = enrollmentCoordinator.enroll(bootstrap)
                 enrollmentStateMachine.onEnrollmentSucceeded()
+                try {
+                    configSyncEngine.sync(bootstrap, result.identity)
+                } catch (t: Throwable) {
+                    if (t is kotlinx.coroutines.CancellationException) {
+                        throw t
+                    }
+                    Log.w(TAG, "initial config sync failed", t)
+                }
+                maybeStartConfigSync(bootstrap, result.identity)
             } catch (t: Throwable) {
                 Log.w(TAG, "enrollment failed", t)
                 enrollmentStateMachine.onEnrollmentFailed(t.message ?: t.javaClass.simpleName)
@@ -426,6 +448,50 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun maybeStartConfigSync(state: AgentState) {
+        maybeStartConfigSync(state.bootstrap, state.identity)
+    }
+
+    private fun maybeStartConfigSync(
+        bootstrap: com.xmdm.launcher.state.BootstrapState?,
+        identity: com.xmdm.launcher.state.DeviceIdentityState?,
+    ) {
+        bootstrap ?: run {
+            configSyncJob?.cancel()
+            configSyncJob = null
+            configSyncTargetKey = null
+            return
+        }
+        identity ?: run {
+            configSyncJob?.cancel()
+            configSyncJob = null
+            configSyncTargetKey = null
+            return
+        }
+        val syncIntervalMs = configSyncIntervalMs(bootstrap)
+        val targetKey = "${bootstrap.serverUrl}|${bootstrap.secondaryServerUrl}|${identity.deviceId}|${identity.deviceSecret}|$syncIntervalMs"
+        if (configSyncJob?.isActive == true && configSyncTargetKey == targetKey) {
+            return
+        }
+        configSyncJob?.cancel()
+        configSyncTargetKey = targetKey
+        configSyncJob = lifecycleScope.launch(Dispatchers.IO) {
+            delay(syncIntervalMs)
+            while (isActive) {
+                try {
+                    configSyncEngine.sync(bootstrap, identity)
+                    Log.w(TAG, "config sync refreshed instance=$instanceId")
+                } catch (t: Throwable) {
+                    if (t is kotlinx.coroutines.CancellationException) {
+                        throw t
+                    }
+                    Log.w(TAG, "config sync failed", t)
+                }
+                delay(syncIntervalMs)
+            }
+        }
+    }
+
     private suspend fun pollCommands(bootstrap: com.xmdm.launcher.state.BootstrapState, identity: com.xmdm.launcher.state.DeviceIdentityState) {
         val handled = deviceCommandCoordinator.pollAndExecute(
             serverUrl = bootstrap.serverUrl,
@@ -444,11 +510,11 @@ class MainActivity : AppCompatActivity() {
         if (fileInstallInFlight) {
             return
         }
-        if (state.hasManagedFiles && state.managedFiles?.version == policyCache.version) {
+        if (state.managedFiles?.version == policyCache.version) {
             lastManagedFilesSnapshotVersion = policyCache.version
             return
         }
-        if (lastManagedFilesSnapshotVersion == policyCache.version && state.hasManagedFiles) {
+        if (lastManagedFilesSnapshotVersion == policyCache.version) {
             return
         }
         fileInstallInFlight = true
@@ -458,9 +524,6 @@ class MainActivity : AppCompatActivity() {
                     snapshotJson = policyCache.snapshotJson,
                     deviceSecret = identity.deviceSecret,
                     serverUrl = bootstrap.serverUrl,
-                    deviceId = identity.deviceId,
-                    deviceIdUse = identity.deviceIdUse,
-                    bootstrapExtrasJson = bootstrap.bootstrapExtrasJson,
                     previousSnapshotJson = state.managedFiles?.snapshotJson,
                 )
                 stateStore.saveManagedFiles(
@@ -486,13 +549,14 @@ class MainActivity : AppCompatActivity() {
         val policyCache = state.policyCache ?: return
         val identity = state.identity ?: return
         val bootstrap = state.bootstrap ?: return
+        val requiresManagedFiles = snapshotHasManagedFiles(policyCache.snapshotJson)
         if (appInstallInFlight) {
             return
         }
-        if (!state.hasManagedFiles || state.managedFiles?.version != policyCache.version) {
+        if (requiresManagedFiles && state.managedFiles?.version != policyCache.version) {
             return
         }
-        if (lastManagedFilesSnapshotVersion != null && lastManagedFilesSnapshotVersion != policyCache.version) {
+        if (requiresManagedFiles && lastManagedFilesSnapshotVersion != null && lastManagedFilesSnapshotVersion != policyCache.version) {
             return
         }
         if (state.hasManagedApps && state.managedApps?.version == policyCache.version) {
@@ -563,9 +627,19 @@ class MainActivity : AppCompatActivity() {
             enrollmentStateMachine.reset()
             enrollmentStateMachine.onBootstrapReceived(normalizedBootstrap)
             BootstrapProvisioner(stateStore).persist(rawBootstrapJson)
-            maybeStartEnrollment(stateStore.state.first())
         } catch (t: Throwable) {
             Log.w(TAG, "bootstrap parsing failed", t)
+        }
+    }
+
+    private fun snapshotHasManagedFiles(snapshotJson: String): Boolean {
+        return try {
+            val files = JsonParser.parseString(snapshotJson)
+                .asJsonObject
+                .getAsJsonArray("files")
+            files != null && files.size() > 0
+        } catch (_: Throwable) {
+            false
         }
     }
 
@@ -602,6 +676,16 @@ class MainActivity : AppCompatActivity() {
             ?: DEFAULT_COMMAND_POLL_INTERVAL_MS
     }
 
+    private fun configSyncIntervalMs(bootstrap: com.xmdm.launcher.state.BootstrapState): Long {
+        val extras = runCatching { JsonParser.parseString(bootstrap.bootstrapExtrasJson).asJsonObject }.getOrNull()
+            ?: return DEFAULT_CONFIG_SYNC_INTERVAL_MS
+        val raw = extras.get(CONFIG_SYNC_INTERVAL_KEY) ?: return DEFAULT_CONFIG_SYNC_INTERVAL_MS
+        return runCatching { raw.asLong }
+            .getOrNull()
+            ?.takeIf { it > 0 }
+            ?: DEFAULT_CONFIG_SYNC_INTERVAL_MS
+    }
+
     private fun stringValue(source: com.google.gson.JsonObject, names: Set<String>): String? {
         for (name in names) {
             val value = source.get(name) ?: continue
@@ -620,7 +704,9 @@ class MainActivity : AppCompatActivity() {
 const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
         private const val DEFAULT_COMMAND_POLL_INTERVAL_MS = 30_000L
+        private const val DEFAULT_CONFIG_SYNC_INTERVAL_MS = 15 * 60 * 1000L
         private const val COMMAND_POLL_INTERVAL_KEY = "COMMAND_POLL_INTERVAL_MS"
+        private const val CONFIG_SYNC_INTERVAL_KEY = "CONFIG_SYNC_INTERVAL_MS"
         private val MQTT_ADDRESS_KEYS = setOf(
             "com.xmdm.MQTT_ADDRESS",
             "MQTT_ADDRESS",

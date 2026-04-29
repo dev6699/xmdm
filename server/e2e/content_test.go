@@ -19,6 +19,7 @@ func TestManagedAppsAndFiles(t *testing.T) {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
 	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
 	env.requests.waitFor(t, time.Minute, "managed file artifact download", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
 			strings.Contains(r.path, "/api/v1/devices/") &&
@@ -33,6 +34,45 @@ func TestManagedAppsAndFiles(t *testing.T) {
 	})
 	waitForManagedFileOnDevice(t, env.serial, env.deviceID)
 	waitForChromeInstalled(t, env.serial)
+}
+
+// TestManagedAppsAndFilesRemoval verifies that managed file and app removals in
+// a later config snapshot are reflected on the device without re-enrollment.
+func TestManagedAppsAndFilesRemoval(t *testing.T) {
+	env := newContentTestEnvWithExtras(t, map[string]string{
+		"CONFIG_SYNC_INTERVAL_MS": "1000",
+	})
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	env.requests.waitFor(t, time.Minute, "managed file artifact download", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			strings.Contains(r.path, "/api/v1/devices/") &&
+			strings.Contains(r.path, "/managed-files/") &&
+			strings.HasSuffix(r.path, "/artifact")
+	})
+	env.requests.waitFor(t, time.Minute, "managed app artifact download", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			strings.Contains(r.path, "/api/v1/devices/") &&
+			strings.Contains(r.path, "/apps/") &&
+			strings.HasSuffix(r.path, "/artifact")
+	})
+	waitForManagedFileOnDevice(t, env.serial, env.deviceID)
+	waitForChromeInstalled(t, env.serial)
+
+	requestMarker := env.requests.len()
+	deleteJSON(t, env.client, env.baseURL+"/api/v1/managed-files/"+env.managedFile.managedFileID)
+	deleteJSON(t, env.client, env.baseURL+"/api/v1/apps/"+env.chromeAppID)
+
+	env.requests.waitForAfter(t, requestMarker, time.Minute, "config sync after managed content removal", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			r.path == "/api/v1/devices/"+env.deviceID+"/config"
+	})
+	waitForManagedFileRemovedFromDevice(t, env.serial)
+	waitForChromeUninstalled(t, env.serial)
 }
 
 // TestCommandMQTT enrolls a device using MQTT transport and verifies that a
@@ -152,17 +192,22 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 // lock-task mode on a physical device.
 func TestKioskMode(t *testing.T) {
 	env := newBaseTestEnv(t, false)
+	mustCreatePolicy(t, env.client, env.baseURL, `{
+		"name":"kiosk-mode",
+		"version":1,
+		"kioskMode":true,
+		"restrictions":{}
+	}`)
 
 	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
-	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, "", map[string]string{
-		"kioskMode": "true",
-	})
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, "", nil)
 	startLauncher(t, env.serial, bootstrapURI)
 
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
 	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
 	waitForKioskModeOnDevice(t, env.serial)
 }
 
@@ -175,6 +220,59 @@ func TestPackageRules(t *testing.T) {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
 	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
 	waitForChromeInstalled(t, env.serial)
+	waitForPackageSuspendedOnDevice(t, env.serial, chromePackage)
+}
+
+// TestPolicySync verifies that admin policy updates are picked up by the
+// running launcher without re-enrollment and are reflected in the device state.
+func TestPolicySync(t *testing.T) {
+	env := newBaseTestEnv(t, false)
+	artifactStore := newTestArtifactStore(t)
+
+	mustRegisterChromeApp(t, env.client, env.baseURL, artifactStore)
+	policyResp := mustCreatePolicy(t, env.client, env.baseURL, `{
+		"name":"policy-sync",
+		"version":1,
+		"kioskMode":false,
+		"restrictions":{}
+	}`)
+	policyID, _ := policyResp["id"].(string)
+	if policyID == "" {
+		t.Fatalf("policy create returned empty id: %#v", policyResp)
+	}
+
+	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, "", map[string]string{
+		"CONFIG_SYNC_INTERVAL_MS": "1000",
+	})
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	env.requests.waitFor(t, time.Minute, "managed app artifact download", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			strings.Contains(r.path, "/api/v1/devices/") &&
+			strings.Contains(r.path, "/apps/") &&
+			strings.HasSuffix(r.path, "/artifact")
+	})
+	waitForChromeInstalled(t, env.serial)
+
+	requestMarker := env.requests.len()
+	patchJSON(t, env.client, env.baseURL+"/api/v1/policies/"+policyID, `{
+		"name":"policy-sync",
+		"version":2,
+		"kioskMode":false,
+		"restrictions":{
+			"blockPackages":["com.android.chrome"]
+		}
+	}`)
+	env.requests.waitForAfter(t, requestMarker, time.Minute, "config sync after policy update", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			r.path == "/api/v1/devices/"+env.deviceID+"/config"
+	})
 	waitForPackageSuspendedOnDevice(t, env.serial, chromePackage)
 }

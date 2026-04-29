@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/checksum"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
@@ -50,8 +51,9 @@ func TestRegisterDeviceManagedFileArtifactRoute(t *testing.T) {
 					MimeType:   "text/plain",
 				},
 			},
+			ReplaceVariables: true,
 		},
-	}, &fakeDeviceStore{}, &fakeArtifactStore{content: []byte("device-config-bytes")}, "tenant-1")
+	}, &fakeDeviceStore{}, &fakeArtifactStore{content: []byte("device-config-bytes DEVICE_NUMBER CUSTOMER")}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/managed-files/managed-file-1/artifact", nil)
 	req.Header.Set(deviceSecretHeader, "device-secret")
@@ -65,13 +67,13 @@ func TestRegisterDeviceManagedFileArtifactRoute(t *testing.T) {
 	if got := res.Header().Get("Content-Type"); got != "text/plain" {
 		t.Fatalf("unexpected content type: %q", got)
 	}
-	if got := res.Header().Get("X-XMDM-Artifact-Checksum"); got != "sha256-file-abc" {
+	if got := res.Header().Get("X-XMDM-Artifact-Checksum"); got != checksum.SHA256Base64URL([]byte("device-config-bytes device-123 Acme")) {
 		t.Fatalf("unexpected checksum header: %q", got)
 	}
 	if got := res.Header().Get("Content-Disposition"); got != `attachment; filename="device-config.txt"` {
 		t.Fatalf("unexpected disposition: %q", got)
 	}
-	if !bytes.Equal(res.Body.Bytes(), []byte("device-config-bytes")) {
+	if !bytes.Equal(res.Body.Bytes(), []byte("device-config-bytes device-123 Acme")) {
 		t.Fatalf("unexpected body: %q", res.Body.Bytes())
 	}
 }
@@ -118,7 +120,10 @@ func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, se
 	if deviceID != "device-123" || secret != "device-secret" {
 		return device.Device{}, httpx.ErrNotFound
 	}
-	return device.Device{}, nil
+	return device.Device{
+		Name:            "device-123",
+		BootstrapExtras: map[string]any{"CUSTOMER": "Acme"},
+	}, nil
 }
 
 type fakeArtifactStore struct {

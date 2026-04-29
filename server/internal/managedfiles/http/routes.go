@@ -1,6 +1,7 @@
 package managedfilehttp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"xmdm/server/internal/artifacts"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/checksum"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/managedfiles"
@@ -35,7 +37,8 @@ func Register(mux httpx.Router, svc *auth.Service, store managedfiles.Repository
 			http.Error(w, "invalid input", http.StatusBadRequest)
 			return
 		}
-		if _, err := devices.Authenticate(r.Context(), tenantID, deviceID, secret); err != nil {
+		authDevice, err := devices.Authenticate(r.Context(), tenantID, deviceID, secret)
+		if err != nil {
 			switch err {
 			case httpx.ErrInvalidInput:
 				log.Printf("managed files artifact auth invalid input: device=%s managed_file=%s", deviceID, managedFileID)
@@ -70,10 +73,19 @@ func Register(mux httpx.Router, svc *auth.Service, store managedfiles.Repository
 			return
 		}
 		defer body.Close()
+		content, err := io.ReadAll(body)
+		if err != nil {
+			log.Printf("managed files artifact read failed: device=%s managed_file=%s storage_key=%s err=%v", deviceID, managedFileID, managedFile.File.Artifact.StorageKey, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if managedFile.ReplaceVariables {
+			content = managedfiles.RenderTemplate(content, deviceID, authDevice.BootstrapExtras)
+		}
 		w.Header().Set("Content-Type", managedFile.File.Artifact.MimeType)
-		w.Header().Set("Content-Length", strconv.FormatInt(managedFile.File.Artifact.SizeBytes, 10))
-		w.Header().Set("X-XMDM-Artifact-Checksum", managedFile.File.Artifact.Checksum)
-		w.Header().Set("X-XMDM-Artifact-Size", strconv.FormatInt(managedFile.File.Artifact.SizeBytes, 10))
+		w.Header().Set("Content-Length", strconv.FormatInt(int64(len(content)), 10))
+		w.Header().Set("X-XMDM-Artifact-Checksum", checksum.SHA256Base64URL(content))
+		w.Header().Set("X-XMDM-Artifact-Size", strconv.FormatInt(int64(len(content)), 10))
 		downloadName := managedFile.Path
 		if downloadName == "" {
 			downloadName = managedFile.File.Name
@@ -83,7 +95,7 @@ func Register(mux httpx.Router, svc *auth.Service, store managedfiles.Repository
 		}
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadName))
 		w.WriteHeader(http.StatusOK)
-		_, _ = io.Copy(w, body)
+		_, _ = io.Copy(w, bytes.NewReader(content))
 	})
 
 	mux.HandleFunc("/managed-files", func(w http.ResponseWriter, r *http.Request) {

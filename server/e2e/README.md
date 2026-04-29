@@ -7,8 +7,10 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestAdminE2E` covers the admin console flow.
 - `TestEnrollmentE2E` covers server-simulated enrollment and first-sync behavior.
 - `TestManagedAppsAndFiles` covers adb-backed managed app and managed file delivery on a physical device.
+- `TestManagedAppsAndFilesRemoval` covers adb-backed managed app and managed file removal on a physical device.
 - `TestKioskMode` covers adb-backed kiosk enforcement on a physical device.
 - `TestPackageRules` covers adb-backed package suspension enforcement on a physical device.
+- `TestPolicySync` covers adb-backed policy refresh after an admin update on a physical device.
 - `TestCommandMQTT` covers MQTT command transport on a physical device.
 - `TestCommandPolling` covers HTTP polling command transport on a physical device.
 - `TestCommandBrokerOutageRecovery` covers MQTT outage fallback and recovery on a physical device.
@@ -61,8 +63,10 @@ Use this bucket for:
 Current coverage:
 
 - `TestManagedAppsAndFiles`
+- `TestManagedAppsAndFilesRemoval`
 - `TestKioskMode`
 - `TestPackageRules`
+- `TestPolicySync`
 - `TestCommandMQTT`
 - `TestCommandPolling`
 - `TestCommandBrokerOutageRecovery`
@@ -72,6 +76,7 @@ Current coverage:
 - [`TestAdminE2E`](/home/puong/xmdm/server/e2e/admin_test.go) for admin API coverage.
 - [`TestEnrollmentE2E`](/home/puong/xmdm/server/e2e/enrollment_test.go) for server-simulated device enrollment and sync behavior.
 - [`TestManagedAppsAndFiles`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app delivery.
+- [`TestManagedAppsAndFilesRemoval`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app removal.
 - [`TestKioskMode`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk enforcement.
 - [`TestPackageRules`](/home/puong/xmdm/server/e2e/content_test.go) for real-device package suspension enforcement.
 - [`TestCommandMQTT`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command transport.
@@ -95,7 +100,7 @@ The admin E2E verifies:
 
 - enrollment token issuance through the admin API
 - device binding through `/api/v1/enrollment`
-- signed bootstrap config returned from enrollment
+- signed bootstrap config fetched from `/api/v1/devices/{deviceId}/config`
 - telemetry upload using the device secret
 - device state promotion from `enrolled` to `active`
 - duplicate enrollment handling for the same device ID
@@ -114,8 +119,19 @@ The admin E2E verifies:
 8. Builds an enrollment QR payload that points at the test server.
 9. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
 10. Starts the launcher with the bootstrap payload on the physical device.
-11. Waits for the launcher to enroll, fetch policy, render the managed file, and restore Chrome for the current user.
+11. Waits for the launcher to enroll, fetch the signed device config snapshot, receive the rendered managed file, and restore Chrome for the current user.
 12. Verifies on-device state with adb reads from the launcher sandbox and package manager.
+
+`TestManagedAppsAndFilesRemoval` is the physical-device content removal test. It does all of the following in one run:
+
+1. Starts the same real HTTP handler stack with a real Postgres test database.
+2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
+3. Creates the managed file and Chrome app fixtures used by the content install test.
+4. Starts the launcher with a short `CONFIG_SYNC_INTERVAL_MS=1000` bootstrap override.
+5. Waits for the launcher to enroll, fetch the signed device config snapshot, receive the rendered managed file, and restore Chrome for the current user.
+6. Retires the managed file record and the managed Chrome app on the server.
+7. Waits for the launcher to fetch the updated device config snapshot after the retire operations.
+8. Verifies the managed file has been removed from the launcher sandbox and Chrome has been uninstalled from the device.
 
 ## Kiosk Flow
 
@@ -124,10 +140,10 @@ The admin E2E verifies:
 1. Starts a real HTTP handler stack with a real Postgres test database.
 2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
 3. Resets server-side enrollment state for the chosen device ID.
-4. Builds an enrollment QR payload that includes `kioskMode=true` in bootstrap extras.
+4. Creates an active kiosk policy and keeps the enrollment payload itself free of kiosk-specific extras.
 5. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
 6. Starts the launcher with the bootstrap payload on the physical device.
-7. Waits for the launcher to enroll and fetch the signed policy snapshot.
+7. Waits for the launcher to enroll and fetch the signed device config snapshot.
 8. Verifies on-device kiosk state with `dumpsys activity activities`.
 
 ## Package Rules Flow
@@ -140,7 +156,20 @@ The admin E2E verifies:
 4. Creates an active policy that blocks `com.android.chrome` through the policy restrictions JSON.
 5. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
 6. Starts the launcher with the bootstrap payload on the physical device.
-7. Waits for the launcher to enroll, fetch policy, restore Chrome, and suspend the package on-device.
+7. Waits for the launcher to enroll, fetch the signed device config snapshot, restore Chrome, and suspend the package on-device.
+8. Verifies the package suspension state with `dumpsys package com.android.chrome`.
+
+## Policy Sync Flow
+
+`TestPolicySync` is the physical-device policy refresh test. It does all of the following in one run:
+
+1. Starts a real HTTP handler stack with a real Postgres test database.
+2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
+3. Uploads the Chrome APK artifact and publishes it as a managed app.
+4. Creates a benign active policy, then later patches it to block `com.android.chrome`.
+5. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
+6. Starts the launcher with a short `CONFIG_SYNC_INTERVAL_MS=1000` bootstrap override on the physical device.
+7. Waits for the launcher to enroll, fetch policy, restore Chrome, and then fetch the updated device config snapshot after the policy patch.
 8. Verifies the package suspension state with `dumpsys package com.android.chrome`.
 
 ## Command Flows
@@ -174,7 +203,7 @@ Important details:
 
 - The test no longer tears the device down after a successful run.
 - Chrome is treated as a managed app restore path for a preloaded system package on this device.
-- The managed file content is rendered into the launcher sandbox and checked after the run.
+- The managed file content is rendered on the server, downloaded by the launcher, and checked after the run.
 - The test logs periodic adb snapshots while it waits so a stalled run shows the current device state.
 
 ## Test Harness
@@ -200,6 +229,16 @@ XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestManagedAppsAndFiles -
 
 The test uses `XMDM_TEST_POSTGRES_DSN` from `../infra/test-db-env.sh` and requires a connected device serial in `XMDM_ADB_SERIAL`.
 
+For the adb-backed content removal test on a physical device:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestManagedAppsAndFilesRemoval -count=1 ./e2e
+```
+
+`TestManagedAppsAndFilesRemoval` uses `CONFIG_SYNC_INTERVAL_MS=1000` so the launcher picks up the retire operations quickly.
+
 For the adb-backed kiosk enforcement test:
 
 ```sh
@@ -215,6 +254,16 @@ eval "$(../infra/test-db-env.sh)"
 cd server
 XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestPackageRules -count=1 ./e2e
 ```
+
+For the adb-backed policy sync test:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestPolicySync -count=1 ./e2e
+```
+
+`TestPolicySync` uses `CONFIG_SYNC_INTERVAL_MS=1000` so the launcher refreshes the signed device config snapshot quickly after the admin policy patch.
 
 For the MQTT command transport test:
 

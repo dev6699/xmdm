@@ -13,13 +13,13 @@ class KioskModeControllerTest {
         val host = FakeHost(deviceOwner = true, inLockTaskMode = false)
         val controller = KioskModeController(host) { }
 
-        controller.apply(agentState("""{"policy":{"bootstrapExtras":{"kioskMode":true}}}"""))
+        controller.apply(agentState("""{"policy":{"kioskMode":true}}"""))
 
         assertTrue(host.setPackagesCalls.contains(listOf("com.xmdm.launcher")))
         assertTrue(host.startLockTaskCalls == 1)
         assertTrue(host.inLockTaskMode)
 
-        controller.apply(agentState("""{"policy":{"bootstrapExtras":{"kioskMode":false}}}"""))
+        controller.apply(agentState("""{"policy":{"kioskMode":false}}"""))
 
         assertTrue(host.stopLockTaskCalls == 1)
         assertTrue(host.setPackagesCalls.contains(emptyList()))
@@ -33,7 +33,7 @@ class KioskModeControllerTest {
 
         controller.apply(
             agentState(
-                snapshotJson = """{"policy":{"bootstrapExtras":{"kioskMode":true}}}""",
+                snapshotJson = """{"policy":{"kioskMode":true}}""",
                 policyVersion = 2,
                 managedAppsVersion = 1,
             ),

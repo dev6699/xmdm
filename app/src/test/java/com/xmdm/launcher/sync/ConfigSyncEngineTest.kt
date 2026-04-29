@@ -40,7 +40,7 @@ class ConfigSyncEngineTest {
             {
               "version":"7",
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
-              "policy":{"bootstrapExtras":{"customer":"Acme"}},
+              "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
               "certificates":[]
@@ -50,7 +50,7 @@ class ConfigSyncEngineTest {
             {
               "version":"7",
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
-              "policy":{"bootstrapExtras":{"customer":"Acme"}},
+              "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
               "certificates":[],
@@ -125,7 +125,7 @@ class ConfigSyncEngineTest {
             {
               "version":"7",
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
-              "policy":{"bootstrapExtras":{"customer":"Acme"}},
+              "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
               "certificates":[]
@@ -135,7 +135,7 @@ class ConfigSyncEngineTest {
             {
               "version":"7",
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
-              "policy":{"bootstrapExtras":{"customer":"Acme"}},
+              "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
               "certificates":[],

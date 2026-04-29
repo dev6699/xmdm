@@ -50,8 +50,27 @@ func TestEnrollmentE2E(t *testing.T) {
 	if bound["status"] != device.StatusEnrolled {
 		t.Fatalf("expected enrolled status, got %#v", bound["status"])
 	}
-	if config, ok := bound["config"].(map[string]any); !ok || config["signature"] == "" {
-		t.Fatalf("expected signed config in response: %#v", bound["config"])
+
+	configReq, err := http.NewRequest(http.MethodGet, baseURL+"/api/v1/devices/"+deviceID+"/config", nil)
+	if err != nil {
+		t.Fatalf("build config request: %v", err)
+	}
+	configReq.Header.Set("X-XMDM-Device-Secret", deviceSecret)
+	configRes, err := client.Do(configReq)
+	if err != nil {
+		t.Fatalf("config request: %v", err)
+	}
+	defer configRes.Body.Close()
+	if configRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(configRes.Body)
+		t.Fatalf("expected config ok, got %d: %s", configRes.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var config map[string]any
+	if err := json.NewDecoder(configRes.Body).Decode(&config); err != nil {
+		t.Fatalf("decode config response: %v", err)
+	}
+	if config["signature"] == "" {
+		t.Fatalf("expected signed config in response: %#v", config)
 	}
 
 	reqBody := strings.NewReader(`{"heartbeat":{"online":true}}`)

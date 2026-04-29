@@ -4,9 +4,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -14,11 +16,13 @@ func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, policy PolicySnaps
 	if apps == nil {
 		apps = []AppSnapshot{}
 	}
+	if files == nil {
+		files = []ManagedFileSnapshot{}
+	}
 	if certificates == nil {
 		certificates = []CertificateSnapshot{}
 	}
-	return ConfigSnapshot{
-		Version: "1",
+	snapshot := ConfigSnapshot{
 		Device: DeviceSnapshot{
 			DeviceID:    deviceID,
 			DeviceIDUse: deviceIDUse,
@@ -28,6 +32,8 @@ func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, policy PolicySnaps
 		Files:        files,
 		Certificates: certificates,
 	}
+	snapshot.Version = snapshotRevision(snapshot)
+	return snapshot
 }
 
 func SignConfigSnapshot(snapshot ConfigSnapshot, secret string) (ConfigSnapshot, error) {
@@ -80,6 +86,27 @@ func expectedConfigSignature(snapshot ConfigSnapshot, secret string) ([]byte, er
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(canonical))
 	return mac.Sum(nil), nil
+}
+
+func snapshotRevision(snapshot ConfigSnapshot) string {
+	snapshot.Version = ""
+	snapshot.Signature = ""
+	snapshot.Device = DeviceSnapshot{}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return "0"
+	}
+	var normalized any
+	if err := json.Unmarshal(raw, &normalized); err != nil {
+		return "0"
+	}
+	canonical, err := canonicalJSON(normalized)
+	if err != nil {
+		return "0"
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	revision := int64(binary.BigEndian.Uint64(sum[:8]))
+	return strconv.FormatInt(revision, 10)
 }
 
 func canonicalJSON(value any) (string, error) {

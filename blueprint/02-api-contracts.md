@@ -37,9 +37,10 @@
 
 - Creates or binds a device during first enrollment.
 - Accepts an enrollment token, device identity hints, and optional bootstrap fields.
-- Returns the device identity, device secret, initial config snapshot, and any initial artifact or command data needed for first sync.
+- Returns the device identity and device secret.
 - `POST /api/v1/enrollment` binds the device during first enrollment and returns the device secret.
 - Enrollment token lifecycle routes live under `/api/v1/enrollment/tokens` for issuance, validation, consumption, and revocation.
+- `GET /api/v1/devices/{deviceId}/config` returns the latest signed device config snapshot for an enrolled device when called with `X-XMDM-Device-Secret`.
 - The issued token is one-time use and is stored only as a hash server-side.
 - Token validation and consumption are public device-side calls that operate on the raw bootstrap token string.
 
@@ -52,7 +53,7 @@
 
 ### Device Config Sync
 
-- Returns the signed policy snapshot plus the app, file, certificate, and command state that the device needs to apply.
+- Returns the signed policy snapshot plus the app, file, and certificate state that the device needs to apply.
 - The sync path is deterministic and idempotent.
 - The POST variant is used when the device needs to send telemetry in the same round trip.
 - App snapshot entries include the managed package name, published version, artifact checksum, and a device-scoped download path so the launcher can fetch and install the correct APK.
@@ -119,19 +120,11 @@
   "deviceId": "string",
   "deviceSecret": "string",
   "status": "enrolled",
-  "config": {
-    "version": "string",
-    "device": {},
-    "policy": {},
-    "apps": [],
-    "files": [],
-    "certificates": [],
-    "signature": "string"
-  }
 }
 ```
 
-- The `config` payload is a signed config snapshot.
+- The enrollment response no longer includes the config snapshot.
+- The launcher fetches the signed config snapshot from `/api/v1/devices/{deviceId}/config` after enrollment.
 - The signature is computed over the canonical JSON representation with `signature` blanked and keyed by the device secret.
 
 ### Config Snapshot

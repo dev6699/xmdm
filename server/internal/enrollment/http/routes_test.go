@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"xmdm/server/internal/apps"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/certificates"
+	"xmdm/server/internal/checksum"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/files"
@@ -29,7 +31,7 @@ func TestRegisterQRPng(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -66,7 +68,7 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -126,7 +128,7 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 	}
 }
 
-func TestRegisterEnrollmentIncludesLatestActivePolicy(t *testing.T) {
+func TestRegisterEnrollmentBindRouteReturnsIdentityOnly(t *testing.T) {
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	store := &fakeEnrollmentStore{
 		bound: enrollment.BoundDevice{
@@ -163,7 +165,7 @@ func TestRegisterEnrollmentIncludesLatestActivePolicy(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, nil, nil, nil, policyStore, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, store, nil, nil, nil, nil, policyStore, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
@@ -181,31 +183,17 @@ func TestRegisterEnrollmentIncludesLatestActivePolicy(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode bind response: %v", err)
 	}
-	rawConfig, _ := payload["config"].(map[string]any)
-	rawConfigJSON, err := json.Marshal(rawConfig)
-	if err != nil {
-		t.Fatalf("marshal config: %v", err)
+	if payload["deviceId"] != "device-123" {
+		t.Fatalf("unexpected device id: %#v", payload["deviceId"])
 	}
-	var typedConfig struct {
-		Policy enrollment.PolicySnapshot `json:"policy"`
+	if payload["deviceSecret"] != "device-secret" {
+		t.Fatalf("unexpected device secret: %#v", payload["deviceSecret"])
 	}
-	if err := json.Unmarshal(rawConfigJSON, &typedConfig); err != nil {
-		t.Fatalf("decode policy snapshot: %v", err)
+	if payload["status"] != device.StatusEnrolled {
+		t.Fatalf("unexpected status: %#v", payload["status"])
 	}
-	if !typedConfig.Policy.KioskMode {
-		t.Fatalf("unexpected kioskMode: %#v", typedConfig.Policy.KioskMode)
-	}
-	if typedConfig.Policy.Name != "new" {
-		t.Fatalf("unexpected policy name: %#v", typedConfig.Policy.Name)
-	}
-	if typedConfig.Policy.Version != 2 {
-		t.Fatalf("unexpected policy version: %#v", typedConfig.Policy.Version)
-	}
-	if len(typedConfig.Policy.Restrictions.BlockPackages) == 0 {
-		t.Fatalf("missing blockPackages: %#v", typedConfig.Policy.Restrictions)
-	}
-	if typedConfig.Policy.BootstrapExtras["customer"] != "Acme" {
-		t.Fatalf("missing bootstrapExtras passthrough: %#v", typedConfig.Policy)
+	if _, ok := payload["config"]; ok {
+		t.Fatalf("enrollment response should not include config: %#v", payload["config"])
 	}
 }
 
@@ -217,7 +205,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/qr/json", bytes.NewBufferString(`{"serverUrl":"not-a-url","deviceAdminPackageDownloadLocation":"https://cdn.example/launcher.apk","deviceAdminPackageChecksum":"abc123"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -239,7 +227,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res = httptest.NewRecorder()
 	mux = http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, "tenant-1")
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad request, got %d", res.Code)
@@ -280,7 +268,7 @@ func TestRegisterTokenLifecycleRoutes(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, store, nil, nil, nil, nil, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens", bytes.NewBufferString(`{"ttlSeconds":3600}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -329,6 +317,17 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 			DeviceID:     "device-123",
 			DeviceSecret: "device-secret",
 			Status:       device.StatusEnrolled,
+		},
+	}
+	deviceStore := &fakeDeviceStore{
+		device: device.Device{
+			RecordBase: device.RecordBase{
+				ID:       "device-record-1",
+				TenantID: "tenant-1",
+				Status:   device.StatusEnrolled,
+			},
+			Name:            "device-123",
+			BootstrapExtras: map[string]any{"customer": "Acme"},
 		},
 	}
 	appStore := &fakeAppStore{
@@ -396,7 +395,8 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, appStore, fileStore, &fakeCertificateStore{
+	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER CUSTOMER")}
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, store, appStore, fileStore, artifactStore, &fakeCertificateStore{
 		active: []certificates.Certificate{
 			{
 				RecordBase: certificates.RecordBase{
@@ -432,13 +432,12 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if payload["deviceSecret"] != "device-secret" {
 		t.Fatalf("unexpected device secret: %#v", payload["deviceSecret"])
 	}
-	rawConfig, ok := payload["config"].(map[string]any)
-	if !ok {
-		t.Fatalf("config has wrong type: %T", payload["config"])
-	}
-	rawConfigJSON, err := json.Marshal(rawConfig)
-	if err != nil {
-		t.Fatalf("marshal config: %v", err)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/config", nil)
+	req.Header.Set("X-XMDM-Device-Secret", "device-secret")
+	res = httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected config ok, got %d", res.Code)
 	}
 	var typedConfig struct {
 		Version      string                           `json:"version"`
@@ -449,7 +448,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 		Certificates []enrollment.CertificateSnapshot `json:"certificates"`
 		Signature    string                           `json:"signature"`
 	}
-	if err := json.Unmarshal(rawConfigJSON, &typedConfig); err != nil {
+	if err := json.Unmarshal(res.Body.Bytes(), &typedConfig); err != nil {
 		t.Fatalf("decode config snapshot: %v", err)
 	}
 	config := enrollment.ConfigSnapshot{
@@ -461,8 +460,8 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 		Certificates: typedConfig.Certificates,
 		Signature:    typedConfig.Signature,
 	}
-	if config.Version != "1" {
-		t.Fatalf("unexpected config version: %q", config.Version)
+	if config.Version == "" {
+		t.Fatalf("expected non-empty config version")
 	}
 	if err := enrollment.VerifyConfigSnapshot(config, "device-secret"); err != nil {
 		t.Fatalf("verify config snapshot: %v", err)
@@ -475,6 +474,9 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	}
 	if len(config.Files) != 1 {
 		t.Fatalf("expected one file in config, got %d", len(config.Files))
+	}
+	if got := config.Files[0].Checksum; got != checksum.SHA256Base64URL([]byte("managed-file-on-device device-123 Acme")) {
+		t.Fatalf("unexpected rendered file checksum: %#v", got)
 	}
 	if config.Apps[0].DownloadPath != "/api/v1/devices/device-123/apps/app-1/versions/version-1/artifact" {
 		t.Fatalf("unexpected download path: %#v", config.Apps[0].DownloadPath)
@@ -497,6 +499,17 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 			DeviceID:     "device-123",
 			DeviceSecret: "device-secret",
 			Status:       device.StatusEnrolled,
+		},
+	}
+	deviceStore := &fakeDeviceStore{
+		device: device.Device{
+			RecordBase: device.RecordBase{
+				ID:       "device-record-1",
+				TenantID: "tenant-1",
+				Status:   device.StatusEnrolled,
+			},
+			Name:            "device-123",
+			BootstrapExtras: map[string]any{"customer": "Acme"},
 		},
 	}
 	appStore := &fakeAppStore{
@@ -574,7 +587,8 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, appStore, fileStore, nil, nil, "tenant-1")
+	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER CUSTOMER")}
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, store, appStore, fileStore, artifactStore, nil, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
@@ -591,18 +605,18 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode bind response: %v", err)
 	}
-	rawConfig, ok := payload["config"].(map[string]any)
-	if !ok {
-		t.Fatalf("config has wrong type: %T", payload["config"])
-	}
-	rawConfigJSON, err := json.Marshal(rawConfig)
-	if err != nil {
-		t.Fatalf("marshal config: %v", err)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/config", nil)
+	req.Header.Set("X-XMDM-Device-Secret", "device-secret")
+	res = httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected config ok, got %d", res.Code)
 	}
 	var typedConfig struct {
-		Apps []enrollment.AppSnapshot `json:"apps"`
+		Apps  []enrollment.AppSnapshot         `json:"apps"`
+		Files []enrollment.ManagedFileSnapshot `json:"files"`
 	}
-	if err := json.Unmarshal(rawConfigJSON, &typedConfig); err != nil {
+	if err := json.Unmarshal(res.Body.Bytes(), &typedConfig); err != nil {
 		t.Fatalf("decode config snapshot: %v", err)
 	}
 	if len(typedConfig.Apps) != 1 {
@@ -613,6 +627,168 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 	}
 	if typedConfig.Apps[0].DownloadPath != "/api/v1/devices/device-123/apps/app-1/versions/version-2/artifact" {
 		t.Fatalf("unexpected download path: %#v", typedConfig.Apps[0].DownloadPath)
+	}
+	if len(typedConfig.Files) != 1 {
+		t.Fatalf("expected one file in config, got %d", len(typedConfig.Files))
+	}
+	if got := typedConfig.Files[0].Checksum; got != checksum.SHA256Base64URL([]byte("managed-file-on-device device-123 Acme")) {
+		t.Fatalf("unexpected rendered file checksum: %#v", got)
+	}
+}
+
+func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
+	deviceStore := &fakeDeviceStore{
+		device: device.Device{
+			RecordBase: device.RecordBase{
+				ID:       "device-record-1",
+				TenantID: "tenant-1",
+				Status:   device.StatusEnrolled,
+			},
+			Name:            "device-123",
+			BootstrapExtras: map[string]any{"CUSTOMER": "Acme"},
+		},
+	}
+	appStore := &fakeAppStore{
+		apps: []apps.App{
+			{
+				RecordBase: apps.RecordBase{
+					ID:       "app-1",
+					TenantID: "tenant-1",
+					Status:   apps.StatusActive,
+				},
+				PackageName: "com.example.app",
+				Name:        "Example App",
+			},
+		},
+		versions: map[string][]apps.Version{
+			"app-1": {
+				{
+					ID:          "version-1",
+					TenantID:    "tenant-1",
+					AppID:       "app-1",
+					Status:      apps.VersionStatusPublished,
+					VersionName: "1.0.0",
+					VersionCode: 100,
+					ArtifactID:  strPtr("artifact-1"),
+					Checksum:    "sha256-app-abc",
+				},
+			},
+		},
+	}
+	fileStore := &fakeFileStore{
+		items: []managedfiles.ManagedFile{
+			{
+				RecordBase: managedfiles.RecordBase{
+					ID:       "managed-file-1",
+					TenantID: "tenant-1",
+					Status:   managedfiles.StatusActive,
+				},
+				FileID:           "file-1",
+				Path:             "device-config.txt",
+				ReplaceVariables: true,
+				File: &files.File{
+					RecordBase: files.RecordBase{
+						ID:       "file-1",
+						TenantID: "tenant-1",
+						Status:   files.StatusActive,
+					},
+					Name:       "device-config.txt",
+					ArtifactID: "artifact-2",
+					Checksum:   "sha256-file-abc",
+					MimeType:   "text/plain",
+					Artifact: &files.Artifact{
+						RecordBase: files.RecordBase{
+							ID:       "artifact-2",
+							TenantID: "tenant-1",
+							Status:   files.StatusActive,
+						},
+						StorageKey: "artifacts/device-config.txt",
+						Checksum:   "sha256-file-abc",
+						SizeBytes:  42,
+						MimeType:   "text/plain",
+					},
+				},
+			},
+		},
+	}
+	policyStore := &fakePolicyStore{
+		policies: []policy.Policy{
+			{
+				RecordBase: policy.RecordBase{
+					ID:       "policy-1",
+					TenantID: "tenant-1",
+					Status:   "active",
+				},
+				Name:      "policy-one",
+				Version:   3,
+				KioskMode: true,
+				Restrictions: json.RawMessage(`{
+					"blockPackages":["com.example.bad"],
+					"allowPackages":["com.example.good"]
+				}`),
+			},
+		},
+	}
+
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
+	mux := http.NewServeMux()
+	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER CUSTOMER")}
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, nil, appStore, fileStore, artifactStore, &fakeCertificateStore{
+		active: []certificates.Certificate{
+			{
+				RecordBase: certificates.RecordBase{
+					ID:       "cert-1",
+					TenantID: "tenant-1",
+					Status:   certificates.StatusActive,
+				},
+				Name:       "wifi-root-ca",
+				ArtifactID: "artifact-1",
+				Checksum:   "sha256-cert-abc",
+			},
+		},
+	}, policyStore, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/config", nil)
+	req.Header.Set("X-XMDM-Device-Secret", "device-secret")
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected ok, got %d", res.Code)
+	}
+
+	var typedConfig struct {
+		Version      string                           `json:"version"`
+		Device       enrollment.DeviceSnapshot        `json:"device"`
+		Policy       enrollment.PolicySnapshot        `json:"policy"`
+		Apps         []enrollment.AppSnapshot         `json:"apps"`
+		Files        []enrollment.ManagedFileSnapshot `json:"files"`
+		Certificates []enrollment.CertificateSnapshot `json:"certificates"`
+		Signature    string                           `json:"signature"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &typedConfig); err != nil {
+		t.Fatalf("decode config snapshot: %v", err)
+	}
+	config := enrollment.ConfigSnapshot{
+		Version:      typedConfig.Version,
+		Device:       typedConfig.Device,
+		Policy:       typedConfig.Policy,
+		Apps:         typedConfig.Apps,
+		Files:        typedConfig.Files,
+		Certificates: typedConfig.Certificates,
+		Signature:    typedConfig.Signature,
+	}
+	if err := enrollment.VerifyConfigSnapshot(config, "device-secret"); err != nil {
+		t.Fatalf("verify config snapshot: %v", err)
+	}
+	if config.Device.DeviceID != "device-123" {
+		t.Fatalf("unexpected device id: %#v", config.Device.DeviceID)
+	}
+	if config.Policy.Name != "policy-one" || !config.Policy.KioskMode {
+		t.Fatalf("unexpected policy: %#v", config.Policy)
+	}
+	if len(config.Apps) != 1 || len(config.Files) != 1 || len(config.Certificates) != 1 {
+		t.Fatalf("unexpected snapshot contents: apps=%d files=%d certs=%d", len(config.Apps), len(config.Files), len(config.Certificates))
 	}
 }
 
@@ -653,6 +829,14 @@ type fakePolicyStore struct {
 	policies []policy.Policy
 }
 
+type fakeDeviceStore struct {
+	device device.Device
+}
+
+type fakeArtifactStore struct {
+	content []byte
+}
+
 func (s *fakeEnrollmentStore) IssueToken(ctx context.Context, tenantID string, expiresAt time.Time) (enrollment.IssuedToken, error) {
 	s.issueTenant = tenantID
 	s.issueExpiresAt = expiresAt
@@ -671,7 +855,7 @@ func (s *fakeEnrollmentStore) ConsumeToken(_ context.Context, tenantID, token st
 	return s.consumed, nil
 }
 
-func (s *fakeEnrollmentStore) BindDevice(_ context.Context, tenantID, token, deviceID string) (enrollment.BoundDevice, error) {
+func (s *fakeEnrollmentStore) BindDevice(_ context.Context, tenantID, token, deviceID string, _ map[string]any) (enrollment.BoundDevice, error) {
 	s.bindTenant = tenantID
 	s.bindToken = token
 	s.bindDeviceID = deviceID
@@ -762,6 +946,38 @@ func (s *fakePolicyStore) UpdatePolicy(context.Context, string, string, policy.P
 
 func (s *fakePolicyStore) RetirePolicy(context.Context, string, string) (policy.Policy, error) {
 	return policy.Policy{}, nil
+}
+
+func (s *fakeDeviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
+	return []device.Device{s.device}, nil
+}
+
+func (s *fakeDeviceStore) CreateDevice(context.Context, string, device.DeviceUpsert) (device.Device, error) {
+	return s.device, nil
+}
+
+func (s *fakeDeviceStore) UpdateDevice(context.Context, string, string, device.DeviceUpsert) (device.Device, error) {
+	return s.device, nil
+}
+
+func (s *fakeDeviceStore) RetireDevice(context.Context, string, string) (device.Device, error) {
+	return s.device, nil
+}
+
+func (s *fakeDeviceStore) Authenticate(context.Context, string, string, string) (device.Device, error) {
+	return s.device, nil
+}
+
+func (s *fakeArtifactStore) Put(context.Context, string, io.Reader, string, int64) error {
+	return nil
+}
+
+func (s *fakeArtifactStore) Get(context.Context, string) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(s.content)), nil
+}
+
+func (s *fakeArtifactStore) Delete(context.Context, string) error {
+	return nil
 }
 
 func strPtr(value string) *string {

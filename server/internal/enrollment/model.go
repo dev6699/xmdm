@@ -26,10 +26,9 @@ type IssuedToken struct {
 }
 
 type BoundDevice struct {
-	DeviceID     string         `json:"deviceId"`
-	DeviceSecret string         `json:"deviceSecret"`
-	Status       string         `json:"status"`
-	Config       ConfigSnapshot `json:"config"`
+	DeviceID     string `json:"deviceId"`
+	DeviceSecret string `json:"deviceSecret"`
+	Status       string `json:"status"`
 }
 
 type DeviceSnapshot struct {
@@ -38,11 +37,10 @@ type DeviceSnapshot struct {
 }
 
 type PolicySnapshot struct {
-	Name            string             `json:"name,omitempty"`
-	Version         int                `json:"version,omitempty"`
-	KioskMode       bool               `json:"kioskMode"`
-	Restrictions    PolicyRestrictions `json:"restrictions,omitempty"`
-	BootstrapExtras map[string]any     `json:"bootstrapExtras,omitempty"`
+	Name         string             `json:"name,omitempty"`
+	Version      int                `json:"version,omitempty"`
+	KioskMode    bool               `json:"kioskMode"`
+	Restrictions PolicyRestrictions `json:"restrictions,omitempty"`
 }
 
 type PolicyRestrictions struct {

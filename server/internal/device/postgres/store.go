@@ -2,8 +2,10 @@ package devicepg
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	device "xmdm/server/internal/device"
@@ -47,7 +49,7 @@ func (s *Store) CreateDevice(ctx context.Context, tenantID string, req device.De
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO devices (id, tenant_id, device_id, secret_hash, policy_id, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text`,
+		 RETURNING id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text, bootstrap_extras::text`,
 		uuid.NewString(), tenantID, req.Name, req.SecretHash, policyID, now,
 	)
 	return scanDevice(row)
@@ -55,7 +57,7 @@ func (s *Store) CreateDevice(ctx context.Context, tenantID string, req device.De
 
 func (s *Store) ListDevices(ctx context.Context, tenantID string) ([]device.Device, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text
+		`SELECT id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text, bootstrap_extras::text
 		 FROM devices
 		 WHERE tenant_id = $1
 		 ORDER BY created_at`,
@@ -93,7 +95,7 @@ func (s *Store) UpdateDevice(ctx context.Context, tenantID, id string, req devic
 		`UPDATE devices
 		 SET device_id = $3, secret_hash = $4, policy_id = $5, updated_at = $6
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text`,
+		 RETURNING id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text, bootstrap_extras::text`,
 		tenantID, id, req.Name, req.SecretHash, policyID, now,
 	)
 	rec, err := scanDevice(row)
@@ -112,7 +114,7 @@ func (s *Store) RetireDevice(ctx context.Context, tenantID, id string) (device.D
 		`UPDATE devices
 		 SET status = $3, deleted_at = $4, updated_at = $4
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text`,
+		 RETURNING id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text, bootstrap_extras::text`,
 		tenantID, id, device.StatusRetired, now,
 	)
 	rec, err := scanDevice(row)
@@ -135,7 +137,7 @@ func (s *Store) Authenticate(ctx context.Context, tenantID, deviceID, secret str
 		return device.Device{}, httpx.ErrInvalidInput
 	}
 	row := s.pool.QueryRow(ctx,
-		`SELECT id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text
+		`SELECT id::text, tenant_id::text, device_id, status, updated_at, deleted_at, policy_id::text, bootstrap_extras::text
 		 FROM devices
 		 WHERE tenant_id = $1 AND device_id = $2 AND secret_hash = $3`,
 		tenantID, deviceID, enrollment.HashToken(secret),
@@ -147,7 +149,8 @@ func scanDevice(scanner rowScanner) (device.Device, error) {
 	var rec device.Device
 	var deletedAt pgtype.Timestamptz
 	var policyID pgtype.Text
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &rec.Status, &rec.UpdatedAt, &deletedAt, &policyID); err != nil {
+	var bootstrapExtrasJSON pgtype.Text
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &rec.Status, &rec.UpdatedAt, &deletedAt, &policyID, &bootstrapExtrasJSON); err != nil {
 		return device.Device{}, err
 	}
 	if deletedAt.Valid {
@@ -156,6 +159,13 @@ func scanDevice(scanner rowScanner) (device.Device, error) {
 	if policyID.Valid {
 		value := policyID.String
 		rec.PolicyID = &value
+	}
+	if bootstrapExtrasJSON.Valid && strings.TrimSpace(bootstrapExtrasJSON.String) != "" {
+		var extras map[string]any
+		if err := json.Unmarshal([]byte(bootstrapExtrasJSON.String), &extras); err != nil {
+			return device.Device{}, err
+		}
+		rec.BootstrapExtras = extras
 	}
 	return rec, nil
 }

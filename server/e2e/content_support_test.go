@@ -102,6 +102,7 @@ func newBaseTestEnv(t *testing.T, enableMQTT bool) baseTestEnv {
 type contentTestEnv struct {
 	baseTestEnv
 	managedFile managedFileFixture
+	chromeAppID string
 }
 
 // packageRulesTestEnv extends baseTestEnv with the managed app and policy
@@ -115,20 +116,28 @@ type packageRulesTestEnv struct {
 // immediately after this call returns.
 func newContentTestEnv(t *testing.T) contentTestEnv {
 	t.Helper()
+	return newContentTestEnvWithExtras(t, nil)
+}
+
+// newContentTestEnvWithExtras builds the same content fixture set with extra
+// bootstrap values and a custom config sync interval.
+func newContentTestEnvWithExtras(t *testing.T, extraBootstrapExtras map[string]string) contentTestEnv {
+	t.Helper()
 
 	base := newBaseTestEnv(t, false)
 	artifactStore := newTestArtifactStore(t)
 
 	mf := mustUploadManagedFile(t, base.client, base.baseURL, artifactStore)
-	mustRegisterChromeApp(t, base.client, base.baseURL, artifactStore)
+	chromeAppID := mustRegisterChromeApp(t, base.client, base.baseURL, artifactStore)
 
 	token := mustCreateEnrollmentToken(t, base.client, base.baseURL)
-	bootstrapURI := mustBuildBootstrapURI(t, base.client, base.baseURL, base.launcherChecksum, base.deviceID, token, "", nil)
+	bootstrapURI := mustBuildBootstrapURI(t, base.client, base.baseURL, base.launcherChecksum, base.deviceID, token, "", extraBootstrapExtras)
 	startLauncher(t, base.serial, bootstrapURI)
 
 	return contentTestEnv{
 		baseTestEnv: base,
 		managedFile: mf,
+		chromeAppID: chromeAppID,
 	}
 }
 
@@ -405,6 +414,48 @@ func (r *requestRecorder) assertNeverAfter(t *testing.T, start int, description 
 	}
 }
 
+func (r *requestRecorder) waitForAfter(t *testing.T, start int, timeout time.Duration, description string, match func(requestRecord) bool) {
+	t.Helper()
+	waitForCondition(t, timeout, description, func() string {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if start < 0 {
+			start = 0
+		}
+		if start > len(r.requests) {
+			start = len(r.requests)
+		}
+		parts := make([]string, 0, len(r.requests[start:]))
+		for _, req := range r.requests[start:] {
+			parts = append(parts, req.method+" "+req.path)
+		}
+		return strings.Join(parts, " | ")
+	}, func() (bool, error) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if start < 0 {
+			start = 0
+		}
+		if start > len(r.requests) {
+			start = len(r.requests)
+		}
+		for _, req := range r.requests[start:] {
+			if match(req) {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
+func waitForConfigSnapshotFetch(t *testing.T, requests *requestRecorder, deviceID string) {
+	t.Helper()
+	requests.waitFor(t, time.Minute, "config snapshot fetch", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			r.path == "/api/v1/devices/"+deviceID+"/config"
+	})
+}
+
 func runDockerCompose(t *testing.T, args ...string) {
 	t.Helper()
 	cmd := exec.Command("docker", append([]string{"compose"}, args...)...)
@@ -485,8 +536,9 @@ func mustBuildBootstrapURI(t *testing.T, client *http.Client, baseURL, launcherC
 
 // managedFileFixture holds the uploaded managed file's server-side identifiers.
 type managedFileFixture struct {
-	sourceID string
-	content  []byte
+	sourceID      string
+	managedFileID string
+	content       []byte
 }
 
 // mustUploadManagedFile uploads the managed file source artifact, registers it
@@ -519,6 +571,10 @@ func mustUploadManagedFile(t *testing.T, client *http.Client, baseURL string, ar
 		"path":"adb-managed-file.txt",
 		"replaceVariables":true
 	}`)
+	managedFileID, _ := mf["id"].(string)
+	if managedFileID == "" {
+		t.Fatalf("managed file create returned empty id: %#v", mf)
+	}
 	if mf["path"] != "adb-managed-file.txt" {
 		t.Fatalf("managed file create returned unexpected path: %v", mf["path"])
 	}
@@ -526,13 +582,13 @@ func mustUploadManagedFile(t *testing.T, client *http.Client, baseURL string, ar
 		t.Fatalf("managed file create returned unexpected replaceVariables: %v", mf["replaceVariables"])
 	}
 
-	return managedFileFixture{sourceID: sourceID, content: content}
+	return managedFileFixture{sourceID: sourceID, managedFileID: managedFileID, content: content}
 }
 
 // mustRegisterChromeApp uploads the Chrome APK artifact and publishes it as a managed app version.
 func mustRegisterChromeApp(t *testing.T, client *http.Client, baseURL string, artifactStore interface {
 	Delete(context.Context, string) error
-}) {
+}) string {
 	t.Helper()
 
 	apkPath := filepath.Join("..", "..", "artifacts", "chrome.apk")
@@ -574,4 +630,5 @@ func mustRegisterChromeApp(t *testing.T, client *http.Client, baseURL string, ar
 	if versionResp["status"] != "published" {
 		t.Fatalf("chrome version create returned unexpected status: %v", versionResp["status"])
 	}
+	return appID
 }

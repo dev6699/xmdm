@@ -13,7 +13,7 @@ class ConfigSnapshotVerifierTest {
             {
               "version":"1",
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
-              "policy":{"bootstrapExtras":{"customer":"Acme"}},
+              "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
               "certificates":[]
@@ -24,7 +24,7 @@ class ConfigSnapshotVerifierTest {
             {
               "version":"1",
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
-              "policy":{"bootstrapExtras":{"customer":"Acme"}},
+              "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
               "certificates":[],

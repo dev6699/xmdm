@@ -50,6 +50,33 @@ func waitForChromeInstalled(t *testing.T, serial string) {
 	)
 }
 
+// waitForChromeUninstalled polls until Chrome is no longer listed by the package manager.
+func waitForChromeUninstalled(t *testing.T, serial string) {
+	t.Helper()
+	waitForCondition(t, time.Minute, "Chrome to be uninstalled from device",
+		func() string { return adbChromeSnapshot(t, serial) },
+		func() (bool, error) {
+			out, err := adbShellOutput(serial, "pm", "list", "packages", "com.android.chrome")
+			if err != nil {
+				return false, nil
+			}
+			return !strings.Contains(out, "com.android.chrome"), nil
+		},
+	)
+}
+
+// waitForManagedFileRemovedFromDevice polls until the managed file disappears from the device.
+func waitForManagedFileRemovedFromDevice(t *testing.T, serial string) {
+	t.Helper()
+	waitForCondition(t, time.Minute, "managed file to be removed from device",
+		func() string { return adbContentSnapshot(t, serial) },
+		func() (bool, error) {
+			_, err := adbShellOutput(serial, "run-as", "com.xmdm.launcher", "ls", "files/managed-files/adb-managed-file.txt")
+			return err != nil, nil
+		},
+	)
+}
+
 // waitForPackageSuspendedOnDevice polls until the package manager reports the package as suspended.
 func waitForPackageSuspendedOnDevice(t *testing.T, serial, packageName string) {
 	t.Helper()

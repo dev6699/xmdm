@@ -22,8 +22,9 @@ type RecordBase struct {
 
 type Device struct {
 	RecordBase
-	Name     string  `json:"name"`
-	PolicyID *string `json:"policyId,omitempty"`
+	Name            string         `json:"name"`
+	PolicyID        *string        `json:"policyId,omitempty"`
+	BootstrapExtras map[string]any `json:"bootstrapExtras,omitempty"`
 }
 
 type DeviceUpsert struct {

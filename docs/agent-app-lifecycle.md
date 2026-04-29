@@ -18,16 +18,17 @@ flowchart TD
     B --> C{Bootstrap present?}
     C -->|No| Z[Wait for provisioning input]
     C -->|Yes| D[Enroll device]
-    D --> E[Persist identity and signed snapshot]
-    E --> F[Apply managed files]
-    F --> G[Apply managed apps]
-    G --> H[Start command transport]
-    H --> I{MQTT enabled?}
-    I -->|Yes| J[Subscribe to MQTT commands]
-    I -->|No| K[Poll HTTP commands]
-    J --> L[Execute and ack]
-    K --> L
-    L --> M[Recover after reboot or retry on failure]
+    D --> E[Fetch signed config snapshot]
+    E --> F[Persist identity and config cache]
+    F --> G[Apply managed files]
+    G --> H[Apply managed apps]
+    H --> I[Start command transport]
+    I --> J{MQTT enabled?}
+    J -->|Yes| K[Subscribe to MQTT commands]
+    J -->|No| L[Poll HTTP commands]
+    K --> M[Execute and ack]
+    L --> M
+    M --> N[Recover after reboot or retry on failure]
 ```
 
 ### 1. App Start
@@ -36,8 +37,9 @@ flowchart TD
 - The launcher renders the current bootstrap, enrollment, policy, file, and app state.
 - The state collector then evaluates the next actions:
   - start enrollment if bootstrap exists and the device is not enrolled
-  - apply managed files if policy cache and identity are present
-  - apply managed apps once managed files have been applied
+  - fetch the signed config snapshot after enrollment
+  - apply managed files from the signed snapshot
+  - apply managed apps from the signed snapshot
   - start command transport when identity exists
 
 Relevant code:
@@ -68,26 +70,36 @@ Relevant code:
   - device ID
   - device secret
   - device status
-  - initial signed config snapshot
-- The launcher verifies the signed snapshot, then persists:
+- The launcher verifies the enrollment response, then persists:
   - device identity
-  - policy cache metadata
+- After enrollment succeeds, the launcher immediately fetches the signed config snapshot from `GET /api/v1/devices/{deviceId}/config`.
+- The launcher verifies the signed snapshot, then persists:
+  - config cache metadata
+  - the raw signed snapshot for later replay
+- If the config fetch fails, the device remains enrolled and the sync loop retries later.
 
-The launcher treats enrollment as complete only after the server returns `status == enrolled` and the snapshot signature verifies.
-That snapshot is the first policy snapshot the rest of the lifecycle uses.
+The launcher treats enrollment as complete only after the server returns `status == enrolled`.
+Config sync is a separate step after identity creation.
 
 Relevant code:
 - [`HttpEnrollmentGateway`](../app/src/main/java/com/xmdm/launcher/enrollment/HttpEnrollmentGateway.kt)
 - [`EnrollmentCoordinator`](../app/src/main/java/com/xmdm/launcher/enrollment/EnrollmentCoordinator.kt)
 
-### 4. Policy Snapshot
+### 4. Config Sync
 
-- The launcher keeps the last signed policy snapshot locally.
-- In the current runtime flow, the initial signed snapshot comes from enrollment.
-- The app also contains a reusable sync engine contract for verified snapshot fetches and retries, but that engine is not the current provisioning handoff path.
-- Any snapshot used by the launcher must verify against the device secret before it is persisted or applied.
+- The launcher keeps the last signed config snapshot locally.
+- The snapshot revision is the top-level `version` field in the signed payload.
+- The revision changes when any mutable bucket changes:
+  - `policy`
+  - `apps`
+  - `files`
+  - `certificates`
+- The `device` bucket is identity-only and does not participate in sync revisioning.
+- The launcher periodically calls `GET /api/v1/devices/{deviceId}/config` with the device secret.
+- If the fetched snapshot revision matches the cached revision, the launcher does nothing.
+- If the revision changes, the launcher reapplies the relevant buckets.
 
-At this stage the launcher is still only holding policy truth. It has not yet applied content.
+The launcher verifies every fetched snapshot before it is cached or applied.
 
 Relevant code:
 - [`ConfigSyncEngine`](../app/src/main/java/com/xmdm/launcher/sync/ConfigSyncEngine.kt)
@@ -95,13 +107,15 @@ Relevant code:
 
 ### 5. Managed File Application
 
-- Once policy cache and identity exist, the launcher applies managed files.
+- Once the launcher has identity and a verified config snapshot, it applies managed files.
 - For each file entry in the signed snapshot, it:
   - resolves the download URL from the server and the snapshot path
   - downloads the artifact with the device secret
   - verifies the artifact checksum
   - writes the file into the launcher sandbox
-- If `replaceVariables` is enabled, bootstrap values are substituted before the file is written.
+- If a file disappears from a later snapshot, the launcher deletes the previously applied file.
+- If the file list is empty in a newer snapshot, the launcher treats that as an empty desired set and removes stale managed files from the previous revision.
+- If `replaceVariables` is enabled, the server has already rendered the file before download, so the launcher still just writes the downloaded bytes.
 
 Managed files are applied before managed apps so content and config can settle before package installation begins.
 
@@ -111,13 +125,15 @@ Relevant code:
 
 ### 6. Managed App Application
 
-- After managed files are present for the current snapshot version, the launcher applies managed apps.
+- After managed files have been processed for the current snapshot revision, the launcher applies managed apps.
 - For each app entry in the signed snapshot, it:
   - resolves the artifact URL
   - downloads the APK with the device secret
   - verifies the checksum
   - installs or restores the package
 - The launcher tracks installed apps by package name and version code to avoid redundant installs.
+- If the config snapshot has no managed files, the launcher proceeds directly to app processing.
+- If a later config revision removes an app, the launcher uninstalls the removed package on the next sync pass.
 
 Relevant code:
 - [`ManagedAppInstallCoordinator`](../app/src/main/java/com/xmdm/launcher/apps/ManagedAppInstallCoordinator.kt)
@@ -146,7 +162,13 @@ These are the HTTP paths the launcher calls during the lifecycle.
 
 - `POST /api/v1/enrollment`
   - Sent once bootstrap is present and enrollment has not completed.
-  - Returns the device secret plus the initial signed policy snapshot.
+  - Returns the device ID, device secret, and enrollment status.
+
+### Config Sync
+
+- `GET /api/v1/devices/{deviceId}/config`
+  - Sent after enrollment and on a periodic sync loop.
+  - Returns the signed config snapshot containing policy, apps, files, and certificates.
 
 ### Managed File Download
 
@@ -178,9 +200,9 @@ Those are admin or server-side setup paths, not device runtime calls.
 ### 8. Recovery And Reboot
 
 - If enrollment fails, the launcher surfaces recovery UI instead of silently exiting.
-- If content application fails, the launcher keeps the last known good state and retries on the next viable pass.
+- If config sync or content application fails, the launcher keeps the last known good state and retries on the next viable pass.
 - Local state survives reboot through DataStore.
-- On restart, the launcher replays the stored bootstrap, identity, and policy cache to resume the lifecycle without re-enrollment.
+- On restart, the launcher replays the stored bootstrap, identity, and config cache to resume the lifecycle without re-enrollment.
 
 Relevant code:
 - [`MainActivity`](../app/src/main/java/com/xmdm/launcher/MainActivity.kt)
@@ -196,9 +218,9 @@ The launcher state is effectively a pipeline:
 | `bootstrap restored` | Bootstrap payload is present | Attempt enrollment |
 | `enrollment: in progress` | Enrollment request is running | Wait for server response |
 | `enrollment: success` | Device identity is stored | Apply policy and content |
-| `policy cache: restored` | Signed config is stored | Apply files and apps |
-| `managed files: restored` | Managed files match the policy version | Apply managed apps |
-| `managed apps: restored` | App state matches the policy version | Start or continue command transport |
+| `config cache: restored` | Signed config is stored | Apply files and apps |
+| `managed files: restored` | Managed files match the current config revision | Apply managed apps |
+| `managed apps: restored` | App state matches the current config revision | Start or continue command transport |
 
 The UI exposes these states to make device-side recovery visible during provisioning and support.
 
@@ -208,8 +230,8 @@ The expected first-run order is:
 
 1. Bootstrap is persisted.
 2. Enrollment binds the device and returns a secret.
-3. The signed policy snapshot is stored.
-4. Managed files are downloaded and written.
+3. The signed config snapshot is fetched and stored.
+4. Managed files are downloaded and written, or stale files are deleted if the new snapshot is empty.
 5. Managed apps are downloaded and installed.
 6. Command transport starts.
 
@@ -218,7 +240,43 @@ If any later step fails, the earlier successful state remains on disk and the la
 ## Why This Lifecycle Exists
 
 - Enrollment must happen before any device-authenticated artifact download.
-- Policy must be verified before content application.
+- Config must be verified before content application.
 - Managed files must precede managed apps so the launcher can stabilize content state first.
+- Managed apps can proceed immediately when the config snapshot has no managed files.
 - Command transport must wait for device identity so requests can be authenticated.
 - Persistent local state is required so reboot does not force manual reprovisioning.
+
+## Config Buckets
+
+The signed config snapshot contains multiple buckets:
+
+- `device`
+  - identity metadata only
+  - used for replay and request correlation
+  - does not drive sync revision changes
+- `policy`
+  - kiosk mode and package restrictions
+  - this is the main post-provision admin-updatable behavior bucket today
+- `apps`
+  - managed app inventory and version metadata
+  - used by the launcher to download, install, and uninstall packages
+- `files`
+  - managed file inventory and rendered checksums
+  - used by the launcher to write and remove sandbox files
+- `certificates`
+  - signed and transported with the snapshot
+  - currently carried in the config envelope, but not yet applied by launcher code
+
+The launcher applies only the buckets it knows how to enforce today. Unknown or future fields remain part of the signed envelope so the contract can evolve without breaking verification.
+
+### Bucket Behavior
+
+| Bucket | Add / Update | Remove | Notes |
+| --- | --- | --- | --- |
+| `policy` | Replace the cached signed snapshot and reapply policy controllers | Implicitly removed when the snapshot no longer carries the old policy state | Controls kiosk mode and package restrictions |
+| `apps` | Install or upgrade if the package is missing or the installed `versionCode` differs | Uninstall packages that were present in the previous snapshot but are absent from the new one | Uses package name and version code to detect changes |
+| `files` | Download and overwrite each declared file path | Delete files that were present in the previous snapshot but are absent from the new one, or marked `remove=true` | Empty file lists are treated as a real sync state and delete stale files |
+| `certificates` | Not yet applied by the launcher | Not yet applied by the launcher | Present in the signed envelope, but no device-side enforcement exists yet |
+| `device` | Not applicable | Not applicable | Identity-only; does not participate in config revision changes |
+
+Revision changes are coarse-grained: when the snapshot revision changes, the launcher re-evaluates all supported buckets, then each coordinator decides whether it needs to add, update, or remove anything inside its own bucket.

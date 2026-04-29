@@ -121,13 +121,10 @@ class KioskModeController(
         val root = runCatching { JsonParser.parseString(snapshotJson).asJsonObject }.getOrNull()
             ?: return false
         val policy = root.getAsJsonObject("policy") ?: return false
-        val bootstrapExtras = policy.getAsJsonObject("bootstrapExtras")
         return booleanValue(
-            bootstrapExtras ?: policy,
+            policy,
             "kioskMode",
             "kiosk_mode",
-            "com.xmdm.KIOSK_MODE",
-            "KIOSK_MODE",
         )
     }
 

@@ -52,6 +52,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 
 - Policy snapshot calculation
 - App, file, certificate, and command inclusion
+- Device-authenticated config refresh at `GET /api/v1/devices/{deviceId}/config`
 - Device state transition tracking
 - Heartbeat and telemetry recording
 
@@ -126,8 +127,9 @@ The server must be able to start, serve admin requests, and accept device sync e
 2. Server loads the active device state and policy.
 3. Server computes a signed snapshot.
 4. Server includes pending artifacts and config state.
-5. Device applies the snapshot and reports acknowledgements.
-6. Server persists the new device state and telemetry.
+5. Device may refresh the latest signed config snapshot through `GET /api/v1/devices/{deviceId}/config` and then applies the snapshot.
+6. Device reports acknowledgements and telemetry.
+7. Server persists the new device state.
 
 ## Plugin Design
 

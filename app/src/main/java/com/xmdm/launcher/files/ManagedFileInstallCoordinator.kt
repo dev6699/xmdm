@@ -2,7 +2,6 @@ package com.xmdm.launcher.files
 
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import com.xmdm.launcher.artifacts.ArtifactChecksumVerifier
 import com.xmdm.launcher.apps.ManagedAppDownloader
 import com.xmdm.launcher.sync.ConfigSnapshotVerifier
@@ -36,9 +35,6 @@ class ManagedFileInstallCoordinator(
         snapshotJson: String,
         deviceSecret: String,
         serverUrl: String,
-        deviceId: String,
-        deviceIdUse: String,
-        bootstrapExtrasJson: String,
         previousSnapshotJson: String? = null,
     ): ManagedFileInstallResult {
         val verified = snapshotVerifier.verify(snapshotJson, deviceSecret)
@@ -51,7 +47,6 @@ class ManagedFileInstallCoordinator(
         val written = mutableListOf<String>()
         val removed = mutableListOf<String>()
         val desiredPaths = desiredFiles.map { it.path }.toSet()
-        val bootstrapValues = templateValues(deviceId, deviceIdUse, bootstrapExtrasJson)
 
         for (file in desiredFiles) {
             val target = resolveTarget(file.path)
@@ -70,14 +65,8 @@ class ManagedFileInstallCoordinator(
                     destination = tempFile,
                 )
                 checksumVerifier.verify(tempFile, file.checksum)
-                if (file.replaceVariables) {
-                    val content = tempFile.readText(Charsets.UTF_8)
-                    target.parentFile?.mkdirs()
-                    target.writeText(renderTemplate(content, bootstrapValues), Charsets.UTF_8)
-                } else {
-                    target.parentFile?.mkdirs()
-                    tempFile.copyTo(target, overwrite = true)
-                }
+                target.parentFile?.mkdirs()
+                tempFile.copyTo(target, overwrite = true)
                 written += file.path
             } finally {
                 if (!tempFile.delete()) {
@@ -151,43 +140,6 @@ class ManagedFileInstallCoordinator(
         if (file.exists() && !file.delete()) {
             file.deleteOnExit()
         }
-    }
-
-    private fun renderTemplate(content: String, values: Map<String, String>): String {
-        var rendered = content
-        for ((key, value) in values) {
-            rendered = rendered.replace(key, value)
-        }
-        return rendered
-    }
-
-    private fun templateValues(
-        deviceId: String,
-        deviceIdUse: String,
-        bootstrapExtrasJson: String,
-    ): Map<String, String> {
-        val values = linkedMapOf(
-            "DEVICE_NUMBER" to deviceId,
-            "DEVICE_ID" to deviceId,
-            "DEVICE_ID_USE" to deviceIdUse,
-            "IMEI" to if (deviceIdUse.equals("imei", ignoreCase = true)) deviceId else "",
-        )
-        if (bootstrapExtrasJson.isBlank()) {
-            return values
-        }
-        val extras = JsonParser.parseString(bootstrapExtrasJson).asJsonObject
-        for ((name, element) in extras.entrySet()) {
-            val value = when {
-                element.isJsonNull -> ""
-                element.isJsonPrimitive -> element.asString
-                else -> element.toString()
-            }
-            if (value.isNotBlank()) {
-                values[name] = value
-                values[name.uppercase()] = value
-            }
-        }
-        return values
     }
 
     private fun JsonObject.string(name: String): String? {

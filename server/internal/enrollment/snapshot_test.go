@@ -1,0 +1,77 @@
+package enrollment
+
+import "testing"
+
+func TestSnapshotRevisionChangesWithContent(t *testing.T) {
+	base := NewBootstrapConfigSnapshot(
+		"device-123",
+		"serial",
+		PolicySnapshot{KioskMode: false},
+		nil,
+		nil,
+		nil,
+	)
+	if base.Version == "" {
+		t.Fatalf("expected non-empty revision")
+	}
+
+	same := NewBootstrapConfigSnapshot(
+		"device-abc",
+		"serial",
+		PolicySnapshot{KioskMode: false},
+		nil,
+		nil,
+		nil,
+	)
+	if same.Version != base.Version {
+		t.Fatalf("expected device identity not to affect revision: %q != %q", same.Version, base.Version)
+	}
+
+	changedPolicy := NewBootstrapConfigSnapshot(
+		"device-123",
+		"serial",
+		PolicySnapshot{Name: "policy", Version: 2, KioskMode: true},
+		nil,
+		nil,
+		nil,
+	)
+	if changedPolicy.Version == base.Version {
+		t.Fatalf("expected policy change to affect revision")
+	}
+
+	changedApps := NewBootstrapConfigSnapshot(
+		"device-123",
+		"serial",
+		PolicySnapshot{KioskMode: false},
+		[]AppSnapshot{{AppID: "app-1", PackageName: "com.example.app", VersionID: "v1", VersionName: "1", VersionCode: 1, ArtifactID: "artifact-1", Checksum: "abc", DownloadPath: "/artifact"}},
+		nil,
+		nil,
+	)
+	if changedApps.Version == base.Version {
+		t.Fatalf("expected app change to affect revision")
+	}
+
+	changedFiles := NewBootstrapConfigSnapshot(
+		"device-123",
+		"serial",
+		PolicySnapshot{KioskMode: false},
+		nil,
+		[]ManagedFileSnapshot{{FileID: "file-1", Name: "file", Path: "config.txt", DownloadPath: "/artifact", Checksum: "xyz"}},
+		nil,
+	)
+	if changedFiles.Version == base.Version {
+		t.Fatalf("expected file change to affect revision")
+	}
+
+	changedCertificates := NewBootstrapConfigSnapshot(
+		"device-123",
+		"serial",
+		PolicySnapshot{KioskMode: false},
+		nil,
+		nil,
+		[]CertificateSnapshot{{ID: "cert-1", Name: "cert", ArtifactID: "artifact-1", Checksum: "cert-checksum"}},
+	)
+	if changedCertificates.Version == base.Version {
+		t.Fatalf("expected certificate change to affect revision")
+	}
+}

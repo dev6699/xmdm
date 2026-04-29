@@ -5,7 +5,7 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-04-28
+Snapshot last updated: 2026-04-29
 
 ### M0 - Foundation
 
@@ -60,7 +60,7 @@ Note: `M2-07 Enrollment E2E` and `M2-08 Reconnect E2E` are complete on the enrol
 | M3-06 Reboot Survival | ☑ |
 | M3-07 Polling Fallback | ☑ |
 
-Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeeds, `M3-02 Local Persistence` has a DataStore-backed state store plus unit coverage and now survives a physical-device reboot check, `M3-03 Bootstrap Parsing` now accepts and persists canonical or fallback bootstrap JSON, the Android app now flows from bootstrap into enrollment so the device secret and initial signed config snapshot are fetched from the backend, `M3-04 Retry Logic` adds a contract-driven config sync engine with retry and signature verification, `M3-05 Recovery UI` surfaces bootstrap and enrollment failures with a device-owner entry point, `M3-06 Reboot Survival` now has a physical-device reboot verification with the persisted state file checksum unchanged and the launcher UI restoring bootstrap, identity, and policy cache after reboot, and `M3-07 Polling Fallback` is verified by the sync engine falling back from the primary polling path to the secondary server URL when the primary path is unavailable.
+Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeeds, `M3-02 Local Persistence` has a DataStore-backed state store plus unit coverage and now survives a physical-device reboot check, `M3-03 Bootstrap Parsing` now accepts and persists canonical or fallback bootstrap JSON, the Android app now flows from bootstrap into enrollment so the device secret and initial signed config snapshot are fetched from the backend, `M3-04 Retry Logic` adds a contract-driven config sync engine with retry and signature verification and now refreshes the signed device config from `GET /api/v1/devices/{deviceId}/config` after provisioning, `M3-05 Recovery UI` surfaces bootstrap and enrollment failures with a device-owner entry point, `M3-06 Reboot Survival` now has a physical-device reboot verification with the persisted state file checksum unchanged and the launcher UI restoring bootstrap, identity, and policy cache after reboot, and `M3-07 Polling Fallback` is verified by the sync engine falling back from the primary polling path to the secondary server URL when the primary path is unavailable.
 
 ### M4 - Content Delivery
 
@@ -75,7 +75,7 @@ Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeed
 | M4-07 Content E2E | ☑ |
 | M4-08 Artifact Cleanup | ☑ |
 
-Note: `M4-01 App Management` is complete with app CRUD plus immutable version upload and publish support, `M4-02 File Storage` is complete with multipart file upload plus artifact metadata persistence, `M4-03 Certificates` is complete with certificate upload/distribution and signed config inclusion for active certificates, `M4-04 Checksum Verification` is complete with server-side content digest validation for file, certificate, and referenced app artifacts plus an Android-side artifact checksum verifier, `M4-05 App Install Flow` is complete with server-side app artifact streaming, signed snapshot app entries, Android install/uninstall coordination for managed packages, live download progress UI, and a documented reprovision runbook, `M4-06 File Download Flow` is complete with device-authenticated file artifact downloads, a separate managed-file creation flow, templated file rendering, and persisted managed-file state on the launcher, `M4-07 Content E2E` is complete with adb-backed physical-device verification of managed app install plus managed file rendering, and `M4-08 Artifact Cleanup` is complete with orphan artifact detection plus a dedicated cleanup command that retires and purges unreferenced artifact rows and blobs.
+Note: `M4-01 App Management` is complete with app CRUD plus immutable version upload and publish support, `M4-02 File Storage` is complete with multipart file upload plus artifact metadata persistence, `M4-03 Certificates` is complete with certificate upload/distribution and signed config inclusion for active certificates, `M4-04 Checksum Verification` is complete with server-side content digest validation for file, certificate, and referenced app artifacts plus an Android-side artifact checksum verifier, `M4-05 App Install Flow` is complete with server-side app artifact streaming, signed snapshot app entries, Android install/uninstall coordination for managed packages, live download progress UI, and a documented reprovision runbook, `M4-06 File Download Flow` is complete with device-authenticated file artifact downloads, a separate managed-file creation flow, server-rendered file content, and persisted managed-file state on the launcher, `M4-07 Content E2E` is complete with adb-backed physical-device verification of managed app install plus server-rendered managed file delivery, and `M4-08 Artifact Cleanup` is complete with orphan artifact detection plus a dedicated cleanup command that retires and purges unreferenced artifact rows and blobs.
 
 ### M5 - Push And Commands
 
