@@ -26,6 +26,9 @@ import com.xmdm.launcher.enrollment.EnrollmentCoordinator
 import com.xmdm.launcher.enrollment.HttpEnrollmentGateway
 import com.xmdm.launcher.kiosk.AndroidKioskModeHost
 import com.xmdm.launcher.kiosk.KioskModeController
+import com.xmdm.launcher.logs.DeviceLogCoordinator
+import com.xmdm.launcher.logs.DeviceLogStore
+import com.xmdm.launcher.logs.HttpDeviceLogGateway
 import com.xmdm.launcher.packages.AndroidPackageRulesHost
 import com.xmdm.launcher.packages.PackageRulesController
 import com.xmdm.launcher.state.AgentState
@@ -78,6 +81,12 @@ class MainActivity : AppCompatActivity() {
             fetcher = HttpConfigSnapshotFetcher(),
         )
     }
+    private val deviceLogCoordinator by lazy {
+        DeviceLogCoordinator(
+            queue = DeviceLogStore.from(applicationContext),
+            gateway = HttpDeviceLogGateway(),
+        )
+    }
     private val deviceCommandCoordinator by lazy {
         DeviceCommandCoordinator(
             gateway = HttpDeviceCommandGateway(),
@@ -108,6 +117,8 @@ class MainActivity : AppCompatActivity() {
     private var commandTransportTargetKey: String? = null
     private var configSyncJob: Job? = null
     private var configSyncTargetKey: String? = null
+    private var deviceLogUploadJob: Job? = null
+    private var deviceLogUploadTargetKey: String? = null
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
     private var cachedPrettySnapshotJson: String? = null
     private var cachedPrettySnapshotText: String = ""
@@ -127,6 +138,12 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         binding.launcherTitle.text = getString(R.string.launcher_title)
+        recordDeviceLog(
+            source = "launcher",
+            level = "info",
+            message = "launcher started",
+            payload = mapOf("instanceId" to instanceId),
+        )
         lifecycleScope.launch {
             consumeBootstrapIntent()
         }
@@ -140,6 +157,7 @@ class MainActivity : AppCompatActivity() {
                 maybeStartConfigSync(state)
                 packageRulesController.apply(state)
                 kioskModeController.apply(state)
+                maybeStartDeviceLogUpload(state)
                 maybeStartCommandTransport(state)
             }
         }
@@ -375,23 +393,57 @@ class MainActivity : AppCompatActivity() {
         }
         lastEnrollmentAttemptBootstrapJson = bootstrapJson
         Log.w(TAG, "mark enrollment attempted instance=$instanceId bootstrap=${bootstrapJson.hashCode()}")
+        recordDeviceLog(
+            source = "enrollment",
+            level = "info",
+            message = "enrollment attempt started",
+            payload = mapOf("bootstrapHash" to bootstrapJson.hashCode()),
+        )
         lifecycleScope.launch {
             try {
                 val result = enrollmentCoordinator.enroll(bootstrap)
                 enrollmentStateMachine.onEnrollmentSucceeded()
+                recordDeviceLogSafely(
+                    source = "enrollment",
+                    level = "info",
+                    message = "enrollment succeeded",
+                    payload = mapOf("deviceId" to result.identity.deviceId),
+                )
                 maybeStartConfigSync(bootstrap, result.identity, null)
                 try {
                     val cached = configSyncEngine.sync(bootstrap, result.identity)
                     maybeStartConfigSync(bootstrap, result.identity, cached)
+                    recordDeviceLogSafely(
+                        source = "sync",
+                        level = "info",
+                        message = "initial config sync succeeded",
+                        payload = mapOf(
+                            "configRevision" to cached.version,
+                            "syncedAtEpochMillis" to cached.lastSyncAtEpochMillis,
+                        ),
+                    )
+                    requestDeviceLogUpload(bootstrap, result.identity)
                     maybeStartCommandTransport(bootstrap, result.identity, cached)
                 } catch (t: Throwable) {
                     if (t is kotlinx.coroutines.CancellationException) {
                         throw t
                     }
                     Log.w(TAG, "initial config sync failed", t)
+                    recordDeviceLogSafely(
+                        source = "sync",
+                        level = "warn",
+                        message = "initial config sync failed",
+                        payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                    )
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "enrollment failed", t)
+                recordDeviceLogSafely(
+                    source = "enrollment",
+                    level = "warn",
+                    message = "enrollment failed",
+                    payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                )
                 enrollmentStateMachine.onEnrollmentFailed(t.message ?: t.javaClass.simpleName)
             }
         }
@@ -429,6 +481,12 @@ class MainActivity : AppCompatActivity() {
                     val mqtt = mqttAddress.takeIf { it.isNotBlank() }
                     if (mqtt != null) {
                         Log.w(TAG, "command transport connecting via mqtt=$mqtt instance=$instanceId")
+                        recordDeviceLogSafely(
+                            source = "commands",
+                            level = "info",
+                            message = "command transport connecting via mqtt",
+                            payload = mapOf("mqttAddress" to mqtt),
+                        )
                         MqttDeviceCommandTransport(
                             MqttDeviceCommandConfig(
                                 address = mqtt,
@@ -453,15 +511,32 @@ class MainActivity : AppCompatActivity() {
                         throw t
                     }
                     Log.w(TAG, "command transport failed", t)
+                    recordDeviceLogSafely(
+                        source = "commands",
+                        level = "warn",
+                        message = "command transport failed",
+                        payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                    )
                     if (mqttAddress.isNotBlank()) {
                         try {
                             Log.w(TAG, "command transport falling back to polling instance=$instanceId")
+                            recordDeviceLogSafely(
+                                source = "commands",
+                                level = "info",
+                                message = "command transport falling back to polling",
+                            )
                             pollCommands(bootstrap, identity)
                         } catch (pollFailure: Throwable) {
                             if (pollFailure is kotlinx.coroutines.CancellationException) {
                                 throw pollFailure
                             }
                             Log.w(TAG, "command polling fallback failed", pollFailure)
+                            recordDeviceLogSafely(
+                                source = "commands",
+                                level = "warn",
+                                message = "command polling fallback failed",
+                                payload = mapOf("error" to (pollFailure.message ?: pollFailure.javaClass.simpleName)),
+                            )
                         }
                     }
                 }
@@ -503,13 +578,29 @@ class MainActivity : AppCompatActivity() {
             delay(syncIntervalMs)
             while (isActive) {
                 try {
-                    configSyncEngine.sync(bootstrap, identity)
+                    val cached = configSyncEngine.sync(bootstrap, identity)
                     Log.w(TAG, "config sync refreshed instance=$instanceId")
+                    recordDeviceLogSafely(
+                        source = "sync",
+                        level = "info",
+                        message = "config sync refreshed",
+                        payload = mapOf(
+                            "configRevision" to cached.version,
+                            "syncedAtEpochMillis" to cached.lastSyncAtEpochMillis,
+                        ),
+                    )
+                    requestDeviceLogUpload(bootstrap, identity)
                 } catch (t: Throwable) {
                     if (t is kotlinx.coroutines.CancellationException) {
                         throw t
                     }
                     Log.w(TAG, "config sync failed", t)
+                    recordDeviceLogSafely(
+                        source = "sync",
+                        level = "warn",
+                        message = "config sync failed",
+                        payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                    )
                 }
                 delay(syncIntervalMs)
             }
@@ -524,6 +615,12 @@ class MainActivity : AppCompatActivity() {
         )
         if (handled.isNotEmpty()) {
             Log.w(TAG, "command poll handled ${handled.size} commands instance=$instanceId")
+            recordDeviceLogSafely(
+                source = "commands",
+                level = "info",
+                message = "command poll handled commands",
+                payload = mapOf("count" to handled.size),
+            )
         }
     }
 
@@ -532,6 +629,16 @@ class MainActivity : AppCompatActivity() {
         val bootstrap = state.bootstrap ?: error("bootstrap state unavailable")
         val identity = state.identity ?: error("device identity unavailable")
         val cached = configSyncEngine.sync(bootstrap, identity)
+        recordDeviceLogSafely(
+            source = "commands",
+            level = "info",
+            message = "config sync requested by command",
+            payload = mapOf(
+                "configRevision" to cached.version,
+                "syncedAtEpochMillis" to cached.lastSyncAtEpochMillis,
+            ),
+        )
+        requestDeviceLogUpload(bootstrap, identity)
         return DeviceCommandExecutionResult(
             status = "acked",
             message = "config refreshed",
@@ -573,8 +680,21 @@ class MainActivity : AppCompatActivity() {
                     ),
                 )
                 lastManagedFilesSnapshotVersion = policyCache.version
+                recordDeviceLogSafely(
+                    source = "files",
+                    level = "info",
+                    message = "managed files applied",
+                    payload = mapOf("version" to policyCache.version),
+                )
+                requestDeviceLogUpload(bootstrap, identity)
             } catch (t: Throwable) {
                 Log.w(TAG, "managed file install failed", t)
+                recordDeviceLogSafely(
+                    source = "files",
+                    level = "warn",
+                    message = "managed file install failed",
+                    payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                )
             } finally {
                 withContext(Dispatchers.Main) {
                     fileInstallInFlight = false
@@ -624,6 +744,17 @@ class MainActivity : AppCompatActivity() {
                     ),
                 )
                 lastManagedAppsSnapshotVersion = policyCache.version
+                recordDeviceLogSafely(
+                    source = "apps",
+                    level = "info",
+                    message = "managed apps applied",
+                    payload = mapOf(
+                        "installed" to result.installed.size,
+                        "uninstalled" to result.uninstalled.size,
+                        "version" to policyCache.version,
+                    ),
+                )
+                requestDeviceLogUpload(bootstrap, identity)
                 withContext(Dispatchers.Main) {
                     managedAppProgress.value = ManagedAppInstallProgress.Completed(
                         installed = result.installed,
@@ -632,6 +763,12 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "managed app install failed", t)
+                recordDeviceLogSafely(
+                    source = "apps",
+                    level = "warn",
+                    message = "managed app install failed",
+                    payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                )
                 managedAppProgress.value = ManagedAppInstallProgress.Failed(t.message ?: t.javaClass.simpleName)
             } finally {
                 withContext(Dispatchers.Main) {
@@ -650,6 +787,12 @@ class MainActivity : AppCompatActivity() {
         try {
             val normalizedBootstrap = rawBootstrapJson.trim()
             val shouldReset = normalizedBootstrap.isNotEmpty()
+            recordDeviceLogSafely(
+                source = "bootstrap",
+                level = "info",
+                message = "bootstrap intent received",
+                payload = mapOf("bootstrapHash" to normalizedBootstrap.hashCode()),
+            )
 
             if (shouldReset) {
                 withContext(Dispatchers.IO) {
@@ -668,6 +811,12 @@ class MainActivity : AppCompatActivity() {
             BootstrapProvisioner(stateStore).persist(rawBootstrapJson)
         } catch (t: Throwable) {
             Log.w(TAG, "bootstrap parsing failed", t)
+            recordDeviceLogSafely(
+                source = "bootstrap",
+                level = "warn",
+                message = "bootstrap parsing failed",
+                payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+            )
         }
     }
 
@@ -722,11 +871,119 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun maybeStartDeviceLogUpload(state: AgentState) {
+        maybeStartDeviceLogUpload(state.bootstrap, state.identity)
+    }
+
+    private fun maybeStartDeviceLogUpload(
+        bootstrap: com.xmdm.launcher.state.BootstrapState?,
+        identity: com.xmdm.launcher.state.DeviceIdentityState?,
+    ) {
+        if (bootstrap == null || identity == null) {
+            deviceLogUploadJob?.cancel()
+            deviceLogUploadJob = null
+            deviceLogUploadTargetKey = null
+            return
+        }
+        val targetKey = "${bootstrap.serverUrl}|${bootstrap.secondaryServerUrl}|${identity.deviceId}|${identity.deviceSecret}"
+        if (deviceLogUploadJob?.isActive == true && deviceLogUploadTargetKey == targetKey) {
+            return
+        }
+        deviceLogUploadJob?.cancel()
+        deviceLogUploadTargetKey = targetKey
+        deviceLogUploadJob = lifecycleScope.launch(Dispatchers.IO) {
+            delay(DEVICE_LOG_UPLOAD_INITIAL_DELAY_MS)
+            while (isActive) {
+                try {
+                    val uploaded = deviceLogCoordinator.upload(bootstrap, identity)
+                    if (uploaded > 0) {
+                        Log.w(TAG, "device logs uploaded count=$uploaded instance=$instanceId")
+                    }
+                } catch (t: Throwable) {
+                    if (t is kotlinx.coroutines.CancellationException) {
+                        throw t
+                    }
+                    Log.w(TAG, "device logs upload failed", t)
+                }
+                delay(DEVICE_LOG_UPLOAD_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun recordDeviceLog(
+        source: String,
+        level: String,
+        message: String,
+        payload: Map<String, Any?> = emptyMap(),
+    ) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                recordDeviceLogNow(source, level, message, payload)
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) {
+                    throw t
+                }
+                Log.w(TAG, "device log record failed", t)
+            }
+        }
+    }
+
+    private suspend fun recordDeviceLogSafely(
+        source: String,
+        level: String,
+        message: String,
+        payload: Map<String, Any?> = emptyMap(),
+    ) {
+        try {
+            recordDeviceLogNow(source, level, message, payload)
+        } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException) {
+                throw t
+            }
+            Log.w(TAG, "device log record failed", t)
+        }
+    }
+
+    private suspend fun recordDeviceLogNow(
+        source: String,
+        level: String,
+        message: String,
+        payload: Map<String, Any?> = emptyMap(),
+    ) {
+        deviceLogCoordinator.record(
+            source = source,
+            level = level,
+            message = message,
+            payload = payload.takeIf { it.isNotEmpty() },
+        )
+    }
+
+    private fun requestDeviceLogUpload(
+        bootstrap: com.xmdm.launcher.state.BootstrapState,
+        identity: com.xmdm.launcher.state.DeviceIdentityState,
+    ) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val uploaded = deviceLogCoordinator.upload(bootstrap, identity)
+                if (uploaded > 0) {
+                    Log.w(TAG, "device logs uploaded count=$uploaded instance=$instanceId")
+                }
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) {
+                    throw t
+                }
+                Log.w(TAG, "device logs upload failed", t)
+            }
+        }
+    }
+
     companion object {
         const val EXTRA_BOOTSTRAP_JSON = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON"
         const val EXTRA_BOOTSTRAP_JSON_B64 = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64"
         const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
+        private const val DEVICE_LOG_UPLOAD_INITIAL_DELAY_MS = 5_000L
+        private const val DEVICE_LOG_UPLOAD_INTERVAL_MS = 30_000L
         private const val DEFAULT_COMMAND_POLL_INTERVAL_MS = 30_000L
         private const val DEFAULT_CONFIG_SYNC_INTERVAL_MS = 15 * 60 * 1000L
         private val SAVED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")

@@ -308,3 +308,22 @@ func TestPolicySync(t *testing.T) {
 	})
 	waitForPackageSuspendedOnDevice(t, env.serial, chromePackage)
 }
+
+// TestDeviceLogsUpload verifies that the launcher emits and uploads structured
+// device logs after enrollment and config sync.
+func TestDeviceLogsUpload(t *testing.T) {
+	env := newBaseTestEnv(t, false)
+
+	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	waitForDeviceLogsUpload(t, env.requests, env.deviceID)
+	assertDeviceLogsUploadPayload(t, env.requests, env.deviceID)
+	assertDeviceLogsRecordedViaAPI(t, env.client, env.baseURL, env.deviceID)
+}

@@ -69,6 +69,9 @@
 
 - Accepts batch uploads of app and device logs.
 - Log uploads are separate from telemetry so large log payloads do not block config sync.
+- The live upload surface uses `POST /api/v1/devices/{deviceId}/logs` with the device secret in `X-XMDM-Device-Secret`.
+- The admin search surface uses `GET /api/v1/logs` with optional `deviceId`, `source`, `level`, `q`, `since`, `until`, and `limit` filters.
+- The search response returns a `logs` array of device log records.
 
 ### Message Polling
 

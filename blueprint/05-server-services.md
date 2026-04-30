@@ -28,6 +28,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 - `internal/apps` for app management and versions
 - `internal/files` for file and certificate handling
 - `internal/push` for command fan-out and device notifications
+- `internal/logs` for device log upload and search
 - `internal/plugins` for plugin registration and plugin settings
 - `internal/audit` for audit events
 - `internal/ops` for scheduled jobs and health checks
@@ -55,6 +56,12 @@ The server must be able to start, serve admin requests, and accept device sync e
 - Device-authenticated config refresh at `GET /api/v1/devices/{deviceId}/config`
 - Device state transition tracking
 - Heartbeat and telemetry recording
+
+### Device Logs
+
+- Device-authenticated batch log upload
+- Admin search across device log records
+- Retention and export of log rows
 
 ### Artifact Service
 

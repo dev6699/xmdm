@@ -8,6 +8,7 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestEnrollmentE2E` covers server-simulated enrollment and first-sync behavior.
 - `TestManagedAppsAndFiles` covers adb-backed managed app and managed file delivery on a physical device.
 - `TestManagedAppsAndFilesRemoval` covers adb-backed managed app and managed file removal on a physical device.
+- `TestDeviceLogsUpload` covers adb-backed device log upload and recorded-log API verification on a physical device.
 - `TestKioskMode` covers adb-backed kiosk enforcement on a physical device.
 - `TestPackageRules` covers adb-backed package suspension enforcement on a physical device.
 - `TestPolicySync` covers adb-backed policy refresh after an admin update on a physical device.
@@ -58,6 +59,7 @@ Use this bucket for:
 - package suspension enforcement
 - managed file rendering
 - managed app install
+- device log upload and API readback
 - MQTT command transport
 - MQTT command-triggered config sync
 - HTTP polling command transport
@@ -66,6 +68,7 @@ Current coverage:
 
 - `TestManagedAppsAndFiles`
 - `TestManagedAppsAndFilesRemoval`
+- `TestDeviceLogsUpload`
 - `TestKioskMode`
 - `TestPackageRules`
 - `TestPolicySync`
@@ -73,12 +76,23 @@ Current coverage:
 - `TestCommandPolling`
 - `TestCommandBrokerOutageRecovery`
 
+The device-log upload test covers the structured launcher events emitted by the app:
+
+- `launcher` startup
+- `bootstrap` intake and parsing
+- `enrollment` attempt and result
+- `sync` refresh success or failure
+- `files` apply and removal
+- `apps` apply and removal
+- `commands` transport, polling, and command-triggered sync
+
 ### Recommended Taxonomy
 
 - [`TestAdminE2E`](/home/puong/xmdm/server/e2e/admin_test.go) for admin API coverage.
 - [`TestEnrollmentE2E`](/home/puong/xmdm/server/e2e/enrollment_test.go) for server-simulated device enrollment and sync behavior.
 - [`TestManagedAppsAndFiles`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app delivery.
 - [`TestManagedAppsAndFilesRemoval`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app removal.
+- [`TestDeviceLogsUpload`](/home/puong/xmdm/server/e2e/content_test.go) for real-device device log upload.
 - [`TestKioskMode`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk enforcement.
 - [`TestPackageRules`](/home/puong/xmdm/server/e2e/content_test.go) for real-device package suspension enforcement.
 - [`TestCommandMQTT`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command transport.
@@ -253,6 +267,16 @@ XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestManagedAppsAndFilesRe
 ```
 
 `TestManagedAppsAndFilesRemoval` uses the short config-sync interval from the signed config snapshot runtime bucket so the launcher picks up the retire operations quickly.
+
+For the adb-backed device log upload test:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestDeviceLogsUpload -count=1 ./e2e
+```
+
+`TestDeviceLogsUpload` waits for the launcher to emit structured lifecycle logs and upload them through `POST /api/v1/devices/{deviceId}/logs`.
 
 For the adb-backed kiosk enforcement test:
 

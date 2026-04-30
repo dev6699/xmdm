@@ -5,7 +5,7 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-04-29
+Snapshot last updated: 2026-04-30
 
 ### M0 - Foundation
 
@@ -98,7 +98,7 @@ Note: `M5-01 MQTT Transport` is complete with the server constructing an interna
 | M6-01 Kiosk Enforcement | ☑ |
 | M6-02 Package Rules | ☑ |
 | M6-03 Foreground Enforcement | Not Planned |
-| M6-04 Device Logs | ☐ |
+| M6-04 Device Logs | ☑ |
 | M6-05 Device Info | ☐ |
 | M6-06 Messaging And Audit | ☐ |
 | M6-07 Image Upload | ☐ |

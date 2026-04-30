@@ -1,9 +1,11 @@
 package e2e_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -333,14 +335,22 @@ func buildTestServer(t *testing.T, handler *http.ServeMux, launcherAPKPath strin
 	t.Helper()
 	recordingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if requests != nil {
-			requests.record(r.Method, r.URL.Path)
+			body := ""
+			if r.Body != nil {
+				raw, err := io.ReadAll(r.Body)
+				if err == nil {
+					body = string(raw)
+				}
+				r.Body = io.NopCloser(bytes.NewReader(raw))
+			}
+			requests.record(r.Method, r.URL.Path, body)
 		}
 		handler.ServeHTTP(w, r)
 	})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/launcher.apk", func(w http.ResponseWriter, r *http.Request) {
 		if requests != nil {
-			requests.record(r.Method, r.URL.Path)
+			requests.record(r.Method, r.URL.Path, "")
 		}
 		w.Header().Set("Content-Type", "application/vnd.android.package-archive")
 		http.ServeFile(w, r, launcherAPKPath)
@@ -367,6 +377,7 @@ func mustReadFile(t *testing.T, label, path string) []byte {
 type requestRecord struct {
 	method string
 	path   string
+	body   string
 }
 
 type requestRecorder struct {
@@ -378,10 +389,10 @@ func newRequestRecorder() *requestRecorder {
 	return &requestRecorder{}
 }
 
-func (r *requestRecorder) record(method, path string) {
+func (r *requestRecorder) record(method, path, body string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.requests = append(r.requests, requestRecord{method: method, path: path})
+	r.requests = append(r.requests, requestRecord{method: method, path: path, body: body})
 }
 
 func (r *requestRecorder) waitFor(t *testing.T, timeout time.Duration, description string, match func(requestRecord) bool) {
@@ -480,6 +491,153 @@ func waitForConfigSnapshotFetch(t *testing.T, requests *requestRecorder, deviceI
 		return r.method == http.MethodGet &&
 			r.path == "/api/v1/devices/"+deviceID+"/config"
 	})
+}
+
+func waitForDeviceLogsUpload(t *testing.T, requests *requestRecorder, deviceID string) {
+	t.Helper()
+	requests.waitFor(t, time.Minute, "device log upload", func(r requestRecord) bool {
+		return r.method == http.MethodPost &&
+			r.path == "/api/v1/devices/"+deviceID+"/logs"
+	})
+}
+
+func assertDeviceLogsUploadPayload(t *testing.T, requests *requestRecorder, deviceID string) {
+	t.Helper()
+	requests.mu.Lock()
+	defer requests.mu.Unlock()
+	var payloadBody string
+	for _, req := range requests.requests {
+		if req.method == http.MethodPost && req.path == "/api/v1/devices/"+deviceID+"/logs" && strings.TrimSpace(req.body) != "" {
+			payloadBody = req.body
+			break
+		}
+	}
+	if payloadBody == "" {
+		t.Fatalf("did not capture a device log upload body for %s", deviceID)
+	}
+	var upload struct {
+		ObservedAt string `json:"observedAt"`
+		Entries    []struct {
+			Source  string         `json:"source"`
+			Level   string         `json:"level"`
+			Message string         `json:"message"`
+			Payload map[string]any `json:"payload"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(payloadBody), &upload); err != nil {
+		t.Fatalf("decode device log upload body: %v", err)
+	}
+	if len(upload.Entries) == 0 {
+		t.Fatalf("expected at least one device log entry, got none")
+	}
+	required := map[string]bool{
+		"launcher|info|launcher started":           false,
+		"bootstrap|info|bootstrap intent received": false,
+		"enrollment|info|enrollment succeeded":     false,
+		"sync|info|initial config sync succeeded":  false,
+	}
+	for _, entry := range upload.Entries {
+		key := entry.Source + "|" + entry.Level + "|" + entry.Message
+		if _, ok := required[key]; ok {
+			required[key] = true
+		}
+	}
+	for key, seen := range required {
+		if !seen {
+			t.Fatalf("device log upload body did not include expected entry %q; body=%s", key, payloadBody)
+		}
+	}
+}
+
+func assertDeviceLogsRecordedViaAPI(t *testing.T, client *http.Client, baseURL, deviceID string) {
+	t.Helper()
+	time.Sleep(2 * time.Second)
+	logs := mustFetchDeviceLogs(t, client, baseURL, deviceID)
+	if !deviceLogsMatch(logs, deviceID) {
+		t.Fatalf("device logs API did not include the expected launcher records: %s", deviceLogsSnapshot(logs))
+	}
+}
+
+func mustFetchDeviceLogs(t *testing.T, client *http.Client, baseURL, deviceID string) []any {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/logs?deviceId="+deviceID+"&limit=50", nil)
+	if err != nil {
+		t.Fatalf("build device logs request: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("device logs request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("device logs request got %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode device logs response: %v", err)
+	}
+	logs, _ := payload["logs"].([]any)
+	return logs
+}
+
+func deviceLogsMatch(logs []any, deviceID string) bool {
+	required := map[string]bool{
+		"bootstrap|info|bootstrap intent received": false,
+		"enrollment|info|enrollment succeeded":     false,
+		"sync|info|initial config sync succeeded":  false,
+	}
+	for _, item := range logs {
+		rec, _ := item.(map[string]any)
+		source, _ := rec["source"].(string)
+		level, _ := rec["level"].(string)
+		message, _ := rec["message"].(string)
+		key := source + "|" + level + "|" + message
+		payload, _ := rec["payload"].(map[string]any)
+		switch key {
+		case "bootstrap|info|bootstrap intent received":
+			if payload != nil {
+				if _, ok := payload["bootstrapHash"]; ok {
+					required[key] = true
+				}
+			}
+		case "enrollment|info|enrollment succeeded":
+			if payload != nil && payload["deviceId"] == deviceID {
+				required[key] = true
+			}
+		case "sync|info|initial config sync succeeded":
+			if payload != nil {
+				if _, ok := payload["configRevision"]; ok {
+					if _, ok := payload["syncedAtEpochMillis"]; ok {
+						required[key] = true
+					}
+				}
+			}
+		}
+	}
+	for _, seen := range required {
+		if !seen {
+			return false
+		}
+	}
+	return true
+}
+
+func deviceLogsSnapshot(logs []any) string {
+	if len(logs) == 0 {
+		return "<empty>"
+	}
+	parts := make([]string, 0, len(logs))
+	for _, item := range logs {
+		rec, _ := item.(map[string]any)
+		source, _ := rec["source"].(string)
+		level, _ := rec["level"].(string)
+		message, _ := rec["message"].(string)
+		parts = append(parts, source+"|"+level+"|"+message)
+	}
+	return strings.Join(parts, " | ")
 }
 
 func runDockerCompose(t *testing.T, args ...string) {

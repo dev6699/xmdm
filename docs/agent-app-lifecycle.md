@@ -41,6 +41,7 @@ flowchart TD
   - apply managed files from the signed snapshot
   - apply managed apps from the signed snapshot
   - start command transport when identity exists
+  - start device log upload when bootstrap and identity exist
 
 Relevant code:
 - [`MainActivity`](../app/src/main/java/com/xmdm/launcher/MainActivity.kt)
@@ -161,6 +162,64 @@ Relevant code:
 - [`MqttDeviceCommandTransport`](../app/src/main/java/com/xmdm/launcher/commands/MqttDeviceCommandTransport.kt)
 - [`DeviceCommandCoordinator`](../app/src/main/java/com/xmdm/launcher/commands/DeviceCommandCoordinator.kt)
 
+### 8. Device Log Upload
+
+- Once the launcher has bootstrap data and device identity, it starts a periodic log upload loop.
+- The launcher records structured lifecycle events during:
+  - startup
+  - bootstrap intake
+  - enrollment
+  - config sync
+  - managed file application
+  - managed app application
+  - command transport
+- It batches those entries and uploads them to:
+  - `POST /api/v1/devices/{deviceId}/logs`
+- If the first upload happens before any buffered entries exist, the launcher retries later through the periodic loop.
+- Log uploads are separate from config sync so a log burst cannot block the signed snapshot refresh path.
+
+Relevant code:
+- [`DeviceLogCoordinator`](../app/src/main/java/com/xmdm/launcher/logs/DeviceLogCoordinator.kt)
+- [`DeviceLogStore`](../app/src/main/java/com/xmdm/launcher/logs/DeviceLogStore.kt)
+- [`HttpDeviceLogGateway`](../app/src/main/java/com/xmdm/launcher/logs/HttpDeviceLogGateway.kt)
+
+### 9. Device Log Categories
+
+The device currently emits structured logs for these launcher events:
+
+- `launcher`
+  - app process start and high-level lifecycle markers
+- `bootstrap`
+  - bootstrap intent received
+  - bootstrap parsing success or failure
+- `enrollment`
+  - enrollment attempt started
+  - enrollment succeeded or failed
+- `sync`
+  - initial config sync succeeded or failed
+  - periodic config sync refreshed or failed
+- `files`
+  - managed files applied or failed
+- `apps`
+  - managed apps applied or failed
+- `commands`
+  - MQTT command transport connect, failure, and polling fallback
+  - command polling activity
+  - command-triggered config sync
+
+Each log entry carries a human-readable `message` plus a structured `payload` with context such as:
+
+- `bootstrapHash`
+- `deviceId`
+- `configRevision`
+- `syncedAtEpochMillis`
+- `mqttAddress`
+- `count`
+- `version`
+- `installed`
+- `uninstalled`
+- `error`
+
 ## API Calls
 
 These are the HTTP paths the launcher calls during the lifecycle.
@@ -202,6 +261,12 @@ These are the HTTP paths the launcher calls during the lifecycle.
   - Delivered through MQTT when available, otherwise through HTTP polling.
   - Triggers the launcher to fetch `GET /api/v1/devices/{deviceId}/config` immediately.
   - Useful for push-driven refresh when admin updates policy, apps, files, or certificates.
+
+### Device Log Upload
+
+- `POST /api/v1/devices/{deviceId}/logs`
+  - Used for structured launcher lifecycle logs.
+  - Uses the device secret in `X-XMDM-Device-Secret`.
 
 ### Not Called By The Device During Provisioning
 
@@ -248,6 +313,7 @@ The expected first-run order is:
 4. Managed files are downloaded and written, or stale files are deleted if the new snapshot is empty.
 5. Managed apps are downloaded and installed.
 6. Command transport starts.
+7. Device log upload starts and continues independently of config sync.
 
 If any later step fails, the earlier successful state remains on disk and the launcher can retry without repeating bootstrap intake.
 
@@ -258,6 +324,7 @@ If any later step fails, the earlier successful state remains on disk and the la
 - Managed files must precede managed apps so the launcher can stabilize content state first.
 - Managed apps can proceed immediately when the config snapshot has no managed files.
 - Command transport must wait for device identity so requests can be authenticated.
+- Device logs can be buffered before identity exists, but upload waits until the launcher has identity and server URL context.
 - A command can request an immediate config refresh without changing the sync contract.
 - Persistent local state is required so reboot does not force manual reprovisioning.
 
