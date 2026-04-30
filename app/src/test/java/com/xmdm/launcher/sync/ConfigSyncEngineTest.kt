@@ -39,6 +39,11 @@ class ConfigSyncEngineTest {
         val unsigned = """
             {
               "version":"7",
+              "runtime":{
+                "mqttAddress":"127.0.0.1:1883",
+                "commandPollIntervalMs":1000,
+                "configSyncIntervalMs":1000
+              },
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
               "policy":{"kioskMode":false},
               "apps":[],
@@ -49,6 +54,11 @@ class ConfigSyncEngineTest {
         val signed = """
             {
               "version":"7",
+              "runtime":{
+                "mqttAddress":"127.0.0.1:1883",
+                "commandPollIntervalMs":1000,
+                "configSyncIntervalMs":1000
+              },
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
               "policy":{"kioskMode":false},
               "apps":[],
@@ -124,6 +134,11 @@ class ConfigSyncEngineTest {
         val unsigned = """
             {
               "version":"7",
+              "runtime":{
+                "mqttAddress":"127.0.0.1:1883",
+                "commandPollIntervalMs":1000,
+                "configSyncIntervalMs":1000
+              },
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
               "policy":{"kioskMode":false},
               "apps":[],
@@ -134,6 +149,11 @@ class ConfigSyncEngineTest {
         val signed = """
             {
               "version":"7",
+              "runtime":{
+                "mqttAddress":"127.0.0.1:1883",
+                "commandPollIntervalMs":1000,
+                "configSyncIntervalMs":1000
+              },
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
               "policy":{"kioskMode":false},
               "apps":[],
@@ -208,6 +228,11 @@ class ConfigSyncEngineTest {
                     return """
                         {
                           "version":"7",
+                          "runtime":{
+                            "mqttAddress":"127.0.0.1:1883",
+                            "commandPollIntervalMs":1000,
+                            "configSyncIntervalMs":1000
+                          },
                           "device":{"deviceId":"device-123","deviceIdUse":"serial"},
                           "policy":{},
                           "apps":[],

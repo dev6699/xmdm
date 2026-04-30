@@ -39,9 +39,7 @@ func TestManagedAppsAndFiles(t *testing.T) {
 // TestManagedAppsAndFilesRemoval verifies that managed file and app removals in
 // a later config snapshot are reflected on the device without re-enrollment.
 func TestManagedAppsAndFilesRemoval(t *testing.T) {
-	env := newContentTestEnvWithExtras(t, map[string]string{
-		"CONFIG_SYNC_INTERVAL_MS": "1000",
-	})
+	env := newContentTestEnvWithExtras(t, nil)
 
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
@@ -83,12 +81,15 @@ func TestCommandMQTT(t *testing.T) {
 	env.reverseMQTTPort(t)
 
 	token := env.mustCreateEnrollmentToken(t)
-	bootstrapURI := env.mustBuildBootstrapURI(t, token, "127.0.0.1:1883")
+	bootstrapURI := env.mustBuildBootstrapURI(t, token)
 	startLauncher(t, env.serial, bootstrapURI)
 
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
+	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	waitForCommandTransportWarmup(t)
 
 	commandID := env.mustIssuePingCommand(t)
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
@@ -110,7 +111,7 @@ func TestCommandMQTTSyncConfig(t *testing.T) {
 	env.reverseMQTTPort(t)
 
 	token := env.mustCreateEnrollmentToken(t)
-	bootstrapURI := env.mustBuildBootstrapURI(t, token, "127.0.0.1:1883")
+	bootstrapURI := env.mustBuildBootstrapURI(t, token)
 	startLauncher(t, env.serial, bootstrapURI)
 
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
@@ -118,6 +119,7 @@ func TestCommandMQTTSyncConfig(t *testing.T) {
 	})
 	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
 	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	waitForCommandTransportWarmup(t)
 
 	initialMarker := env.requests.len()
 	commandID := env.mustIssueSyncConfigCommand(t)
@@ -143,9 +145,7 @@ func TestCommandPolling(t *testing.T) {
 	env := newPollingCommandTestEnv(t)
 
 	token := env.mustCreateEnrollmentToken(t)
-	bootstrapURI := env.mustBuildBootstrapURIWithExtras(t, token, "", map[string]string{
-		"COMMAND_POLL_INTERVAL_MS": "1000",
-	})
+	bootstrapURI := env.mustBuildBootstrapURIWithExtras(t, token, nil)
 	startLauncher(t, env.serial, bootstrapURI)
 
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
@@ -177,15 +177,15 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 	env.reverseMQTTPort(t)
 
 	token := env.mustCreateEnrollmentToken(t)
-	bootstrapURI := env.mustBuildBootstrapURIWithExtras(t, token, "127.0.0.1:1883", map[string]string{
-		"COMMAND_POLL_INTERVAL_MS": "1000",
-	})
+	bootstrapURI := env.mustBuildBootstrapURIWithExtras(t, token, nil)
 	startLauncher(t, env.serial, bootstrapURI)
 
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
 	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	waitForCommandTransportWarmup(t)
 
 	initialCommandID := env.mustIssuePingCommand(t)
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
@@ -208,7 +208,7 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 	env.waitForCommandAck(t, outageCommandID, "pong")
 
 	startMQTTBroker(t)
-	time.Sleep(2 * time.Second)
+	waitForCommandTransportWarmup(t)
 
 	recoveryMarker := env.requests.len()
 	recoveryCommandID := env.mustIssuePingCommand(t)
@@ -234,7 +234,7 @@ func TestKioskMode(t *testing.T) {
 	}`)
 
 	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
-	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, "", nil)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
 	startLauncher(t, env.serial, bootstrapURI)
 
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
@@ -278,9 +278,7 @@ func TestPolicySync(t *testing.T) {
 	}
 
 	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
-	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, "", map[string]string{
-		"CONFIG_SYNC_INTERVAL_MS": "1000",
-	})
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
 	startLauncher(t, env.serial, bootstrapURI)
 
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {

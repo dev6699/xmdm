@@ -11,15 +11,16 @@ import (
 // Config represents the configuration structure
 type Config struct {
 	Server      ServerConfig      `yaml:"server"`
-	Postgres   PostgresConfig   `yaml:"postgres"`
-	MQTT       MQTTConfig        `yaml:"mqtt"`
+	Postgres    PostgresConfig    `yaml:"postgres"`
+	MQTT        MQTTConfig        `yaml:"mqtt"`
+	Device      DeviceConfig      `yaml:"device"`
 	ObjectStore ObjectStoreConfig `yaml:"objectStorage"`
-	Admin      AdminConfig      `yaml:"admin"`
+	Admin       AdminConfig       `yaml:"admin"`
 }
 
 type ServerConfig struct {
-	Address   string        `yaml:"address" env:"XMDM_ADDR"`
-	Port      string        `yaml:"port"`
+	Address    string        `yaml:"address" env:"XMDM_ADDR"`
+	Port       string        `yaml:"port"`
 	SessionTTL time.Duration `yaml:"sessionTTL" env:"XMDM_SESSION_TTL"`
 }
 
@@ -28,26 +29,31 @@ type PostgresConfig struct {
 }
 
 type MQTTConfig struct {
-	Address              string `yaml:"address" env:"XMDM_MQTT_ADDRESS"`
-	ClientID             string `yaml:"clientID" env:"XMDM_MQTT_CLIENT_ID"`
-	Username               string `yaml:"username" env:"XMDM_MQTT_USERNAME"`
-	Password               string `yaml:"password" env:"XMDM_MQTT_PASSWORD"`
-	DynsecAddress         string `yaml:"dynsecAddress" env:"XMDM_MQTT_DYNSEC_ADDRESS"`
-	DynsecClientID        string `yaml:"dynsecClientID" env:"XMDM_MQTT_DYNSEC_CLIENT_ID"`
-	DynsecAdminUser      string `yaml:"dynsecAdminUser" env:"XMDM_MQTT_DYNSEC_ADMIN_USER"`
-	DynsecPassword       string `yaml:"dynsecPassword" env:"XMDM_MQTT_DYNSEC_PASSWORD"`
-	KeepAlive            string `yaml:"keepAlive" env:"XMDM_MQTT_KEEPALIVE"`
-	DialTimeout          string `yaml:"dialTimeout" env:"XMDM_MQTT_DIAL_TIMEOUT"`
-	DynsecKeepAlive      string `yaml:"dynsecKeepAlive" env:"XMDM_MQTT_DYNSEC_KEEPALIVE"`
-	DynsecDialTimeout    string `yaml:"dynsecDialTimeout" env:"XMDM_MQTT_DYNSEC_DIAL_TIMEOUT"`
+	Address           string `yaml:"address" env:"XMDM_MQTT_ADDRESS"`
+	ClientID          string `yaml:"clientID" env:"XMDM_MQTT_CLIENT_ID"`
+	Username          string `yaml:"username" env:"XMDM_MQTT_USERNAME"`
+	Password          string `yaml:"password" env:"XMDM_MQTT_PASSWORD"`
+	DynsecAddress     string `yaml:"dynsecAddress" env:"XMDM_MQTT_DYNSEC_ADDRESS"`
+	DynsecClientID    string `yaml:"dynsecClientID" env:"XMDM_MQTT_DYNSEC_CLIENT_ID"`
+	DynsecAdminUser   string `yaml:"dynsecAdminUser" env:"XMDM_MQTT_DYNSEC_ADMIN_USER"`
+	DynsecPassword    string `yaml:"dynsecPassword" env:"XMDM_MQTT_DYNSEC_PASSWORD"`
+	KeepAlive         string `yaml:"keepAlive" env:"XMDM_MQTT_KEEPALIVE"`
+	DialTimeout       string `yaml:"dialTimeout" env:"XMDM_MQTT_DIAL_TIMEOUT"`
+	DynsecKeepAlive   string `yaml:"dynsecKeepAlive" env:"XMDM_MQTT_DYNSEC_KEEPALIVE"`
+	DynsecDialTimeout string `yaml:"dynsecDialTimeout" env:"XMDM_MQTT_DYNSEC_DIAL_TIMEOUT"`
+}
+
+type DeviceConfig struct {
+	CommandPollInterval time.Duration `yaml:"commandPollInterval" env:"XMDM_DEVICE_COMMAND_POLL_INTERVAL"`
+	ConfigSyncInterval  time.Duration `yaml:"configSyncInterval" env:"XMDM_DEVICE_CONFIG_SYNC_INTERVAL"`
 }
 
 type ObjectStoreConfig struct {
 	Endpoint        string `yaml:"endpoint" env:"XMDM_OBJECT_STORAGE_ENDPOINT"`
 	Region          string `yaml:"region" env:"XMDM_OBJECT_STORAGE_REGION"`
-	AccessKeyID      string `yaml:"accessKeyID" env:"XMDM_OBJECT_STORAGE_ACCESS_KEY"`
-	SecretAccessKey  string `yaml:"secretAccessKey" env:"XMDM_OBJECT_STORAGE_SECRET_KEY"`
-	Bucket           string `yaml:"bucket" env:"XMDM_OBJECT_STORAGE_BUCKET"`
+	AccessKeyID     string `yaml:"accessKeyID" env:"XMDM_OBJECT_STORAGE_ACCESS_KEY"`
+	SecretAccessKey string `yaml:"secretAccessKey" env:"XMDM_OBJECT_STORAGE_SECRET_KEY"`
+	Bucket          string `yaml:"bucket" env:"XMDM_OBJECT_STORAGE_BUCKET"`
 }
 
 type AdminConfig struct {
@@ -59,31 +65,35 @@ type AdminConfig struct {
 func LoadConfig(configPath string) (*Config, error) {
 	cfg := &Config{
 		Server: ServerConfig{
-			Address: ":8080",
+			Address:    ":8080",
 			SessionTTL: 24 * time.Hour,
 		},
 		Postgres: PostgresConfig{
 			DSN: "postgres://xmdm:xmdm@127.0.0.1:5432/xmdm?sslmode=disable",
 		},
 		MQTT: MQTTConfig{
-			Address:              "127.0.0.1:1883",
-			ClientID:             "xmdm-server",
-			Username:               "xmdm-server",
-			Password:               "xmdm-server-secret",
-			DynsecAddress:         "127.0.0.1:1883",
-			DynsecClientID:        "xmdm-dynsec",
-			DynsecAdminUser:      "admin",
-			DynsecPassword:       "xmdm-admin",
-			KeepAlive:            "30s",
-			DialTimeout:          "5s",
-			DynsecKeepAlive:      "30s",
-			DynsecDialTimeout:    "5s",
+			Address:           "127.0.0.1:1883",
+			ClientID:          "xmdm-server",
+			Username:          "xmdm-server",
+			Password:          "xmdm-server-secret",
+			DynsecAddress:     "127.0.0.1:1883",
+			DynsecClientID:    "xmdm-dynsec",
+			DynsecAdminUser:   "admin",
+			DynsecPassword:    "xmdm-admin",
+			KeepAlive:         "30s",
+			DialTimeout:       "5s",
+			DynsecKeepAlive:   "30s",
+			DynsecDialTimeout: "5s",
+		},
+		Device: DeviceConfig{
+			CommandPollInterval: 30 * time.Second,
+			ConfigSyncInterval:  15 * time.Minute,
 		},
 		ObjectStore: ObjectStoreConfig{
 			Endpoint:        "http://127.0.0.1:8333",
 			Region:          "us-east-1",
-			AccessKeyID:      "xmdm",
-			SecretAccessKey:  "xmdm",
+			AccessKeyID:     "xmdm",
+			SecretAccessKey: "xmdm",
 			Bucket:          "xmdm",
 		},
 		Admin: AdminConfig{
@@ -174,6 +184,18 @@ func loadFromEnv(cfg *Config) {
 	}
 	if mqttDynsecDialTimeout := os.Getenv("XMDM_MQTT_DYNSEC_DIAL_TIMEOUT"); mqttDynsecDialTimeout != "" {
 		cfg.MQTT.DynsecDialTimeout = mqttDynsecDialTimeout
+	}
+
+	// Device runtime config
+	if commandPollInterval := os.Getenv("XMDM_DEVICE_COMMAND_POLL_INTERVAL"); commandPollInterval != "" {
+		if dur, err := time.ParseDuration(commandPollInterval); err == nil {
+			cfg.Device.CommandPollInterval = dur
+		}
+	}
+	if configSyncInterval := os.Getenv("XMDM_DEVICE_CONFIG_SYNC_INTERVAL"); configSyncInterval != "" {
+		if dur, err := time.ParseDuration(configSyncInterval); err == nil {
+			cfg.Device.ConfigSyncInterval = dur
+		}
 	}
 
 	// Object storage config

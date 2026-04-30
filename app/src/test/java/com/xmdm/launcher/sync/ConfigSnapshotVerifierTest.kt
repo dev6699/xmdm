@@ -12,6 +12,11 @@ class ConfigSnapshotVerifierTest {
         val unsigned = """
             {
               "version":"1",
+              "runtime":{
+                "mqttAddress":"127.0.0.1:1883",
+                "commandPollIntervalMs":1000,
+                "configSyncIntervalMs":1000
+              },
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
               "policy":{"kioskMode":false},
               "apps":[],
@@ -23,6 +28,11 @@ class ConfigSnapshotVerifierTest {
         val signed = """
             {
               "version":"1",
+              "runtime":{
+                "mqttAddress":"127.0.0.1:1883",
+                "commandPollIntervalMs":1000,
+                "configSyncIntervalMs":1000
+              },
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
               "policy":{"kioskMode":false},
               "apps":[],
@@ -43,6 +53,11 @@ class ConfigSnapshotVerifierTest {
             """
             {
               "version":"1",
+              "runtime":{
+                "mqttAddress":"127.0.0.1:1883",
+                "commandPollIntervalMs":1000,
+                "configSyncIntervalMs":1000
+              },
               "device":{"deviceId":"device-123","deviceIdUse":"serial"},
               "policy":{},
               "apps":[],

@@ -49,6 +49,12 @@ type PolicyRestrictions struct {
 	SuspendPackages []string `json:"suspendPackages,omitempty"`
 }
 
+type RuntimeSnapshot struct {
+	MqttAddress           string `json:"mqttAddress,omitempty"`
+	CommandPollIntervalMs int64  `json:"commandPollIntervalMs,omitempty"`
+	ConfigSyncIntervalMs  int64  `json:"configSyncIntervalMs,omitempty"`
+}
+
 type AppSnapshot struct {
 	AppID        string `json:"appId"`
 	PackageName  string `json:"packageName"`
@@ -70,6 +76,7 @@ type CertificateSnapshot struct {
 
 type ConfigSnapshot struct {
 	Version      string                `json:"version"`
+	Runtime      RuntimeSnapshot       `json:"runtime,omitempty"`
 	Device       DeviceSnapshot        `json:"device"`
 	Policy       PolicySnapshot        `json:"policy"`
 	Apps         []AppSnapshot         `json:"apps"`

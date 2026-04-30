@@ -19,6 +19,10 @@ mqtt:
   dynsecKeepAlive: "30s"
   dynsecDialTimeout: "5s"
 
+device:
+  commandPollInterval: 30s
+  configSyncInterval: 15m
+
 objectStorage:
   endpoint: "http://127.0.0.1:8333"
   region: "us-east-1"

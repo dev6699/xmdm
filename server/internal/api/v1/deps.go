@@ -14,6 +14,7 @@ import (
 	commandspg "xmdm/server/internal/commands/postgres"
 	"xmdm/server/internal/config"
 	devicepg "xmdm/server/internal/device/postgres"
+	"xmdm/server/internal/enrollment"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
 	filespg "xmdm/server/internal/files/postgres"
 	grouppg "xmdm/server/internal/group/postgres"
@@ -51,20 +52,25 @@ func NewDeps(cfg *config.Config) Dependencies {
 	devicesStore.SetProvisioner(provisioner)
 	enrollmentStore.SetProvisioner(provisioner)
 	return Dependencies{
-		Identity:      identitypg.New(pool),
-		Apps:          appspg.New(pool),
-		Files:         filespg.New(pool),
-		ManagedFiles:  managedfilespg.New(pool),
-		Commands:      commandStore,
-		Certificates:  certificatesspg.New(pool),
-		Artifacts:     artifactStore,
-		Groups:        grouppg.New(pool),
-		Policies:      policypg.New(pool),
-		Devices:       devicesStore,
-		Enrollment:    enrollmentStore,
-		Telemetry:     telemetrypg.New(pool),
-		Audit:         auditpg.NewDBStore(pool),
-		Push:          pushPublisher,
+		Identity:     identitypg.New(pool),
+		Apps:         appspg.New(pool),
+		Files:        filespg.New(pool),
+		ManagedFiles: managedfilespg.New(pool),
+		Commands:     commandStore,
+		Certificates: certificatesspg.New(pool),
+		Artifacts:    artifactStore,
+		Groups:       grouppg.New(pool),
+		Policies:     policypg.New(pool),
+		Devices:      devicesStore,
+		Enrollment:   enrollmentStore,
+		Telemetry:    telemetrypg.New(pool),
+		Audit:        auditpg.NewDBStore(pool),
+		Push:         pushPublisher,
+		Runtime: enrollment.RuntimeSnapshot{
+			MqttAddress:           cfg.MQTT.Address,
+			CommandPollIntervalMs: cfg.Device.CommandPollInterval.Milliseconds(),
+			ConfigSyncIntervalMs:  cfg.Device.ConfigSyncInterval.Milliseconds(),
+		},
 		TenantID:      "00000000-0000-0000-0000-000000000000",
 		PluginManager: plugins.Disabled(),
 	}

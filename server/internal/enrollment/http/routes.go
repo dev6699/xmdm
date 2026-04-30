@@ -67,7 +67,7 @@ type EnrollmentRequest struct {
 	BootstrapExtras      map[string]any       `json:"bootstrapExtras"`
 }
 
-func Register(mux httpx.Router, svc *auth.Service, devices device.Repository, store enrollment.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, artifactStore artifacts.Store, certStore certificates.Repository, policyStore policy.Repository, tenantID string) {
+func Register(mux httpx.Router, svc *auth.Service, devices device.Repository, store enrollment.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, artifactStore artifacts.Store, certStore certificates.Repository, policyStore policy.Repository, runtime enrollment.RuntimeSnapshot, tenantID string) {
 	enrollmentMux := httpx.WithPrefix(mux, "/enrollment")
 
 	enrollmentMux.HandleFunc("", func(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +120,7 @@ func Register(mux httpx.Router, svc *auth.Service, devices device.Repository, st
 			}
 			return
 		}
-		config, err := buildSignedConfigSnapshot(r.Context(), policyStore, appStore, managedFileStore, artifactStore, certStore, tenantID, authDevice.Name, authDevice.BootstrapExtras, secret)
+		config, err := buildSignedConfigSnapshot(r.Context(), policyStore, appStore, managedFileStore, artifactStore, certStore, tenantID, authDevice.Name, authDevice.BootstrapExtras, runtime, secret)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -303,7 +303,7 @@ func Register(mux httpx.Router, svc *auth.Service, devices device.Repository, st
 	})
 }
 
-func buildSignedConfigSnapshot(ctx context.Context, policyStore policy.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, artifactStore artifacts.Store, certStore certificates.Repository, tenantID, deviceID string, bootstrapExtras map[string]any, secret string) (enrollment.ConfigSnapshot, error) {
+func buildSignedConfigSnapshot(ctx context.Context, policyStore policy.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, artifactStore artifacts.Store, certStore certificates.Repository, tenantID, deviceID string, bootstrapExtras map[string]any, runtime enrollment.RuntimeSnapshot, secret string) (enrollment.ConfigSnapshot, error) {
 	appsSnapshot, err := listPublishedApps(ctx, appStore, deviceID, tenantID)
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
@@ -321,7 +321,7 @@ func buildSignedConfigSnapshot(ctx context.Context, policyStore policy.Repositor
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
 	}
-	config := enrollment.NewBootstrapConfigSnapshot(deviceID, deviceIDUse, policySnapshot, appsSnapshot, filesSnapshot, certs)
+	config := enrollment.NewBootstrapConfigSnapshot(deviceID, deviceIDUse, runtime, policySnapshot, appsSnapshot, filesSnapshot, certs)
 	return enrollment.SignConfigSnapshot(config, secret)
 }
 

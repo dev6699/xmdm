@@ -107,6 +107,13 @@ func waitForKioskModeOnDevice(t *testing.T, serial string) {
 	)
 }
 
+// waitForCommandTransportWarmup gives the launcher a short window to finish
+// bringing up its MQTT subscription after the config snapshot has landed.
+func waitForCommandTransportWarmup(t *testing.T) {
+	t.Helper()
+	time.Sleep(5 * time.Second)
+}
+
 // reverseADBPort sets up port forwarding from the device to the host for the given server URL's port.
 func reverseADBPort(t *testing.T, serial, baseURL string) {
 	t.Helper()

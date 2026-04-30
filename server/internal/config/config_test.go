@@ -28,6 +28,12 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.MQTT.Address != "127.0.0.1:1883" {
 		t.Errorf("Expected MQTT.Address '127.0.0.1:1883', got '%s'", cfg.MQTT.Address)
 	}
+	if cfg.Device.CommandPollInterval != 30*time.Second {
+		t.Errorf("Expected Device.CommandPollInterval 30s, got %v", cfg.Device.CommandPollInterval)
+	}
+	if cfg.Device.ConfigSyncInterval != 15*time.Minute {
+		t.Errorf("Expected Device.ConfigSyncInterval 15m, got %v", cfg.Device.ConfigSyncInterval)
+	}
 }
 
 func TestLoadConfigFromEnv(t *testing.T) {
@@ -37,6 +43,8 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	os.Setenv("XMDM_ADMIN_USERNAME", "customuser")
 	os.Setenv("XMDM_ADMIN_PASSWORD", "custompass")
 	os.Setenv("XMDM_POSTGRES_DSN", "postgres://custom:custom@localhost:5432/test")
+	os.Setenv("XMDM_DEVICE_COMMAND_POLL_INTERVAL", "5s")
+	os.Setenv("XMDM_DEVICE_CONFIG_SYNC_INTERVAL", "2m")
 	defer unsetEnvVars()
 
 	cfg, err := LoadConfig("")
@@ -55,6 +63,12 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}
 	if cfg.Postgres.DSN != "postgres://custom:custom@localhost:5432/test" {
 		t.Errorf("Expected Postgres.DSN 'postgres://custom:custom@localhost:5432/test', got '%s'", cfg.Postgres.DSN)
+	}
+	if cfg.Device.CommandPollInterval != 5*time.Second {
+		t.Errorf("Expected Device.CommandPollInterval 5s, got %v", cfg.Device.CommandPollInterval)
+	}
+	if cfg.Device.ConfigSyncInterval != 2*time.Minute {
+		t.Errorf("Expected Device.ConfigSyncInterval 2m, got %v", cfg.Device.ConfigSyncInterval)
 	}
 }
 
@@ -159,6 +173,8 @@ func unsetEnvVars() {
 		"XMDM_MQTT_DIAL_TIMEOUT",
 		"XMDM_MQTT_DYNSEC_KEEPALIVE",
 		"XMDM_MQTT_DYNSEC_DIAL_TIMEOUT",
+		"XMDM_DEVICE_COMMAND_POLL_INTERVAL",
+		"XMDM_DEVICE_CONFIG_SYNC_INTERVAL",
 		"XMDM_OBJECT_STORAGE_ENDPOINT",
 		"XMDM_OBJECT_STORAGE_REGION",
 		"XMDM_OBJECT_STORAGE_ACCESS_KEY",

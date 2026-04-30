@@ -6,7 +6,7 @@ The blueprint remains authoritative.
 
 ## Scope
 
-The launcher has one job: turn bootstrap data into a trusted device identity, keep the policy snapshot current, apply managed content, and keep the device available for command execution and recovery.
+The launcher has one job: turn bootstrap data into a trusted device identity, keep the signed config snapshot current, apply managed content, and keep the device available for command execution and recovery.
 
 This lifecycle starts when `MainActivity` launches and ends only when the process is stopped, reset, or the device is retired.
 
@@ -55,7 +55,9 @@ Relevant code:
   - server project
   - enrollment token
   - device identity hints
-  - bootstrap extras
+  - bootstrap extras used for enrollment-time values only
+
+Bootstrap extras remain enrollment-time inputs. Runtime transport and sync settings now come from the signed config snapshot after enrollment.
 
 The bootstrap payload is the handoff from device-owner provisioning into the app-owned lifecycle.
 
@@ -90,14 +92,16 @@ Relevant code:
 - The launcher keeps the last signed config snapshot locally.
 - The snapshot revision is the top-level `version` field in the signed payload.
 - The revision changes when any mutable bucket changes:
+  - `runtime`
   - `policy`
   - `apps`
   - `files`
   - `certificates`
 - The `device` bucket is identity-only and does not participate in sync revisioning.
+- The `runtime` bucket carries MQTT address and sync/poll intervals for the launcher.
 - The launcher periodically calls `GET /api/v1/devices/{deviceId}/config` with the device secret.
 - If the fetched snapshot revision matches the cached revision, the launcher does nothing.
-- If the revision changes, the launcher reapplies the relevant buckets.
+- If the revision changes, the launcher reapplies the relevant buckets and transport timing.
 
 The launcher verifies every fetched snapshot before it is cached or applied.
 
@@ -142,8 +146,8 @@ Relevant code:
 
 ### 7. Command Transport
 
-- After the launcher has bootstrap data and device identity, it starts command transport.
-- If bootstrap extras provide an MQTT address, it subscribes over MQTT.
+- After the launcher has bootstrap data, device identity, and a verified config snapshot, it starts command transport.
+- If the signed config snapshot provides an MQTT address, it subscribes over MQTT.
 - Otherwise it polls:
   - `GET /api/v1/devices/{deviceId}/commands`
 - Supported commands are executed locally and acknowledged back to the server:
@@ -171,7 +175,7 @@ These are the HTTP paths the launcher calls during the lifecycle.
 
 - `GET /api/v1/devices/{deviceId}/config`
   - Sent after enrollment and on a periodic sync loop.
-  - Returns the signed config snapshot containing policy, apps, files, and certificates.
+  - Returns the signed config snapshot containing runtime settings, policy, apps, files, and certificates.
 
 ### Managed File Download
 
@@ -188,7 +192,7 @@ These are the HTTP paths the launcher calls during the lifecycle.
 ### Command Polling And Ack
 
 - `GET /api/v1/devices/{deviceId}/commands`
-  - Used when MQTT is not configured in bootstrap extras.
+  - Used when the signed config snapshot does not provide an MQTT address.
 - `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`
   - Used to report execution results for supported commands.
 

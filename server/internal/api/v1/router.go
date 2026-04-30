@@ -49,6 +49,7 @@ type Dependencies struct {
 	Telemetry     telemetry.Repository
 	Audit         audit.Store
 	Push          push.Publisher
+	Runtime       enrollment.RuntimeSnapshot
 	PluginManager *plugins.Manager
 	TenantID      string
 }
@@ -57,7 +58,7 @@ type Dependencies struct {
 func NewMux(svc *auth.Service, deps Dependencies) *http.ServeMux {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
-	enrollmenthttp.Register(apiMux, svc, deps.Devices, deps.Enrollment, deps.Apps, deps.ManagedFiles, deps.Artifacts, deps.Certificates, deps.Policies, deps.TenantID)
+	enrollmenthttp.Register(apiMux, svc, deps.Devices, deps.Enrollment, deps.Apps, deps.ManagedFiles, deps.Artifacts, deps.Certificates, deps.Policies, deps.Runtime, deps.TenantID)
 	telemetryhttp.Register(apiMux, deps.Telemetry, deps.TenantID)
 	adminhttp.Register(apiMux, svc, deps.PluginManager, deps.Audit, deps.Commands, deps.TenantID)
 	commandhttp.Register(apiMux, deps.Devices, deps.Commands, deps.TenantID)

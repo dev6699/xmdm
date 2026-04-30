@@ -31,7 +31,7 @@ func TestRegisterQRPng(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, enrollment.RuntimeSnapshot{}, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -68,7 +68,7 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, enrollment.RuntimeSnapshot{}, "tenant-1")
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
@@ -165,7 +165,7 @@ func TestRegisterEnrollmentBindRouteReturnsIdentityOnly(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, store, nil, nil, nil, nil, policyStore, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, store, nil, nil, nil, nil, policyStore, enrollment.RuntimeSnapshot{}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
@@ -205,7 +205,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, enrollment.RuntimeSnapshot{}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/qr/json", bytes.NewBufferString(`{"serverUrl":"not-a-url","deviceAdminPackageDownloadLocation":"https://cdn.example/launcher.apk","deviceAdminPackageChecksum":"abc123"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -227,7 +227,7 @@ func TestRegisterQRValidationAndPermissions(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	res = httptest.NewRecorder()
 	mux = http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, nil, nil, nil, nil, enrollment.RuntimeSnapshot{}, "tenant-1")
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad request, got %d", res.Code)
@@ -268,7 +268,7 @@ func TestRegisterTokenLifecycleRoutes(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, store, nil, nil, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, store, nil, nil, nil, nil, nil, enrollment.RuntimeSnapshot{}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens", bytes.NewBufferString(`{"ttlSeconds":3600}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -409,7 +409,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 				Checksum:   "sha256-cert-abc",
 			},
 		},
-	}, nil, "tenant-1")
+	}, nil, enrollment.RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
@@ -441,6 +441,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	}
 	var typedConfig struct {
 		Version      string                           `json:"version"`
+		Runtime      enrollment.RuntimeSnapshot       `json:"runtime"`
 		Device       enrollment.DeviceSnapshot        `json:"device"`
 		Policy       enrollment.PolicySnapshot        `json:"policy"`
 		Apps         []enrollment.AppSnapshot         `json:"apps"`
@@ -453,6 +454,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	}
 	config := enrollment.ConfigSnapshot{
 		Version:      typedConfig.Version,
+		Runtime:      typedConfig.Runtime,
 		Device:       typedConfig.Device,
 		Policy:       typedConfig.Policy,
 		Apps:         typedConfig.Apps,
@@ -468,6 +470,9 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	}
 	if len(config.Certificates) != 1 {
 		t.Fatalf("expected one certificate in config, got %d", len(config.Certificates))
+	}
+	if config.Runtime.MqttAddress != "127.0.0.1:1883" || config.Runtime.CommandPollIntervalMs != 1000 || config.Runtime.ConfigSyncIntervalMs != 1000 {
+		t.Fatalf("unexpected runtime config: %#v", config.Runtime)
 	}
 	if len(config.Apps) != 1 {
 		t.Fatalf("expected one app in config, got %d", len(config.Apps))
@@ -588,7 +593,7 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
 	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER CUSTOMER")}
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, store, appStore, fileStore, artifactStore, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, store, appStore, fileStore, artifactStore, nil, nil, enrollment.RuntimeSnapshot{}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
@@ -746,7 +751,7 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 				Checksum:   "sha256-cert-abc",
 			},
 		},
-	}, policyStore, "tenant-1")
+	}, policyStore, enrollment.RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/config", nil)
 	req.Header.Set("X-XMDM-Device-Secret", "device-secret")
@@ -759,6 +764,7 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 
 	var typedConfig struct {
 		Version      string                           `json:"version"`
+		Runtime      enrollment.RuntimeSnapshot       `json:"runtime"`
 		Device       enrollment.DeviceSnapshot        `json:"device"`
 		Policy       enrollment.PolicySnapshot        `json:"policy"`
 		Apps         []enrollment.AppSnapshot         `json:"apps"`
@@ -771,6 +777,7 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 	}
 	config := enrollment.ConfigSnapshot{
 		Version:      typedConfig.Version,
+		Runtime:      typedConfig.Runtime,
 		Device:       typedConfig.Device,
 		Policy:       typedConfig.Policy,
 		Apps:         typedConfig.Apps,
@@ -783,6 +790,9 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 	}
 	if config.Device.DeviceID != "device-123" {
 		t.Fatalf("unexpected device id: %#v", config.Device.DeviceID)
+	}
+	if config.Runtime.MqttAddress != "127.0.0.1:1883" || config.Runtime.CommandPollIntervalMs != 1000 || config.Runtime.ConfigSyncIntervalMs != 1000 {
+		t.Fatalf("unexpected runtime config: %#v", config.Runtime)
 	}
 	if config.Policy.Name != "policy-one" || !config.Policy.KioskMode {
 		t.Fatalf("unexpected policy: %#v", config.Policy)

@@ -6,6 +6,7 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 	base := NewBootstrapConfigSnapshot(
 		"device-123",
 		"serial",
+		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		nil,
 		nil,
@@ -18,6 +19,7 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 	same := NewBootstrapConfigSnapshot(
 		"device-abc",
 		"serial",
+		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		nil,
 		nil,
@@ -30,6 +32,7 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 	changedPolicy := NewBootstrapConfigSnapshot(
 		"device-123",
 		"serial",
+		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{Name: "policy", Version: 2, KioskMode: true},
 		nil,
 		nil,
@@ -39,9 +42,23 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 		t.Fatalf("expected policy change to affect revision")
 	}
 
+	changedRuntime := NewBootstrapConfigSnapshot(
+		"device-123",
+		"serial",
+		RuntimeSnapshot{MqttAddress: "10.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
+		PolicySnapshot{KioskMode: false},
+		nil,
+		nil,
+		nil,
+	)
+	if changedRuntime.Version == base.Version {
+		t.Fatalf("expected runtime change to affect revision")
+	}
+
 	changedApps := NewBootstrapConfigSnapshot(
 		"device-123",
 		"serial",
+		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		[]AppSnapshot{{AppID: "app-1", PackageName: "com.example.app", VersionID: "v1", VersionName: "1", VersionCode: 1, ArtifactID: "artifact-1", Checksum: "abc", DownloadPath: "/artifact"}},
 		nil,
@@ -54,6 +71,7 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 	changedFiles := NewBootstrapConfigSnapshot(
 		"device-123",
 		"serial",
+		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		nil,
 		[]ManagedFileSnapshot{{FileID: "file-1", Name: "file", Path: "config.txt", DownloadPath: "/artifact", Checksum: "xyz"}},
@@ -66,6 +84,7 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 	changedCertificates := NewBootstrapConfigSnapshot(
 		"device-123",
 		"serial",
+		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		nil,
 		nil,

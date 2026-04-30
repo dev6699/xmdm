@@ -130,7 +130,7 @@ The admin E2E verifies:
 1. Starts the same real HTTP handler stack with a real Postgres test database.
 2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
 3. Creates the managed file and Chrome app fixtures used by the content install test.
-4. Starts the launcher with a short `CONFIG_SYNC_INTERVAL_MS=1000` bootstrap override.
+4. Starts the launcher; the test server injects a short config-sync interval through the signed config snapshot runtime bucket.
 5. Waits for the launcher to enroll, fetch the signed device config snapshot, receive the rendered managed file, and restore Chrome for the current user.
 6. Retires the managed file record and the managed Chrome app on the server.
 7. Waits for the launcher to fetch the updated device config snapshot after the retire operations.
@@ -171,7 +171,7 @@ The admin E2E verifies:
 3. Uploads the Chrome APK artifact and publishes it as a managed app.
 4. Creates a benign active policy, then later patches it to block `com.android.chrome`.
 5. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
-6. Starts the launcher with a short `CONFIG_SYNC_INTERVAL_MS=1000` bootstrap override on the physical device.
+6. Starts the launcher; the test server injects a short config-sync interval through the signed config snapshot runtime bucket on the physical device.
 7. Waits for the launcher to enroll, fetch policy, restore Chrome, and then fetch the updated device config snapshot after the policy patch.
 8. Verifies the package suspension state with `dumpsys package com.android.chrome`.
 
@@ -183,7 +183,7 @@ The command transport tests share the same device bootstrap and server setup, th
 
 `TestCommandMQTT` does the following:
 
-1. Boots the launcher with MQTT bootstrap extras.
+1. Boots the launcher; the test server supplies MQTT through the signed config snapshot runtime bucket.
 2. Waits for `POST /api/v1/enrollment`.
 3. Verifies the server marks the device enrolled through the API.
 4. Enqueues a `ping` command through `POST /api/v1/admin/commands`.
@@ -194,7 +194,7 @@ The command transport tests share the same device bootstrap and server setup, th
 
 `TestCommandMQTTSyncConfig` does the following:
 
-1. Boots the launcher with MQTT bootstrap extras.
+1. Boots the launcher; the test server supplies MQTT through the signed config snapshot runtime bucket.
 2. Waits for `POST /api/v1/enrollment`.
 3. Verifies the server marks the device enrolled through the API.
 4. Enqueues a `sync_config` command through `POST /api/v1/admin/commands`.
@@ -206,8 +206,8 @@ The command transport tests share the same device bootstrap and server setup, th
 
 `TestCommandPolling` does the following:
 
-1. Boots the launcher without MQTT bootstrap extras.
-2. Overrides the launcher command poll interval with `COMMAND_POLL_INTERVAL_MS=1000`.
+1. Boots the launcher without an MQTT runtime bucket in the signed config snapshot.
+2. Uses the short command-poll interval from the signed config snapshot runtime bucket.
 3. Waits for `POST /api/v1/enrollment`.
 4. Verifies the server marks the device enrolled through the API.
 5. Enqueues a `ping` command through `POST /api/v1/admin/commands`.
@@ -252,7 +252,7 @@ cd server
 XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestManagedAppsAndFilesRemoval -count=1 ./e2e
 ```
 
-`TestManagedAppsAndFilesRemoval` uses `CONFIG_SYNC_INTERVAL_MS=1000` so the launcher picks up the retire operations quickly.
+`TestManagedAppsAndFilesRemoval` uses the short config-sync interval from the signed config snapshot runtime bucket so the launcher picks up the retire operations quickly.
 
 For the adb-backed kiosk enforcement test:
 
@@ -278,7 +278,7 @@ cd server
 XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestPolicySync -count=1 ./e2e
 ```
 
-`TestPolicySync` uses `CONFIG_SYNC_INTERVAL_MS=1000` so the launcher refreshes the signed device config snapshot quickly after the admin policy patch.
+`TestPolicySync` uses the short config-sync interval from the signed config snapshot runtime bucket so the launcher refreshes the signed device config snapshot quickly after the admin policy patch.
 
 For the MQTT command transport test:
 
@@ -304,13 +304,13 @@ cd server
 XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestCommandMQTTSyncConfig -count=1 ./e2e
 ```
 
-`TestCommandPolling` uses a short bootstrap override for the launcher poll interval so it completes faster than the production 30-second default.
+`TestCommandPolling` uses the short poll interval from the signed config snapshot runtime bucket so it completes faster than the production 30-second default.
 
 ### MQTT Outage Recovery Flow
 
 `TestCommandBrokerOutageRecovery` does the following:
 
-1. Boots the launcher with MQTT enabled and a short polling interval.
+1. Boots the launcher with MQTT enabled and a short polling interval from the signed config snapshot runtime bucket.
 2. Verifies the device enrolls and receives an initial command over MQTT.
 3. Stops the local MQTT broker container.
 4. Verifies the next command falls back to HTTP polling and still gets acknowledged.

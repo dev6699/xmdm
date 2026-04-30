@@ -105,6 +105,7 @@ class ConfigSnapshotVerifier(
         private const val HMAC_ALGORITHM = "HmacSHA256"
         private val SNAPSHOT_FIELD_ORDER = listOf(
             "version",
+            "runtime",
             "device",
             "policy",
             "apps",

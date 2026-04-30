@@ -120,7 +120,7 @@ func newContentTestEnv(t *testing.T) contentTestEnv {
 }
 
 // newContentTestEnvWithExtras builds the same content fixture set with extra
-// bootstrap values and a custom config sync interval.
+// bootstrap values.
 func newContentTestEnvWithExtras(t *testing.T, extraBootstrapExtras map[string]string) contentTestEnv {
 	t.Helper()
 
@@ -131,7 +131,7 @@ func newContentTestEnvWithExtras(t *testing.T, extraBootstrapExtras map[string]s
 	chromeAppID := mustRegisterChromeApp(t, base.client, base.baseURL, artifactStore)
 
 	token := mustCreateEnrollmentToken(t, base.client, base.baseURL)
-	bootstrapURI := mustBuildBootstrapURI(t, base.client, base.baseURL, base.launcherChecksum, base.deviceID, token, "", extraBootstrapExtras)
+	bootstrapURI := mustBuildBootstrapURI(t, base.client, base.baseURL, base.launcherChecksum, base.deviceID, token, extraBootstrapExtras)
 	startLauncher(t, base.serial, bootstrapURI)
 
 	return contentTestEnv{
@@ -161,7 +161,7 @@ func newPackageRulesTestEnv(t *testing.T) packageRulesTestEnv {
 	}`)
 
 	token := mustCreateEnrollmentToken(t, base.client, base.baseURL)
-	bootstrapURI := mustBuildBootstrapURI(t, base.client, base.baseURL, base.launcherChecksum, base.deviceID, token, "", nil)
+	bootstrapURI := mustBuildBootstrapURI(t, base.client, base.baseURL, base.launcherChecksum, base.deviceID, token, nil)
 	startLauncher(t, base.serial, bootstrapURI)
 
 	return packageRulesTestEnv{baseTestEnv: base}
@@ -231,14 +231,14 @@ func (e *commandTestEnv) mustCreateEnrollmentToken(t *testing.T) string {
 	return mustCreateEnrollmentToken(t, e.client, e.baseURL)
 }
 
-func (e *commandTestEnv) mustBuildBootstrapURI(t *testing.T, token, mqttAddress string) string {
+func (e *commandTestEnv) mustBuildBootstrapURI(t *testing.T, token string) string {
 	t.Helper()
-	return mustBuildBootstrapURI(t, e.client, e.baseURL, e.launcherChecksum, e.deviceID, token, mqttAddress, nil)
+	return mustBuildBootstrapURI(t, e.client, e.baseURL, e.launcherChecksum, e.deviceID, token, nil)
 }
 
-func (e *commandTestEnv) mustBuildBootstrapURIWithExtras(t *testing.T, token, mqttAddress string, extraBootstrapExtras map[string]string) string {
+func (e *commandTestEnv) mustBuildBootstrapURIWithExtras(t *testing.T, token string, extraBootstrapExtras map[string]string) string {
 	t.Helper()
-	return mustBuildBootstrapURI(t, e.client, e.baseURL, e.launcherChecksum, e.deviceID, token, mqttAddress, extraBootstrapExtras)
+	return mustBuildBootstrapURI(t, e.client, e.baseURL, e.launcherChecksum, e.deviceID, token, extraBootstrapExtras)
 }
 
 func (e *commandTestEnv) mustIssuePingCommand(t *testing.T) string {
@@ -521,8 +521,7 @@ func mustCreateEnrollmentToken(t *testing.T, client *http.Client, baseURL string
 }
 
 // mustBuildBootstrapURI generates and encodes the QR bootstrap payload for the device.
-// Pass mqttAddress="" to use HTTP polling.
-func mustBuildBootstrapURI(t *testing.T, client *http.Client, baseURL, launcherChecksum, deviceID, token, mqttAddress string, extraBootstrapExtras map[string]string) string {
+func mustBuildBootstrapURI(t *testing.T, client *http.Client, baseURL, launcherChecksum, deviceID, token string, extraBootstrapExtras map[string]string) string {
 	t.Helper()
 	extras := map[string]string{"CUSTOMER": "Acme"}
 	for key, value := range extraBootstrapExtras {
@@ -531,17 +530,6 @@ func mustBuildBootstrapURI(t *testing.T, client *http.Client, baseURL, launcherC
 	extrasJSON, err := json.Marshal(extras)
 	if err != nil {
 		t.Fatalf("marshal bootstrap extras: %v", err)
-	}
-	if mqttAddress != "" {
-		var merged map[string]any
-		if err := json.Unmarshal(extrasJSON, &merged); err != nil {
-			t.Fatalf("unmarshal bootstrap extras: %v", err)
-		}
-		merged["MQTT_ADDRESS"] = mqttAddress
-		extrasJSON, err = json.Marshal(merged)
-		if err != nil {
-			t.Fatalf("marshal bootstrap extras with mqtt: %v", err)
-		}
 	}
 	qrJSON := postJSON(t, client, baseURL+"/api/v1/enrollment/qr/json", fmt.Sprintf(`{
 		"serverUrl":"%s",

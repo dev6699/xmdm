@@ -25,6 +25,7 @@ import (
 	commandspg "xmdm/server/internal/commands/postgres"
 	device "xmdm/server/internal/device"
 	devicepg "xmdm/server/internal/device/postgres"
+	"xmdm/server/internal/enrollment"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
 	filespg "xmdm/server/internal/files/postgres"
 	grouppg "xmdm/server/internal/group/postgres"
@@ -389,7 +390,17 @@ func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins
 		Audit:         auditStore,
 		PluginManager: pluginManager,
 		Artifacts:     artifactStore,
-		TenantID:      bootstrap.SeedTenantID,
+		Runtime: enrollment.RuntimeSnapshot{
+			MqttAddress: func() string {
+				if enableMQTT {
+					return "127.0.0.1:1883"
+				}
+				return ""
+			}(),
+			CommandPollIntervalMs: 1000,
+			ConfigSyncIntervalMs:  1000,
+		},
+		TenantID: bootstrap.SeedTenantID,
 	}
 	if enableMQTT {
 		if pub, err := push.NewMQTTPublisher(push.MQTTConfig{

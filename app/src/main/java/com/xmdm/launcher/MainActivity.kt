@@ -113,6 +113,12 @@ class MainActivity : AppCompatActivity() {
     private var cachedPrettySnapshotText: String = ""
     private var latestState: AgentState = AgentState.empty()
 
+    private data class RuntimeSnapshotConfig(
+        val mqttAddress: String?,
+        val commandPollIntervalMs: Long,
+        val configSyncIntervalMs: Long,
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.w(TAG, "onCreate instance=$instanceId")
@@ -373,15 +379,17 @@ class MainActivity : AppCompatActivity() {
             try {
                 val result = enrollmentCoordinator.enroll(bootstrap)
                 enrollmentStateMachine.onEnrollmentSucceeded()
+                maybeStartConfigSync(bootstrap, result.identity, null)
                 try {
-                    configSyncEngine.sync(bootstrap, result.identity)
+                    val cached = configSyncEngine.sync(bootstrap, result.identity)
+                    maybeStartConfigSync(bootstrap, result.identity, cached)
+                    maybeStartCommandTransport(bootstrap, result.identity, cached)
                 } catch (t: Throwable) {
                     if (t is kotlinx.coroutines.CancellationException) {
                         throw t
                     }
                     Log.w(TAG, "initial config sync failed", t)
                 }
-                maybeStartConfigSync(bootstrap, result.identity)
             } catch (t: Throwable) {
                 Log.w(TAG, "enrollment failed", t)
                 enrollmentStateMachine.onEnrollmentFailed(t.message ?: t.javaClass.simpleName)
@@ -390,16 +398,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun maybeStartCommandTransport(state: AgentState) {
-        val bootstrap = state.bootstrap
-        val identity = state.identity
+        maybeStartCommandTransport(state.bootstrap, state.identity, state.policyCache)
+    }
+
+    private fun maybeStartCommandTransport(
+        bootstrap: com.xmdm.launcher.state.BootstrapState?,
+        identity: com.xmdm.launcher.state.DeviceIdentityState?,
+        policyCache: com.xmdm.launcher.state.PolicyCacheState?,
+    ) {
         if (bootstrap == null || identity == null) {
             commandTransportJob?.cancel()
             commandTransportJob = null
             commandTransportTargetKey = null
             return
         }
-        val mqttAddress = resolveMqttAddress(bootstrap) ?: ""
-        val targetKey = "${bootstrap.serverUrl}|${identity.deviceId}|${identity.deviceSecret}|$mqttAddress"
+        if (policyCache == null) {
+            return
+        }
+        val runtime = runtimeConfig(policyCache.snapshotJson)
+        val mqttAddress = runtime.mqttAddress.orEmpty()
+        val targetKey = "${bootstrap.serverUrl}|${identity.deviceId}|${identity.deviceSecret}|${policyCache.version}|$mqttAddress|${runtime.commandPollIntervalMs}"
         if (commandTransportJob?.isActive == true && commandTransportTargetKey == targetKey) {
             return
         }
@@ -447,18 +465,19 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                delay(commandPollIntervalMs(bootstrap))
+                delay(runtime.commandPollIntervalMs)
             }
         }
     }
 
     private fun maybeStartConfigSync(state: AgentState) {
-        maybeStartConfigSync(state.bootstrap, state.identity)
+        maybeStartConfigSync(state.bootstrap, state.identity, state.policyCache)
     }
 
     private fun maybeStartConfigSync(
         bootstrap: com.xmdm.launcher.state.BootstrapState?,
         identity: com.xmdm.launcher.state.DeviceIdentityState?,
+        policyCache: com.xmdm.launcher.state.PolicyCacheState?,
     ) {
         bootstrap ?: run {
             configSyncJob?.cancel()
@@ -472,8 +491,9 @@ class MainActivity : AppCompatActivity() {
             configSyncTargetKey = null
             return
         }
-        val syncIntervalMs = configSyncIntervalMs(bootstrap)
-        val targetKey = "${bootstrap.serverUrl}|${bootstrap.secondaryServerUrl}|${identity.deviceId}|${identity.deviceSecret}|$syncIntervalMs"
+        val runtime = runtimeConfig(policyCache?.snapshotJson)
+        val syncIntervalMs = runtime.configSyncIntervalMs
+        val targetKey = "${bootstrap.serverUrl}|${bootstrap.secondaryServerUrl}|${identity.deviceId}|${identity.deviceSecret}|${policyCache?.version ?: -1}|$syncIntervalMs"
         if (configSyncJob?.isActive == true && configSyncTargetKey == targetKey) {
             return
         }
@@ -679,57 +699,36 @@ class MainActivity : AppCompatActivity() {
         return intent.getStringExtra(android.content.Intent.EXTRA_TEXT)
     }
 
-    private fun resolveMqttAddress(bootstrap: com.xmdm.launcher.state.BootstrapState): String? {
-        val extras = runCatching { JsonParser.parseString(bootstrap.bootstrapExtrasJson).asJsonObject }.getOrNull()
-            ?: return null
-        return stringValue(extras, MQTT_ADDRESS_KEYS)
-    }
-
-    private fun commandPollIntervalMs(bootstrap: com.xmdm.launcher.state.BootstrapState): Long {
-        val extras = runCatching { JsonParser.parseString(bootstrap.bootstrapExtrasJson).asJsonObject }.getOrNull()
-            ?: return DEFAULT_COMMAND_POLL_INTERVAL_MS
-        val raw = extras.get(COMMAND_POLL_INTERVAL_KEY) ?: return DEFAULT_COMMAND_POLL_INTERVAL_MS
-        return runCatching { raw.asLong }
-            .getOrNull()
-            ?.takeIf { it > 0 }
-            ?: DEFAULT_COMMAND_POLL_INTERVAL_MS
-    }
-
-    private fun configSyncIntervalMs(bootstrap: com.xmdm.launcher.state.BootstrapState): Long {
-        val extras = runCatching { JsonParser.parseString(bootstrap.bootstrapExtrasJson).asJsonObject }.getOrNull()
-            ?: return DEFAULT_CONFIG_SYNC_INTERVAL_MS
-        val raw = extras.get(CONFIG_SYNC_INTERVAL_KEY) ?: return DEFAULT_CONFIG_SYNC_INTERVAL_MS
-        return runCatching { raw.asLong }
-            .getOrNull()
-            ?.takeIf { it > 0 }
-            ?: DEFAULT_CONFIG_SYNC_INTERVAL_MS
-    }
-
-    private fun stringValue(source: com.google.gson.JsonObject, names: Set<String>): String? {
-        for (name in names) {
-            val value = source.get(name) ?: continue
-            if (value.isJsonNull) continue
-            val stringValue = value.asString.trim()
-            if (stringValue.isNotBlank()) {
-                return stringValue
-            }
+    private fun runtimeConfig(snapshotJson: String?): RuntimeSnapshotConfig {
+        if (snapshotJson == null) {
+            return RuntimeSnapshotConfig(
+                mqttAddress = null,
+                commandPollIntervalMs = DEFAULT_COMMAND_POLL_INTERVAL_MS,
+                configSyncIntervalMs = DEFAULT_CONFIG_SYNC_INTERVAL_MS,
+            )
         }
-        return null
+        val snapshot = runCatching { JsonParser.parseString(snapshotJson).asJsonObject }.getOrNull()
+        val runtime = snapshot?.getAsJsonObject("runtime")
+        return RuntimeSnapshotConfig(
+            mqttAddress = runtime?.get("mqttAddress")?.takeIf { !it.isJsonNull }?.asString?.trim()?.takeIf { it.isNotBlank() },
+            commandPollIntervalMs = runtime?.get("commandPollIntervalMs")?.takeIf { !it.isJsonNull }
+                ?.asLong
+                ?.takeIf { it > 0 }
+                ?: DEFAULT_COMMAND_POLL_INTERVAL_MS,
+            configSyncIntervalMs = runtime?.get("configSyncIntervalMs")?.takeIf { !it.isJsonNull }
+                ?.asLong
+                ?.takeIf { it > 0 }
+                ?: DEFAULT_CONFIG_SYNC_INTERVAL_MS,
+        )
     }
 
     companion object {
         const val EXTRA_BOOTSTRAP_JSON = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON"
         const val EXTRA_BOOTSTRAP_JSON_B64 = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64"
-const val BOOTSTRAP_DATA_PREFIX = "base64url:"
+        const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
         private const val DEFAULT_COMMAND_POLL_INTERVAL_MS = 30_000L
         private const val DEFAULT_CONFIG_SYNC_INTERVAL_MS = 15 * 60 * 1000L
-        private const val COMMAND_POLL_INTERVAL_KEY = "COMMAND_POLL_INTERVAL_MS"
-        private const val CONFIG_SYNC_INTERVAL_KEY = "CONFIG_SYNC_INTERVAL_MS"
-        private val MQTT_ADDRESS_KEYS = setOf(
-            "com.xmdm.MQTT_ADDRESS",
-            "MQTT_ADDRESS",
-        )
         private val SAVED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
 
         fun intent(

@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, policy PolicySnapshot, apps []AppSnapshot, files []ManagedFileSnapshot, certificates []CertificateSnapshot) ConfigSnapshot {
+func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, runtime RuntimeSnapshot, policy PolicySnapshot, apps []AppSnapshot, files []ManagedFileSnapshot, certificates []CertificateSnapshot) ConfigSnapshot {
 	if apps == nil {
 		apps = []AppSnapshot{}
 	}
@@ -23,6 +23,7 @@ func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, policy PolicySnaps
 		certificates = []CertificateSnapshot{}
 	}
 	snapshot := ConfigSnapshot{
+		Runtime: runtime,
 		Device: DeviceSnapshot{
 			DeviceID:    deviceID,
 			DeviceIDUse: deviceIDUse,
@@ -200,6 +201,7 @@ func canonicalObjectKeys(value map[string]any) []string {
 
 var snapshotFieldOrder = []string{
 	"version",
+	"runtime",
 	"device",
 	"policy",
 	"apps",
