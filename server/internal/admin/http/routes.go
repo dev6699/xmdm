@@ -3,7 +3,6 @@ package adminhttp
 import (
 	"bytes"
 	"encoding/json"
-	"html/template"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +18,7 @@ func Register(mux httpx.Router, svc *auth.Service, pluginManager *plugins.Manage
 	adminMux := httpx.WithPrefix(mux, "/admin")
 	registerSessionRoutes(adminMux, svc)
 	registerCommandRoutes(adminMux, svc, auditStore, commandStore, tenantID)
+	registerAuditRoutes(adminMux, svc, auditStore, tenantID)
 	if pluginManager != nil {
 		pluginManager.Register(adminMux)
 	}
@@ -30,29 +30,6 @@ type commandCreateRequest struct {
 	ExpiresAt string          `json:"expiresAt,omitempty"`
 	Target    commands.Target `json:"target"`
 }
-
-var commandFormTemplate = template.Must(template.New("admin-commands").Parse(`<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>XMDM Commands</title></head>
-<body>
-<h1>Create Command</h1>
-<form method="post">
-  <label>Type <input name="type" value="reboot"></label><br>
-  <label>Expires At <input name="expiresAt" placeholder="2026-04-25T10:30:00Z"></label><br>
-  <label>Target
-    <select name="targetType">
-      <option value="broadcast">Broadcast</option>
-      <option value="device">Device</option>
-      <option value="group">Group</option>
-    </select>
-  </label><br>
-  <label>Device ID <input name="targetDeviceId" placeholder="device-123"></label><br>
-  <label>Group ID <input name="targetGroupId" placeholder="group-uuid"></label><br>
-  <label>Payload JSON <textarea name="payload" rows="8" cols="60">{}</textarea></label><br>
-  <button type="submit">Send</button>
-</form>
-</body>
-</html>`))
 
 func registerSessionRoutes(mux httpx.Router, svc *auth.Service) {
 	loginPath := "/login"
@@ -129,17 +106,27 @@ func registerCommandRoutes(mux httpx.Router, svc *auth.Service, auditStore audit
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if !auth.HasPermission(session.Permissions, auth.PermissionAdminWrite) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
 		switch r.Method {
 		case http.MethodGet:
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			if err := commandFormTemplate.Execute(w, nil); err != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
+			if !auth.HasPermission(session.Permissions, auth.PermissionAdminRead) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
 			}
+			if commandStore == nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			items, err := commandStore.ListRecent(r.Context(), tenantID, 25)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, map[string]any{"commands": items})
 		case http.MethodPost:
+			if !auth.HasPermission(session.Permissions, auth.PermissionAdminWrite) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
 			if commandStore == nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
@@ -203,6 +190,34 @@ func registerCommandRoutes(mux httpx.Router, svc *auth.Service, auditStore audit
 	})
 }
 
+func registerAuditRoutes(mux httpx.Router, svc *auth.Service, auditStore audit.Store, tenantID string) {
+	mux.HandleFunc("/audit", func(w http.ResponseWriter, r *http.Request) {
+		session, ok := sessionFromRequest(r, svc)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if !auth.HasPermission(session.Permissions, auth.PermissionAdminRead) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if auditStore == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		items, err := auditStore.List(r.Context(), tenantID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"events": items})
+	})
+}
+
 func decodeCommandCreateRequest(r *http.Request) (commandCreateRequest, error) {
 	contentType := r.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "application/json") || contentType == "" {
@@ -262,4 +277,9 @@ func sessionFromRequest(r *http.Request, svc *auth.Service) (*auth.Session, bool
 		return nil, false
 	}
 	return session, true
+}
+
+func writeJSON(w http.ResponseWriter, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(value)
 }

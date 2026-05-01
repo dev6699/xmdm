@@ -5,7 +5,7 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-04-30
+Snapshot last updated: 2026-05-01
 
 ### M0 - Foundation
 
@@ -89,7 +89,7 @@ Note: `M4-01 App Management` is complete with app CRUD plus immutable version up
 | M5-06 Command E2E | ☑ |
 | M5-07 Broker Outage Recovery | ☑ |
 
-Note: `M5-01 MQTT Transport` is complete with the server constructing an internal MQTT publisher in [server/cmd/server/main.go](/home/puong/xmdm/server/cmd/server/main.go) by default, using `127.0.0.1:1883` unless `XMDM_MQTT_ADDRESS` overrides it, publishing command envelopes to `devices/{deviceId}/commands` through [server/internal/push](/home/puong/xmdm/server/internal/push), and automatically provisioning device MQTT credentials through the enrollment and retire flows with Mosquitto dynamic security in [infra/mosquitto/mqtt-security.md](/home/puong/xmdm/infra/mosquitto/mqtt-security.md). `M5-02 Polling Fallback` is complete as of 2026-04-25 with `GET /api/v1/devices/{deviceId}/commands` returning pending commands from PostgreSQL when MQTT is unavailable. `M5-03 Fan-Out Queue` is complete as of 2026-04-25 with server-side command enqueueing that expands device, group, and broadcast targets into per-device rows, publishes each command to MQTT immediately after enqueue, and leaves the row available for polling fallback if publish fails. `M5-04 Device Acks` is complete as of 2026-04-25 with the launcher subscribing to MQTT when the signed config snapshot provides a broker address, otherwise polling pending commands, executing supported ones, and device-authenticated command acknowledgement updating terminal command state through `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`. The launcher currently supports a lightweight `ping` command plus `reboot`. `M5-05 Admin Targeting` is complete as of 2026-04-25 with an admin command console form at `GET /api/v1/admin/commands` plus the JSON/form `POST /api/v1/admin/commands` contract for device, group, and broadcast targeting. `M5-06 Command E2E` is complete as of 2026-04-25 with adb-backed physical-device coverage for `ping` over both MQTT and polling plus expiry handling that transitions commands to `expired` when they outlive `expiresAt`. `M5-07 Broker Outage Recovery` is complete as of 2026-04-28 with physical-device coverage that proves the launcher falls back to polling during MQTT outage and resumes MQTT transport after broker recovery.
+Note: `M5-01 MQTT Transport` is complete with the server constructing an internal MQTT publisher in [server/cmd/server/main.go](/home/puong/xmdm/server/cmd/server/main.go) by default, using `127.0.0.1:1883` unless `XMDM_MQTT_ADDRESS` overrides it, publishing command envelopes to `devices/{deviceId}/commands` through [server/internal/push](/home/puong/xmdm/server/internal/push), and automatically provisioning device MQTT credentials through the enrollment and retire flows with Mosquitto dynamic security in [infra/mosquitto/mqtt-security.md](/home/puong/xmdm/infra/mosquitto/mqtt-security.md). `M5-02 Polling Fallback` is complete as of 2026-04-25 with `GET /api/v1/devices/{deviceId}/commands` returning pending commands from PostgreSQL when MQTT is unavailable. `M5-03 Fan-Out Queue` is complete as of 2026-04-25 with server-side command enqueueing that expands device, group, and broadcast targets into per-device rows, publishes each command to MQTT immediately after enqueue, and leaves the row available for polling fallback if publish fails. `M5-04 Device Acks` is complete as of 2026-04-25 with the launcher subscribing to MQTT when the signed config snapshot provides a broker address, otherwise polling pending commands, executing supported ones, and device-authenticated command acknowledgement updating terminal command state through `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`. The launcher currently supports a lightweight `ping` command plus `reboot`. `M5-05 Admin Targeting` is complete as of 2026-04-25 with the `POST /api/v1/admin/commands` contract for device, group, and broadcast targeting. `M5-06 Command E2E` is complete as of 2026-04-25 with adb-backed physical-device coverage for `ping` over both MQTT and polling plus expiry handling that transitions commands to `expired` when they outlive `expiresAt`. `M5-07 Broker Outage Recovery` is complete as of 2026-04-28 with physical-device coverage that proves the launcher falls back to polling during MQTT outage and resumes MQTT transport after broker recovery.
 
 ### M6 - Enterprise Controls
 
@@ -100,10 +100,12 @@ Note: `M5-01 MQTT Transport` is complete with the server constructing an interna
 | M6-03 Foreground Enforcement | Not Planned |
 | M6-04 Device Logs | ☑ |
 | M6-05 Device Info | ☑ |
-| M6-06 Messaging And Audit | ☐ |
+| M6-06 Messaging And Audit | ☑ |
 | M6-07 Image Upload | ☐ |
 | M6-08 Enterprise E2E | ☐ |
 | M6-09 Policy Gaps | ☐ |
+
+Note: `M6-06 Messaging And Audit` is complete as of 2026-05-01 with API endpoints for command listing, command creation, and audit event listing; a separate admin UI is still future work.
 
 ### M7 - Hardening
 

@@ -124,6 +124,7 @@ The admin E2E verifies:
 - CRUD for users, roles, apps, groups, policies, and devices
 - app version upload and publish
 - multipart file upload and artifact metadata persistence
+- command creation and command audit capture
 - audit event capture for admin mutations
 - logout and session invalidation
 

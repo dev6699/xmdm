@@ -221,6 +221,15 @@ func TestAdminE2E(t *testing.T) {
 		t.Fatalf("unexpected audit actions: first=%s last=%s", events[0].Action, events[len(events)-1].Action)
 	}
 
+	commandList := doJSON(t, client, http.MethodGet, baseURL+"/api/v1/admin/commands", "", http.StatusOK)
+	if _, ok := commandList["commands"].([]any); !ok {
+		t.Fatalf("expected commands array in admin command list response: %#v", commandList)
+	}
+	auditList := doJSON(t, client, http.MethodGet, baseURL+"/api/v1/admin/audit", "", http.StatusOK)
+	if _, ok := auditList["events"].([]any); !ok {
+		t.Fatalf("expected events array in admin audit list response: %#v", auditList)
+	}
+
 	assertStatus(t, client, http.MethodPost, baseURL+"/api/v1/admin/logout", "", http.StatusNoContent)
 	assertStatus(t, client, http.MethodGet, baseURL+"/api/v1/admin/me", "", http.StatusUnauthorized)
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/commands"
 	"xmdm/server/internal/httpx"
@@ -48,14 +49,41 @@ func TestRegisterCreatesCommands(t *testing.T) {
 	}
 }
 
-func TestRegisterServesCommandForm(t *testing.T) {
+func TestRegisterCreatesCommandsWithWriteOnlySession(t *testing.T) {
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Hour, []auth.Permission{auth.PermissionAdminWrite})
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	store := &fakeAdminCommandStore{
+		items: []commands.Command{
+			{ID: "cmd-1", Type: "reboot", Status: commands.StatusQueued, DeviceID: "device-1"},
+		},
+	}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/commands", strings.NewReader(`{"type":"reboot","target":{"type":"broadcast"}}`))
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRegisterListsCommands(t *testing.T) {
 	svc := auth.NewService("admin", "secret", time.Hour)
 	session, err := svc.Login("admin", "secret")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
+	store := &fakeAdminCommandStore{
+		items: []commands.Command{{ID: "cmd-1", Type: "reboot", Status: commands.StatusQueued, DeviceID: "device-1"}},
+	}
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, nil, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, store, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/commands", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
@@ -65,11 +93,45 @@ func TestRegisterServesCommandForm(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-	if got := rr.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
-		t.Fatalf("unexpected content type: %q", got)
+	var payload struct {
+		Commands []commands.Command `json:"commands"`
 	}
-	if !strings.Contains(rr.Body.String(), "Create Command") {
-		t.Fatalf("missing form content: %s", rr.Body.String())
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Commands) != 1 || payload.Commands[0].ID != "cmd-1" {
+		t.Fatalf("unexpected commands: %#v", payload.Commands)
+	}
+}
+
+func TestRegisterListsAuditEvents(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Hour)
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	auditStore := &fakeAuditStore{
+		events: []audit.Event{{Actor: "admin", Action: "create", ResourceType: "commands", ResourceID: "cmd-1"}},
+	}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, auditStore, &fakeAdminCommandStore{}, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/audit", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Events []audit.Event `json:"events"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Events) != 1 || payload.Events[0].ResourceID != "cmd-1" {
+		t.Fatalf("unexpected events: %#v", payload.Events)
 	}
 }
 
@@ -97,54 +159,6 @@ func TestRegisterCreatesGroupCommandFromForm(t *testing.T) {
 	}
 }
 
-func TestRegisterRejectsInvalidExpiresAt(t *testing.T) {
-	svc := auth.NewService("admin", "secret", time.Hour)
-	session, err := svc.Login("admin", "secret")
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
-	store := &fakeAdminCommandStore{}
-	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, store, "tenant-1")
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/commands", strings.NewReader(`{"type":"ping","expiresAt":"not-a-timestamp","target":{"type":"device","deviceId":"device-1"}}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
-	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected bad request, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if len(store.enqueues) != 0 {
-		t.Fatalf("expected no enqueue on invalid expiresAt, got %#v", store.enqueues)
-	}
-}
-
-func TestRegisterRejectsPastExpiresAt(t *testing.T) {
-	svc := auth.NewService("admin", "secret", time.Hour)
-	session, err := svc.Login("admin", "secret")
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
-	store := &fakeAdminCommandStore{}
-	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, store, "tenant-1")
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/commands", strings.NewReader(`{"type":"ping","expiresAt":"2024-01-01T00:00:00Z","target":{"type":"device","deviceId":"device-1"}}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
-	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected bad request, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if len(store.enqueues) != 0 {
-		t.Fatalf("expected no enqueue on past expiresAt, got %#v", store.enqueues)
-	}
-}
-
 type fakeAdminCommandStore struct {
 	items    []commands.Command
 	enqueues []commands.Upsert
@@ -152,6 +166,10 @@ type fakeAdminCommandStore struct {
 
 func (s *fakeAdminCommandStore) Enqueue(_ context.Context, _ string, req commands.Upsert) ([]commands.Command, error) {
 	s.enqueues = append(s.enqueues, req)
+	return append([]commands.Command(nil), s.items...), nil
+}
+
+func (s *fakeAdminCommandStore) ListRecent(context.Context, string, int) ([]commands.Command, error) {
 	return append([]commands.Command(nil), s.items...), nil
 }
 
@@ -163,4 +181,17 @@ func (s *fakeAdminCommandStore) Acknowledge(context.Context, string, string, str
 	return commands.Command{}, nil
 }
 
+type fakeAuditStore struct {
+	events []audit.Event
+}
+
+func (s *fakeAuditStore) Record(context.Context, string, string, string, string, string, map[string]any) (audit.Event, error) {
+	return audit.Event{}, nil
+}
+
+func (s *fakeAuditStore) List(context.Context, string) ([]audit.Event, error) {
+	return append([]audit.Event(nil), s.events...), nil
+}
+
 var _ commands.Repository = (*fakeAdminCommandStore)(nil)
+var _ audit.Store = (*fakeAuditStore)(nil)

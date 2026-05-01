@@ -86,6 +86,43 @@ func (s *Store) Enqueue(ctx context.Context, tenantID string, req commands.Upser
 	return commandsOut, nil
 }
 
+func (s *Store) ListRecent(ctx context.Context, tenantID string, limit int) ([]commands.Command, error) {
+	if tenantID == "" {
+		return nil, httpx.ErrInvalidInput
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at
+		 FROM commands
+		 WHERE tenant_id = $1
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT $2`,
+		tenantID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]commands.Command, 0)
+	for rows.Next() {
+		rec, err := scanCommand(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (s *Store) ListPending(ctx context.Context, tenantID, deviceID string) ([]commands.Command, error) {
 	if tenantID == "" || deviceID == "" {
 		return nil, httpx.ErrInvalidInput

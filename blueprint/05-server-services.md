@@ -130,6 +130,9 @@ The server must be able to start, serve admin requests, and accept device sync e
 6. Device acks receipt and execution through `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`.
 7. Server marks the delivery complete.
 
+- The messaging and audit surface is API-first for now; a separate admin UI can be layered on later.
+- The admin API exposes JSON list endpoints at `GET /api/v1/admin/commands` and `GET /api/v1/admin/audit`.
+
 - MQTT command topics use `devices/{deviceId}/commands` for device-targeted delivery.
 - The broker must enforce device-topic isolation with per-client authentication and ACLs, not topic names alone.
 - Device MQTT credentials are provisioned by the server at enrollment time and retired when the device is retired.

@@ -345,8 +345,6 @@ Owner roles used below:
 - Task: verify command delivery, ack, and expiry handling.
 - Done when: commands expire, ack, and retry as specified.
 
-Completed as of 2026-04-25 with adb-backed physical-device coverage for `ping` over MQTT and polling plus expiry handling that transitions commands to `expired` when they outlive `expiresAt`.
-
 ### M5-07 Broker Outage Recovery
 
 - Owner: `QA`
@@ -396,8 +394,8 @@ Completed as of 2026-04-25 with adb-backed physical-device coverage for `ping` o
 
 - Owner: `BE`
 - Depends on: M1-06, M5-03
-- Task: implement messaging and audit console workflows.
-- Done when: admins can view, send, and audit messages in the console.
+- Task: implement messaging and audit API workflows for the admin console.
+- Done when: admins can view recent commands, send commands, and query audit events through the API.
 
 ### M6-07 Image Upload
 

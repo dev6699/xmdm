@@ -100,6 +100,10 @@ func (s *fakeCommandStore) Enqueue(context.Context, string, commands.Upsert) ([]
 	return nil, nil
 }
 
+func (s *fakeCommandStore) ListRecent(context.Context, string, int) ([]commands.Command, error) {
+	return append([]commands.Command(nil), s.items...), nil
+}
+
 func (s *fakeCommandStore) ListPending(context.Context, string, string) ([]commands.Command, error) {
 	return append([]commands.Command(nil), s.items...), nil
 }

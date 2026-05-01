@@ -92,8 +92,9 @@ For topic isolation, see [../infra/mosquitto/mqtt-security.md](../infra/mosquitt
 The server now exposes `GET /api/v1/devices/{deviceId}/commands` as the HTTP fallback path for pending commands.
 The endpoint authenticates with `X-XMDM-Device-Secret`, reads queued or sent command rows from PostgreSQL, and returns them in a `commands` array.
 The admin surface exposes `POST /api/v1/admin/commands` for queued command creation, and the request target can expand to a device, a group, or a broadcast set.
+The admin API also exposes JSON list endpoints at `GET /api/v1/admin/commands` and `GET /api/v1/admin/audit` for recent command rows and audit events.
 Device acknowledgements use `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack` with the same device secret header and update the command row to `acked` or `failed`.
-The admin console also serves a simple browser form at `GET /api/v1/admin/commands` for the same targeting modes.
+The messaging and audit surface is API-first for now; a separate admin UI can be layered on top later.
 
 ### Migration Tooling
 
@@ -108,7 +109,7 @@ Admin create, update, and retire operations append immutable audit events in the
 
 ### Admin E2E
 
-The root E2E suite in [e2e/README.md](e2e/README.md) runs the login, CRUD, logout, enrollment, telemetry, and audit flows through the HTTP handler stack without a socket listener.
+The root E2E suite in [e2e/README.md](e2e/README.md) runs the login, CRUD, logout, enrollment, telemetry, command, and audit flows through the HTTP handler stack without a socket listener.
 
 It exercises the same entrypoints that the roadmap uses for the clean-install verification checkpoint.
 
