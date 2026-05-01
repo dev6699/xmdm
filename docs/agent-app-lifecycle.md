@@ -383,3 +383,19 @@ The launcher applies only the buckets it knows how to enforce today. Unknown or 
 | `device` | Not applicable | Not applicable | Identity-only; does not participate in config revision changes |
 
 Revision changes are coarse-grained: when the snapshot revision changes, the launcher re-evaluates all supported buckets, then each coordinator decides whether it needs to add, update, or remove anything inside its own bucket.
+
+## Policy Gaps
+
+The enterprise surface is split between hard enforcement, reporting, and future work:
+
+| Feature | Status | What It Means |
+| --- | --- | --- |
+| Kiosk Enforcement | Fully enforced | The launcher enters kiosk mode when policy requires it. |
+| Package Rules | Fully enforced | The launcher applies allow/block lists and package suspension from policy. |
+| Device Logs | Reporting only | Devices upload structured logs; the server stores and queries them. |
+| Device Info | Reporting only | Devices upload inventory/runtime snapshots; the server exports them. |
+| Messaging And Audit | API/admin workflow | Admins can create and list commands and audit events; a separate UI can be added later. |
+| Image Upload | Not planned | No implementation is planned for now. |
+| Foreground Enforcement | Not planned | The roadmap item exists only as a documented non-goal. |
+
+There is no remaining ambiguity in the planned enterprise controls: hard enforcement is kiosk and package policy, reporting is logs and device info, and the messaging/audit surface is an API-first admin workflow.
