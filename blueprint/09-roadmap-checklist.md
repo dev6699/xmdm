@@ -407,9 +407,9 @@ Owner roles used below:
 ### M6-08 Enterprise E2E
 
 - Owner: `QA`
-- Depends on: M6-01 through M6-07
-- Task: verify each enterprise feature with at least one integration test.
-- Done when: each enterprise control has one proven device-side path.
+- Depends on: M6-01, M6-02, M6-04, M6-05, M6-06
+- Task: verify each planned enterprise feature with at least one integration test.
+- Done when: each planned enterprise control has one proven device-side path.
 
 ### M6-09 Policy Gaps
 

@@ -102,10 +102,11 @@ Note: `M5-01 MQTT Transport` is complete with the server constructing an interna
 | M6-05 Device Info | ☑ |
 | M6-06 Messaging And Audit | ☑ |
 | M6-07 Image Upload | Not Planned |
-| M6-08 Enterprise E2E | ☐ |
+| M6-08 Enterprise E2E | ☑ |
 | M6-09 Policy Gaps | ☐ |
 
 Note: `M6-06 Messaging And Audit` is complete as of 2026-05-01 with API endpoints for command listing, command creation, and audit event listing; a separate admin UI is still future work.
+Note: `M6-08 Enterprise E2E` is complete as of 2026-05-01 with device-backed coverage for kiosk enforcement, package rules, managed files and apps, device logs, device info, and API-backed messaging/audit flows; `M6-07 Image Upload` remains not planned.
 
 ### M7 - Hardening
 
