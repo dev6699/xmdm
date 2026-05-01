@@ -630,6 +630,28 @@ func assertDeviceInfoUploadPayload(t *testing.T, requests *requestRecorder, devi
 	}
 }
 
+func assertCertificateInstallReportedViaAPI(t *testing.T, requests *requestRecorder, deviceID string) {
+	t.Helper()
+	requests.waitFor(t, time.Minute, "device info upload after certificate install", func(r requestRecord) bool {
+		if r.method != http.MethodPost || r.path != "/api/v1/devices/"+deviceID+"/info" || strings.TrimSpace(r.body) == "" {
+			return false
+		}
+		var upload struct {
+			ObservedAt string         `json:"observedAt"`
+			Payload    map[string]any `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(r.body), &upload); err != nil || upload.Payload == nil {
+			return false
+		}
+		count, ok := upload.Payload["installedCaCertsCount"].(float64)
+		if !ok || count <= 0 {
+			return false
+		}
+		_, hasVersion := upload.Payload["certificatesVersion"]
+		return hasVersion
+	})
+}
+
 func assertDeviceInfoRecordedViaAPI(t *testing.T, client *http.Client, baseURL, deviceID string) {
 	t.Helper()
 	waitForCondition(t, time.Minute, "device info API record", func() string {
@@ -867,6 +889,13 @@ type managedFileFixture struct {
 	content       []byte
 }
 
+// certificateFixture holds the uploaded certificate source artifact's server-side identifiers.
+type certificateFixture struct {
+	sourceID      string
+	certificateID string
+	content       []byte
+}
+
 // mustUploadManagedFile uploads the managed file source artifact, registers it
 // as a managed file with variable substitution enabled, and schedules cleanup.
 func mustUploadManagedFile(t *testing.T, client *http.Client, baseURL string, artifactStore interface {
@@ -909,6 +938,37 @@ func mustUploadManagedFile(t *testing.T, client *http.Client, baseURL string, ar
 	}
 
 	return managedFileFixture{sourceID: sourceID, managedFileID: managedFileID, content: content}
+}
+
+// mustUploadCertificate uploads a certificate source artifact and registers it as an active certificate.
+func mustUploadCertificate(t *testing.T, client *http.Client, baseURL string, artifactStore interface {
+	Delete(context.Context, string) error
+}) certificateFixture {
+	t.Helper()
+
+	content := testCertificatePEM()
+	cs := checksum.SHA256Base64URL(content)
+	storageKey := "artifacts/content-e2e/" + uuid.NewString() + "/wifi-root-ca.pem"
+
+	fileResp := postMultipartFile(t, client, baseURL+"/api/v1/certificates", map[string]string{
+		"name":       "wifi-root-ca",
+		"storageKey": storageKey,
+		"checksum":   cs,
+		"sizeBytes":  fmt.Sprintf("%d", len(content)),
+		"mimeType":   "application/x-pem-file",
+	}, "file", "wifi-root-ca.pem", content)
+
+	certificateID, _ := fileResp["id"].(string)
+	if certificateID == "" {
+		t.Fatalf("certificate create returned empty id: %#v", fileResp)
+	}
+	t.Cleanup(func() { _ = artifactStore.Delete(context.Background(), storageKey) })
+
+	return certificateFixture{
+		sourceID:      certificateID,
+		certificateID: certificateID,
+		content:       content,
+	}
 }
 
 // mustRegisterChromeApp uploads the Chrome APK artifact and publishes it as a managed app version.
@@ -957,4 +1017,26 @@ func mustRegisterChromeApp(t *testing.T, client *http.Client, baseURL string, ar
 		t.Fatalf("chrome version create returned unexpected status: %v", versionResp["status"])
 	}
 	return appID
+}
+
+func testCertificatePEM() []byte {
+	return []byte(`-----BEGIN CERTIFICATE-----
+MIIDDzCCAfegAwIBAgIUFDeUC/bAkdG0MBP+Ux9kGcOSetwwDQYJKoZIhvcNAQEL
+BQAwFzEVMBMGA1UEAwwMWE1ETSBUZXN0IENBMB4XDTI2MDUwMTA2MzYyNloXDTI3
+MDUwMTA2MzYyNlowFzEVMBMGA1UEAwwMWE1ETSBUZXN0IENBMIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmzdNICgl2bmng2Ut3wWsYcjGZi2VVfMXq1Ca
+M09+q5ZicuA2JfB9iHyAORrQ6lNItD6BlHONYNIOD2LyZlJhI/4/FuXAII4UXYRj
+cuzZ1U/JBG6yWMGPYxtHPjny6Oy+UCroEBlXNGC/8LR3xzRr1xzluwnOL4j/BonV
+h7O1Hb0iUYreMOGkzb/oizt+x0dxoGafq9Dkujz76z+HrrJXN4ybkYQgDZ3wK9TR
+nmDqP2Dbz6Dej9mxx25cPqVFyaqArJKWK519Iow17et0SK+ELl7BLowEirI5VtU+
+ZIEY0yDV9aJJT9+61xRZYs7D353CanF1ajiAjnWngxYAsw3NoQIDAQABo1MwUTAd
+BgNVHQ4EFgQU4mGy0/yFDzK3zw/jCTtxxfNaTMIwHwYDVR0jBBgwFoAU4mGy0/yF
+DzK3zw/jCTtxxfNaTMIwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
+AQEAZatbIgJ9JNXRGvTPO1iOwNWxJQEWPGZb9pa0XQDN9VIGzMpLUjHBQCoMjWI8
+qHmyH8813RSCwCXEBiKsUQFIexPYjSrGnNYaRnj50J7gjuczshR92npd8+3SwZWZ
+mhI0Lwa6a9/QXqMrJ+FjuGTaOa7xHXPuLTCma6GdjfKLoIM/CtTZMZ9ZhpiZ4mdh
+yDmhSLPQhKhlnLOldRuJb56ETMnPQhNeHi590pUa0E0RRvrxPdUDB0Nw1pq38Mqg
+79ZGzWpdcg0DunOW0bYR3ihja1nMDjIpqaRb9BxV1e/PIwyb/pH2zhlke5G2npge
+xonutDHiHIj+oco8QNeISHkh3w==
+-----END CERTIFICATE-----`)
 }

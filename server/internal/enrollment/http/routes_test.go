@@ -471,6 +471,9 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if len(config.Certificates) != 1 {
 		t.Fatalf("expected one certificate in config, got %d", len(config.Certificates))
 	}
+	if config.Certificates[0].DownloadPath != "/api/v1/devices/device-123/certificates/cert-1/artifact" {
+		t.Fatalf("unexpected certificate download path: %#v", config.Certificates[0].DownloadPath)
+	}
 	if config.Runtime.MqttAddress != "127.0.0.1:1883" || config.Runtime.CommandPollIntervalMs != 1000 || config.Runtime.ConfigSyncIntervalMs != 1000 {
 		t.Fatalf("unexpected runtime config: %#v", config.Runtime)
 	}
@@ -800,6 +803,9 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 	if len(config.Apps) != 1 || len(config.Files) != 1 || len(config.Certificates) != 1 {
 		t.Fatalf("unexpected snapshot contents: apps=%d files=%d certs=%d", len(config.Apps), len(config.Files), len(config.Certificates))
 	}
+	if config.Certificates[0].DownloadPath != "/api/v1/devices/device-123/certificates/cert-1/artifact" {
+		t.Fatalf("unexpected certificate download path: %#v", config.Certificates[0].DownloadPath)
+	}
 }
 
 type fakeEnrollmentStore struct {
@@ -888,6 +894,13 @@ func (s *fakeCertificateStore) ListCertificates(context.Context, string) ([]cert
 
 func (s *fakeCertificateStore) ListActiveCertificates(context.Context, string) ([]certificates.Certificate, error) {
 	return append([]certificates.Certificate(nil), s.active...), nil
+}
+
+func (s *fakeCertificateStore) GetCertificate(context.Context, string, string) (certificates.Certificate, error) {
+	if len(s.active) == 0 {
+		return certificates.Certificate{}, httpx.ErrNotFound
+	}
+	return s.active[0], nil
 }
 
 func (s *fakeCertificateStore) CreateCertificate(context.Context, string, certificates.CertificateUpsert) (certificates.Certificate, error) {

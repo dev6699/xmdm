@@ -313,7 +313,7 @@ func buildSignedConfigSnapshot(ctx context.Context, policyStore policy.Repositor
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
 	}
-	certs, err := listActiveCertificates(ctx, certStore, tenantID)
+	certs, err := listActiveCertificates(ctx, certStore, tenantID, deviceID)
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
 	}
@@ -640,7 +640,7 @@ func writeJSON(w http.ResponseWriter, value any) {
 	_, _ = w.Write(bytes.TrimSpace(buf.Bytes()))
 }
 
-func listActiveCertificates(ctx context.Context, store certificates.Repository, tenantID string) ([]enrollment.CertificateSnapshot, error) {
+func listActiveCertificates(ctx context.Context, store certificates.Repository, tenantID, deviceID string) ([]enrollment.CertificateSnapshot, error) {
 	if store == nil {
 		return []enrollment.CertificateSnapshot{}, nil
 	}
@@ -651,13 +651,18 @@ func listActiveCertificates(ctx context.Context, store certificates.Repository, 
 	out := make([]enrollment.CertificateSnapshot, 0, len(items))
 	for _, item := range items {
 		out = append(out, enrollment.CertificateSnapshot{
-			ID:         item.ID,
-			Name:       item.Name,
-			ArtifactID: item.ArtifactID,
-			Checksum:   item.Checksum,
+			ID:           item.ID,
+			Name:         item.Name,
+			ArtifactID:   item.ArtifactID,
+			Checksum:     item.Checksum,
+			DownloadPath: certificateDownloadPath(deviceID, item.ID),
 		})
 	}
 	return out, nil
+}
+
+func certificateDownloadPath(deviceID, certificateID string) string {
+	return "/api/v1/devices/" + deviceID + "/certificates/" + certificateID + "/artifact"
 }
 
 func listPublishedApps(ctx context.Context, store apps.Repository, deviceID, tenantID string) ([]enrollment.AppSnapshot, error) {

@@ -8,6 +8,7 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestEnrollmentE2E` covers server-simulated enrollment and first-sync behavior.
 - `TestManagedAppsAndFiles` covers adb-backed managed app and managed file delivery on a physical device.
 - `TestManagedAppsAndFilesRemoval` covers adb-backed managed app and managed file removal on a physical device.
+- `TestCertificatesApplied` covers adb-backed certificate download and install on a physical device.
 - `TestDeviceLogsUpload` covers adb-backed device log upload and recorded-log API verification on a physical device.
 - `TestDeviceInfoReporting` covers adb-backed device-info reporting and admin export on a physical device.
 - `TestKioskMode` covers adb-backed kiosk enforcement on a physical device.
@@ -60,6 +61,7 @@ Use this bucket for:
 - package suspension enforcement
 - managed file rendering
 - managed app install
+- certificate download and install
 - device log upload and API readback
 - MQTT command transport
 - MQTT command-triggered config sync
@@ -69,6 +71,7 @@ Current coverage:
 
 - `TestManagedAppsAndFiles`
 - `TestManagedAppsAndFilesRemoval`
+- `TestCertificatesApplied`
 - `TestDeviceLogsUpload`
 - `TestDeviceInfoReporting`
 - `TestKioskMode`
@@ -166,6 +169,19 @@ The admin E2E verifies:
 6. Retires the managed file record and the managed Chrome app on the server.
 7. Waits for the launcher to fetch the updated device config snapshot after the retire operations.
 8. Verifies the managed file has been removed from the launcher sandbox and Chrome has been uninstalled from the device.
+
+## Certificate Flow
+
+`TestCertificatesApplied` is the physical-device certificate install test. It does all of the following in one run:
+
+1. Starts a real HTTP handler stack with a real Postgres test database.
+2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
+3. Uploads a certificate artifact and registers it as an active certificate.
+4. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
+5. Starts the launcher with the bootstrap payload on the physical device.
+6. Waits for the launcher to enroll and fetch the signed device config snapshot.
+7. Waits for the launcher to download the certificate artifact from `/api/v1/devices/{deviceId}/certificates/{certificateId}/artifact`.
+8. Verifies the device-info payload reports certificate state after install.
 
 ## Kiosk Flow
 

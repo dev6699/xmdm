@@ -73,7 +73,7 @@ func NewMux(svc *auth.Service, deps Dependencies) *http.ServeMux {
 	apphttp.Register(apiMux, svc, deps.Apps, deps.Devices, deps.Artifacts, deps.Audit, deps.TenantID)
 	filehttp.Register(apiMux, svc, deps.Files, deps.Artifacts, deps.Audit, deps.TenantID)
 	managedfilehttp.Register(apiMux, svc, deps.ManagedFiles, deps.Devices, deps.Artifacts, deps.TenantID)
-	certificatehttp.Register(apiMux, svc, deps.Certificates, deps.Artifacts, deps.Audit, deps.TenantID)
+	certificatehttp.Register(apiMux, svc, deps.Devices, deps.Certificates, deps.Artifacts, deps.Audit, deps.TenantID)
 	identityhttp.Register(apiMux, svc, deps.Identity, deps.Audit, deps.TenantID)
 	grouphttp.Register(apiMux, svc, deps.Groups, deps.Audit, deps.TenantID)
 	policyhttp.Register(apiMux, svc, deps.Policies, deps.Audit, deps.TenantID)

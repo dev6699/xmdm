@@ -63,6 +63,13 @@ class AgentStateStoreTest {
                 lastAppliedAtEpochMillis = 123456990L,
             ),
         )
+        store.saveCertificates(
+            CertificatesState(
+                snapshotJson = """{"version":"1","certificates":[]}""",
+                version = 7,
+                lastAppliedAtEpochMillis = 123456980L,
+            ),
+        )
         first.scope.cancel()
 
         val reloaded = newStore(storeFile)
@@ -73,6 +80,7 @@ class AgentStateStoreTest {
         assertTrue(state.hasPolicyCache)
         assertTrue(state.hasManagedApps)
         assertTrue(state.hasManagedFiles)
+        assertTrue(state.hasCertificates)
         assertEquals("https://mdm.example", state.bootstrap?.serverUrl)
         assertEquals("rest", state.bootstrap?.serverProject)
         assertEquals("enroll-token", state.bootstrap?.enrollmentToken)
@@ -90,6 +98,9 @@ class AgentStateStoreTest {
         assertEquals("""{"version":"1","files":[]}""", state.managedFiles?.snapshotJson)
         assertEquals(7L, state.managedFiles?.version)
         assertEquals(123456990L, state.managedFiles?.lastAppliedAtEpochMillis)
+        assertEquals("""{"version":"1","certificates":[]}""", state.certificates?.snapshotJson)
+        assertEquals(7L, state.certificates?.version)
+        assertEquals(123456980L, state.certificates?.lastAppliedAtEpochMillis)
         reloaded.scope.cancel()
     }
 

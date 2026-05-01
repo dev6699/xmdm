@@ -2,6 +2,7 @@ package com.xmdm.launcher.deviceinfo
 
 import com.google.gson.GsonBuilder
 import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -9,6 +10,7 @@ import android.os.BatteryManager
 import android.os.Build
 import com.google.gson.JsonParser
 import com.xmdm.launcher.BuildConfig
+import com.xmdm.launcher.AdminReceiver
 import com.xmdm.launcher.state.AgentState
 import com.xmdm.launcher.state.BootstrapState
 import com.xmdm.launcher.state.DeviceIdentityState
@@ -82,9 +84,22 @@ class DeviceInfoReporter(
             payload["policyVersion"] = policyVersion(cache.snapshotJson)
             payload["policyKioskMode"] = policyKioskMode(cache.snapshotJson)
         }
+        state.certificates?.let { payload["certificatesVersion"] = it.version }
+        installedCaCertsCount()?.let { payload["installedCaCertsCount"] = it }
         state.managedApps?.let { payload["managedAppsVersion"] = it.version }
         state.managedFiles?.let { payload["managedFilesVersion"] = it.version }
         return payload
+    }
+
+    private fun installedCaCertsCount(): Int? {
+        return runCatching {
+            val dpm = context.getSystemService(DevicePolicyManager::class.java) ?: return null
+            if (!dpm.isDeviceOwnerApp(context.packageName)) {
+                return null
+            }
+            val adminComponent = ComponentName(context, AdminReceiver::class.java)
+            dpm.getInstalledCaCerts(adminComponent)?.size
+        }.getOrNull()
     }
 
     private fun policyVersion(snapshotJson: String): Long? {

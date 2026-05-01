@@ -78,6 +78,22 @@ class AgentStateStore(
         }
     }
 
+    suspend fun saveCertificates(state: CertificatesState) {
+        dataStore.edit { prefs ->
+            prefs[Keys.CERTIFICATES_SNAPSHOT_JSON] = state.snapshotJson
+            prefs[Keys.CERTIFICATES_VERSION] = state.version
+            prefs[Keys.CERTIFICATES_LAST_APPLIED_AT_EPOCH_MILLIS] = state.lastAppliedAtEpochMillis
+        }
+    }
+
+    suspend fun clearCertificates() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.CERTIFICATES_SNAPSHOT_JSON)
+            prefs.remove(Keys.CERTIFICATES_VERSION)
+            prefs.remove(Keys.CERTIFICATES_LAST_APPLIED_AT_EPOCH_MILLIS)
+        }
+    }
+
     suspend fun clearAllState() {
         dataStore.edit { prefs ->
             prefs.clear()
@@ -90,12 +106,14 @@ class AgentStateStore(
         val policyCache = policyCacheFromPrefs(prefs)
         val managedApps = managedAppsFromPrefs(prefs)
         val managedFiles = managedFilesFromPrefs(prefs)
+        val certificates = certificatesFromPrefs(prefs)
         return AgentState(
             bootstrap = bootstrap,
             identity = identity,
             policyCache = policyCache,
             managedApps = managedApps,
             managedFiles = managedFiles,
+            certificates = certificates,
         )
     }
 
@@ -164,6 +182,17 @@ class AgentStateStore(
         )
     }
 
+    private fun certificatesFromPrefs(prefs: Preferences): CertificatesState? {
+        val snapshotJson = prefs[Keys.CERTIFICATES_SNAPSHOT_JSON] ?: return null
+        val version = prefs[Keys.CERTIFICATES_VERSION] ?: return null
+        val lastAppliedAtEpochMillis = prefs[Keys.CERTIFICATES_LAST_APPLIED_AT_EPOCH_MILLIS] ?: return null
+        return CertificatesState(
+            snapshotJson = snapshotJson,
+            version = version,
+            lastAppliedAtEpochMillis = lastAppliedAtEpochMillis,
+        )
+    }
+
     private object Keys {
         val BOOTSTRAP_SERVER_URL = stringPreferencesKey("bootstrap_server_url")
         val BOOTSTRAP_SECONDARY_SERVER_URL = stringPreferencesKey("bootstrap_secondary_server_url")
@@ -187,6 +216,9 @@ class AgentStateStore(
         val MANAGED_FILES_SNAPSHOT_JSON = stringPreferencesKey("managed_files_snapshot_json")
         val MANAGED_FILES_VERSION = longPreferencesKey("managed_files_version")
         val MANAGED_FILES_LAST_APPLIED_AT_EPOCH_MILLIS = longPreferencesKey("managed_files_last_applied_at_epoch_millis")
+        val CERTIFICATES_SNAPSHOT_JSON = stringPreferencesKey("certificates_snapshot_json")
+        val CERTIFICATES_VERSION = longPreferencesKey("certificates_version")
+        val CERTIFICATES_LAST_APPLIED_AT_EPOCH_MILLIS = longPreferencesKey("certificates_last_applied_at_epoch_millis")
     }
 
     companion object {

@@ -13,6 +13,9 @@ import com.xmdm.launcher.apps.AndroidManagedAppInstaller
 import com.xmdm.launcher.apps.HttpManagedAppDownloader
 import com.xmdm.launcher.apps.ManagedAppInstallCoordinator
 import com.xmdm.launcher.apps.ManagedAppInstallProgress
+import com.xmdm.launcher.certificates.AndroidCertificateInstaller
+import com.xmdm.launcher.certificates.CertificateInstallCoordinator
+import com.xmdm.launcher.certificates.certificateBucketVersion
 import com.xmdm.launcher.commands.AndroidDeviceRebooter
 import com.xmdm.launcher.commands.DeviceCommandCoordinator
 import com.xmdm.launcher.commands.DeviceCommandExecutor
@@ -34,6 +37,7 @@ import com.xmdm.launcher.packages.AndroidPackageRulesHost
 import com.xmdm.launcher.packages.PackageRulesController
 import com.xmdm.launcher.state.AgentState
 import com.xmdm.launcher.state.AgentStateStore
+import com.xmdm.launcher.state.CertificatesState
 import com.xmdm.launcher.state.LauncherEnrollmentStateMachine
 import com.xmdm.launcher.state.ManagedAppsState
 import com.xmdm.launcher.state.ManagedFilesState
@@ -76,6 +80,12 @@ class MainActivity : AppCompatActivity() {
             rootDir = File(applicationContext.filesDir, "managed-files"),
         )
     }
+    private val certificateCoordinator by lazy {
+        CertificateInstallCoordinator(
+            downloader = HttpManagedAppDownloader(),
+            installer = AndroidCertificateInstaller(applicationContext),
+        )
+    }
     private val configSyncEngine by lazy {
         ConfigSyncEngine(
             stateStore = stateStore,
@@ -114,7 +124,9 @@ class MainActivity : AppCompatActivity() {
     private val instanceId = UUID.randomUUID().toString().take(8)
     private var fileInstallInFlight = false
     private var appInstallInFlight = false
+    private var certInstallInFlight = false
     private var lastManagedFilesSnapshotVersion: Long? = null
+    private var lastCertificatesSnapshotVersion: Long? = null
     private var lastManagedAppsSnapshotVersion: Long? = null
     private var lastEnrollmentAttemptBootstrapJson: String? = null
     private var commandTransportJob: Job? = null
@@ -157,6 +169,7 @@ class MainActivity : AppCompatActivity() {
                 renderLauncherStatus()
                 maybeStartEnrollment(state)
                 maybeApplyManagedFiles(state)
+                maybeApplyCertificates(state)
                 maybeApplyManagedApps(state)
                 maybeStartConfigSync(state)
                 packageRulesController.apply(state)
@@ -244,6 +257,11 @@ class MainActivity : AppCompatActivity() {
         } else {
             "managed files: empty"
         }
+        val certificatesLine = if (state.hasCertificates) {
+            "certificates: restored"
+        } else {
+            "certificates: empty"
+        }
         val managedAppsLine = if (state.hasManagedApps) {
             "managed apps: restored"
         } else {
@@ -263,6 +281,8 @@ class MainActivity : AppCompatActivity() {
             append(policyLine)
             append('\n')
             append(managedFilesLine)
+            append('\n')
+            append(certificatesLine)
             append('\n')
             append(managedAppsLine)
         }
@@ -418,6 +438,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val cached = configSyncEngine.sync(bootstrap, result.identity)
                     maybeStartConfigSync(bootstrap, result.identity, cached)
+                    maybeApplyCertificates(cached.snapshotJson, stateStore.state.first())
                     recordDeviceLogSafely(
                         source = "sync",
                         level = "info",
@@ -586,6 +607,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val cached = configSyncEngine.sync(bootstrap, identity)
                     Log.w(TAG, "config sync refreshed instance=$instanceId")
+                    maybeApplyCertificates(cached.snapshotJson, stateStore.state.first())
                     recordDeviceLogSafely(
                         source = "sync",
                         level = "info",
@@ -636,6 +658,7 @@ class MainActivity : AppCompatActivity() {
         val bootstrap = state.bootstrap ?: error("bootstrap state unavailable")
         val identity = state.identity ?: error("device identity unavailable")
         val cached = configSyncEngine.sync(bootstrap, identity)
+        maybeApplyCertificates(cached.snapshotJson, state)
         recordDeviceLogSafely(
             source = "commands",
             level = "info",
@@ -713,11 +736,120 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun maybeApplyCertificates(state: AgentState) {
+        val policyCache = state.policyCache ?: return
+        maybeApplyCertificates(policyCache.snapshotJson, state)
+    }
+
+    private fun maybeApplyCertificates(snapshotJson: String, state: AgentState) {
+        val identity = state.identity ?: return
+        val bootstrap = state.bootstrap ?: return
+        val snapshotVersion = configSnapshotVersion(snapshotJson)
+        val requiresManagedFiles = snapshotHasManagedFiles(snapshotJson)
+        if (requiresManagedFiles && state.managedFiles?.version != snapshotVersion) {
+            return
+        }
+        if (requiresManagedFiles && lastManagedFilesSnapshotVersion != null && lastManagedFilesSnapshotVersion != snapshotVersion) {
+            return
+        }
+        val desiredVersion = certificateBucketVersion(snapshotJson)
+        if (certInstallInFlight) {
+            return
+        }
+        if (desiredVersion == 0L) {
+            if (state.certificates == null && lastCertificatesSnapshotVersion == 0L) {
+                return
+            }
+            certInstallInFlight = true
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    stateStore.clearCertificates()
+                    lastCertificatesSnapshotVersion = 0L
+                    recordDeviceLogSafely(
+                        source = "certificates",
+                        level = "info",
+                        message = "certificates cleared",
+                        payload = mapOf(
+                            "version" to 0L,
+                            "installed" to 0,
+                        ),
+                    )
+                    requestDeviceLogUpload(bootstrap, identity)
+                    requestDeviceInfoUpload()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "certificate state update failed", t)
+                    recordDeviceLogSafely(
+                        source = "certificates",
+                        level = "warn",
+                        message = "certificate state update failed",
+                        payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                    )
+                } finally {
+                    withContext(Dispatchers.Main) {
+                        certInstallInFlight = false
+                        renderUi()
+                    }
+                }
+            }
+            return
+        }
+        if (state.certificates?.version == desiredVersion) {
+            lastCertificatesSnapshotVersion = desiredVersion
+            return
+        }
+        if (lastCertificatesSnapshotVersion == desiredVersion) {
+            return
+        }
+        certInstallInFlight = true
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val result = certificateCoordinator.apply(
+                    snapshotJson = snapshotJson,
+                    deviceSecret = identity.deviceSecret,
+                    serverUrl = bootstrap.serverUrl,
+                )
+                stateStore.saveCertificates(
+                    CertificatesState(
+                        snapshotJson = snapshotJson,
+                        version = desiredVersion,
+                        lastAppliedAtEpochMillis = System.currentTimeMillis(),
+                    ),
+                )
+                lastCertificatesSnapshotVersion = desiredVersion
+                recordDeviceLogSafely(
+                    source = "certificates",
+                    level = "info",
+                    message = "certificates applied",
+                    payload = mapOf(
+                        "version" to desiredVersion,
+                        "installed" to result.installed.size,
+                    ),
+                )
+                requestDeviceLogUpload(bootstrap, identity)
+                requestDeviceInfoUpload()
+            } catch (t: Throwable) {
+                Log.w(TAG, "certificate install failed", t)
+                recordDeviceLogSafely(
+                    source = "certificates",
+                    level = "warn",
+                    message = "certificate install failed",
+                    payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                )
+            } finally {
+                withContext(Dispatchers.Main) {
+                    certInstallInFlight = false
+                    renderUi()
+                }
+            }
+        }
+    }
+
     private fun maybeApplyManagedApps(state: AgentState) {
         val policyCache = state.policyCache ?: return
         val identity = state.identity ?: return
         val bootstrap = state.bootstrap ?: return
         val requiresManagedFiles = snapshotHasManagedFiles(policyCache.snapshotJson)
+        val requiresCertificates = snapshotHasCertificates(policyCache.snapshotJson)
         if (appInstallInFlight) {
             return
         }
@@ -725,6 +857,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (requiresManagedFiles && lastManagedFilesSnapshotVersion != null && lastManagedFilesSnapshotVersion != policyCache.version) {
+            return
+        }
+        val desiredCertificateVersion = certificateBucketVersion(policyCache.snapshotJson)
+        if (requiresCertificates && state.certificates?.version != desiredCertificateVersion) {
+            return
+        }
+        if (requiresCertificates && lastCertificatesSnapshotVersion != null && lastCertificatesSnapshotVersion != desiredCertificateVersion) {
             return
         }
         if (state.hasManagedApps && state.managedApps?.version == policyCache.version) {
@@ -808,8 +947,12 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                     stateStore.clearAllState()
                 }
+                fileInstallInFlight = false
+                appInstallInFlight = false
                 lastManagedFilesSnapshotVersion = null
+                lastCertificatesSnapshotVersion = null
                 lastManagedAppsSnapshotVersion = null
+                certInstallInFlight = false
                 lastEnrollmentAttemptBootstrapJson = null
                 cachedPrettySnapshotJson = null
                 cachedPrettySnapshotText = ""
@@ -838,6 +981,26 @@ class MainActivity : AppCompatActivity() {
             files != null && files.size() > 0
         } catch (_: Throwable) {
             false
+        }
+    }
+
+    private fun snapshotHasCertificates(snapshotJson: String): Boolean {
+        return try {
+            val certificates = JsonParser.parseString(snapshotJson)
+                .asJsonObject
+                .getAsJsonArray("certificates")
+            certificates != null && certificates.size() > 0
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun configSnapshotVersion(snapshotJson: String): Long {
+        return try {
+            val snapshot = JsonParser.parseString(snapshotJson).asJsonObject
+            snapshot.get("version")?.takeIf { !it.isJsonNull }?.asString?.toLongOrNull() ?: 0L
+        } catch (_: Throwable) {
+            0L
         }
     }
 

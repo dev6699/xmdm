@@ -127,6 +127,25 @@ func (s *Store) ListActiveCertificates(ctx context.Context, tenantID string) ([]
 	return items, nil
 }
 
+func (s *Store) GetCertificate(ctx context.Context, tenantID, id string) (certificates.Certificate, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT c.id::text, c.tenant_id::text, c.name, c.status, c.updated_at, c.deleted_at, c.artifact_id::text, c.checksum,
+		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
+		 FROM certificates c
+		 JOIN artifacts a ON a.tenant_id = c.tenant_id AND a.id = c.artifact_id
+		 WHERE c.tenant_id = $1 AND c.id = $2`,
+		tenantID, id,
+	)
+	rec, err := scanCertificateWithArtifact(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return certificates.Certificate{}, httpx.ErrNotFound
+		}
+		return certificates.Certificate{}, err
+	}
+	return rec, nil
+}
+
 func (s *Store) RetireCertificate(ctx context.Context, tenantID, id string) (certificates.Certificate, error) {
 	row := s.pool.QueryRow(ctx,
 		`UPDATE certificates

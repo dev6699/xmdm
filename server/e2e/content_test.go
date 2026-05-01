@@ -73,6 +73,28 @@ func TestManagedAppsAndFilesRemoval(t *testing.T) {
 	waitForChromeUninstalled(t, env.serial)
 }
 
+// TestCertificatesApplied enrolls a device and verifies that active certificates
+// are downloaded and reported after the initial config sync.
+func TestCertificatesApplied(t *testing.T) {
+	env := newBaseTestEnv(t, false)
+	artifactStore := newTestArtifactStore(t)
+	cert := mustUploadCertificate(t, env.client, env.baseURL, artifactStore)
+
+	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	env.requests.waitFor(t, time.Minute, "certificate artifact download", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			r.path == "/api/v1/devices/"+env.deviceID+"/certificates/"+cert.certificateID+"/artifact"
+	})
+	assertCertificateInstallReportedViaAPI(t, env.requests, env.deviceID)
+}
+
 // TestCommandMQTT enrolls a device using MQTT transport and verifies that a
 // ping command is acknowledged by the device over the MQTT connection.
 func TestCommandMQTT(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,10 +14,83 @@ import (
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/certificates"
 	"xmdm/server/internal/checksum"
+	"xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
 )
 
-func Register(mux httpx.Router, svc *auth.Service, store certificates.Repository, artifactStore artifacts.Store, auditStore audit.Store, tenantID string) {
+const deviceSecretHeader = "X-XMDM-Device-Secret"
+
+func Register(mux httpx.Router, svc *auth.Service, devices device.Repository, store certificates.Repository, artifactStore artifacts.Store, auditStore audit.Store, tenantID string) {
+	mux.HandleFunc("/devices/{deviceId}/certificates/{certificateId}/artifact", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if devices == nil || store == nil || artifactStore == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		deviceID := strings.TrimSpace(r.PathValue("deviceId"))
+		certificateID := strings.TrimSpace(r.PathValue("certificateId"))
+		secret := strings.TrimSpace(r.Header.Get(deviceSecretHeader))
+		if deviceID == "" || certificateID == "" || secret == "" {
+			http.Error(w, "invalid input", http.StatusBadRequest)
+			return
+		}
+		if _, err := devices.Authenticate(r.Context(), tenantID, deviceID, secret); err != nil {
+			switch err {
+			case httpx.ErrInvalidInput:
+				log.Printf("certificates artifact auth invalid input: device=%s certificate=%s", deviceID, certificateID)
+				http.Error(w, "invalid input", http.StatusBadRequest)
+			case httpx.ErrNotFound:
+				log.Printf("certificates artifact auth unauthorized: device=%s certificate=%s", deviceID, certificateID)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			default:
+				log.Printf("certificates artifact auth failed: device=%s certificate=%s err=%v", deviceID, certificateID, err)
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
+			return
+		}
+		rec, err := store.GetCertificate(r.Context(), tenantID, certificateID)
+		if err != nil {
+			if err == httpx.ErrNotFound {
+				http.NotFound(w, r)
+				return
+			}
+			log.Printf("certificates artifact load failed: device=%s certificate=%s err=%v", deviceID, certificateID, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if rec.Status != certificates.StatusActive || rec.Artifact == nil {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := artifactStore.Get(r.Context(), rec.Artifact.StorageKey)
+		if err != nil {
+			log.Printf("certificates artifact fetch failed: device=%s certificate=%s storage_key=%s err=%v", deviceID, certificateID, rec.Artifact.StorageKey, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		defer body.Close()
+		content, err := io.ReadAll(body)
+		if err != nil {
+			log.Printf("certificates artifact read failed: device=%s certificate=%s storage_key=%s err=%v", deviceID, certificateID, rec.Artifact.StorageKey, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", rec.Artifact.MimeType)
+		w.Header().Set("Content-Length", strconv.FormatInt(int64(len(content)), 10))
+		w.Header().Set("X-XMDM-Artifact-Checksum", checksum.SHA256Base64URL(content))
+		w.Header().Set("X-XMDM-Artifact-Size", strconv.FormatInt(int64(len(content)), 10))
+		downloadName := rec.Name
+		if downloadName == "" {
+			downloadName = rec.ID
+		}
+		w.Header().Set("Content-Disposition", `attachment; filename="`+downloadName+`"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, bytes.NewReader(content))
+	})
+
 	mux.HandleFunc("/certificates", func(w http.ResponseWriter, r *http.Request) {
 		session, ok := sessionFromRequest(r, svc)
 		if !ok {

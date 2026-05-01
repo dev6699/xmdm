@@ -35,12 +35,19 @@ data class ManagedFilesState(
     val lastAppliedAtEpochMillis: Long,
 )
 
+data class CertificatesState(
+    val snapshotJson: String,
+    val version: Long,
+    val lastAppliedAtEpochMillis: Long,
+)
+
 data class AgentState(
     val bootstrap: BootstrapState? = null,
     val identity: DeviceIdentityState? = null,
     val policyCache: PolicyCacheState? = null,
     val managedApps: ManagedAppsState? = null,
     val managedFiles: ManagedFilesState? = null,
+    val certificates: CertificatesState? = null,
 ) {
     val isBootstrapped: Boolean
         get() = bootstrap != null
@@ -56,6 +63,9 @@ data class AgentState(
 
     val hasManagedFiles: Boolean
         get() = managedFiles != null
+
+    val hasCertificates: Boolean
+        get() = certificates != null
 
     companion object {
         fun empty(): AgentState = AgentState()

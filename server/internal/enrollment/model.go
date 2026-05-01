@@ -68,10 +68,11 @@ type AppSnapshot struct {
 }
 
 type CertificateSnapshot struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	ArtifactID string `json:"artifactId"`
-	Checksum   string `json:"checksum"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ArtifactID   string `json:"artifactId"`
+	Checksum     string `json:"checksum"`
+	DownloadPath string `json:"downloadPath"`
 }
 
 type ConfigSnapshot struct {

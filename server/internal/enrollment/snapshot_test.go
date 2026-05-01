@@ -88,7 +88,7 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 		PolicySnapshot{KioskMode: false},
 		nil,
 		nil,
-		[]CertificateSnapshot{{ID: "cert-1", Name: "cert", ArtifactID: "artifact-1", Checksum: "cert-checksum"}},
+		[]CertificateSnapshot{{ID: "cert-1", Name: "cert", ArtifactID: "artifact-1", Checksum: "cert-checksum", DownloadPath: "/artifact"}},
 	)
 	if changedCertificates.Version == base.Version {
 		t.Fatalf("expected certificate change to affect revision")
