@@ -65,6 +65,14 @@
 - Telemetry writes feed device health tracking and operational visibility.
 - The live upload surface uses `POST /api/v1/devices/{deviceId}/telemetry` with the device secret in `X-XMDM-Device-Secret`.
 
+### Device Info Reporting
+
+- Accepts structured device inventory and runtime state snapshots from the launcher.
+- Device info writes feed server-side export and support workflows.
+- The live upload surface uses `POST /api/v1/devices/{deviceId}/info` with the device secret in `X-XMDM-Device-Secret`.
+- The admin export surface uses `GET /api/v1/device-info` with optional `deviceId`, `q`, `since`, `until`, and `limit` filters.
+- The export response returns a `deviceInfo` array of device info records.
+
 ### Log Upload
 
 - Accepts batch uploads of app and device logs.
@@ -136,6 +144,7 @@
 {
   "version": "string",
   "device": {},
+  "runtime": {},
   "policy": {},
   "apps": [],
   "files": [],

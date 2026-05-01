@@ -24,6 +24,7 @@ import com.xmdm.launcher.files.ManagedFileInstallCoordinator
 import com.xmdm.launcher.databinding.ActivityMainBinding
 import com.xmdm.launcher.enrollment.EnrollmentCoordinator
 import com.xmdm.launcher.enrollment.HttpEnrollmentGateway
+import com.xmdm.launcher.deviceinfo.DeviceInfoReporter
 import com.xmdm.launcher.kiosk.AndroidKioskModeHost
 import com.xmdm.launcher.kiosk.KioskModeController
 import com.xmdm.launcher.logs.DeviceLogCoordinator
@@ -86,6 +87,9 @@ class MainActivity : AppCompatActivity() {
             queue = DeviceLogStore.from(applicationContext),
             gateway = HttpDeviceLogGateway(),
         )
+    }
+    private val deviceInfoReporter by lazy {
+        DeviceInfoReporter(applicationContext)
     }
     private val deviceCommandCoordinator by lazy {
         DeviceCommandCoordinator(
@@ -410,6 +414,7 @@ class MainActivity : AppCompatActivity() {
                     payload = mapOf("deviceId" to result.identity.deviceId),
                 )
                 maybeStartConfigSync(bootstrap, result.identity, null)
+                requestDeviceInfoUpload()
                 try {
                     val cached = configSyncEngine.sync(bootstrap, result.identity)
                     maybeStartConfigSync(bootstrap, result.identity, cached)
@@ -423,6 +428,7 @@ class MainActivity : AppCompatActivity() {
                         ),
                     )
                     requestDeviceLogUpload(bootstrap, result.identity)
+                    requestDeviceInfoUpload()
                     maybeStartCommandTransport(bootstrap, result.identity, cached)
                 } catch (t: Throwable) {
                     if (t is kotlinx.coroutines.CancellationException) {
@@ -590,6 +596,7 @@ class MainActivity : AppCompatActivity() {
                         ),
                     )
                     requestDeviceLogUpload(bootstrap, identity)
+                    requestDeviceInfoUpload()
                 } catch (t: Throwable) {
                     if (t is kotlinx.coroutines.CancellationException) {
                         throw t
@@ -639,6 +646,7 @@ class MainActivity : AppCompatActivity() {
             ),
         )
         requestDeviceLogUpload(bootstrap, identity)
+        requestDeviceInfoUpload()
         return DeviceCommandExecutionResult(
             status = "acked",
             message = "config refreshed",
@@ -687,6 +695,7 @@ class MainActivity : AppCompatActivity() {
                     payload = mapOf("version" to policyCache.version),
                 )
                 requestDeviceLogUpload(bootstrap, identity)
+                requestDeviceInfoUpload()
             } catch (t: Throwable) {
                 Log.w(TAG, "managed file install failed", t)
                 recordDeviceLogSafely(
@@ -755,6 +764,7 @@ class MainActivity : AppCompatActivity() {
                     ),
                 )
                 requestDeviceLogUpload(bootstrap, identity)
+                requestDeviceInfoUpload()
                 withContext(Dispatchers.Main) {
                     managedAppProgress.value = ManagedAppInstallProgress.Completed(
                         installed = result.installed,
@@ -973,6 +983,22 @@ class MainActivity : AppCompatActivity() {
                     throw t
                 }
                 Log.w(TAG, "device logs upload failed", t)
+            }
+        }
+    }
+
+    private fun requestDeviceInfoUpload() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val state = stateStore.state.first()
+                val bootstrap = state.bootstrap ?: return@launch
+                val identity = state.identity ?: return@launch
+                deviceInfoReporter.uploadIfNeeded(bootstrap, identity, state)
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) {
+                    throw t
+                }
+                Log.w(TAG, "device info upload failed", t)
             }
         }
     }

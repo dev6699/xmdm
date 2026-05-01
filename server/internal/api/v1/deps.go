@@ -14,6 +14,7 @@ import (
 	commandspg "xmdm/server/internal/commands/postgres"
 	"xmdm/server/internal/config"
 	devicepg "xmdm/server/internal/device/postgres"
+	deviceinfopg "xmdm/server/internal/deviceinfo/postgres"
 	"xmdm/server/internal/enrollment"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
 	filespg "xmdm/server/internal/files/postgres"
@@ -47,6 +48,7 @@ func NewDeps(cfg *config.Config) Dependencies {
 	artifactStore := mustArtifactStore(cfg)
 	pushPublisher := mustPushPublisher(cfg)
 	devicesStore := devicepg.New(pool)
+	deviceInfoStore := deviceinfopg.New(pool)
 	enrollmentStore := enrollmentpg.New(pool)
 	commandStore := commandspg.New(pool)
 	commandStore.SetPublisher(pushPublisher)
@@ -59,6 +61,7 @@ func NewDeps(cfg *config.Config) Dependencies {
 		ManagedFiles: managedfilespg.New(pool),
 		Logs:         logspg.New(pool),
 		Commands:     commandStore,
+		DeviceInfo:   deviceInfoStore,
 		Certificates: certificatesspg.New(pool),
 		Artifacts:    artifactStore,
 		Groups:       grouppg.New(pool),

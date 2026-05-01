@@ -2,7 +2,7 @@
 
 ## Server Design
 
-The Go backend is the authoritative source for auth, policies, device inventory, artifacts, push dispatch, logs, audit, messaging, and plugins.
+The Go backend is the authoritative source for auth, policies, device inventory, artifacts, push dispatch, logs, device info, audit, messaging, and plugins.
 
 The server must be able to start, serve admin requests, and accept device sync even if some optional plugins are unavailable.
 
@@ -29,6 +29,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 - `internal/files` for file and certificate handling
 - `internal/push` for command fan-out and device notifications
 - `internal/logs` for device log upload and search
+- `internal/deviceinfo` for device inventory reporting and export
 - `internal/plugins` for plugin registration and plugin settings
 - `internal/audit` for audit events
 - `internal/ops` for scheduled jobs and health checks
@@ -62,6 +63,12 @@ The server must be able to start, serve admin requests, and accept device sync e
 - Device-authenticated batch log upload
 - Admin search across device log records
 - Retention and export of log rows
+
+### Device Info
+
+- Device-authenticated inventory and runtime reporting
+- Admin export across device info records
+- Retention and export of device info rows
 
 ### Artifact Service
 

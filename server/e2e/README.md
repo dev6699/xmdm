@@ -9,6 +9,7 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestManagedAppsAndFiles` covers adb-backed managed app and managed file delivery on a physical device.
 - `TestManagedAppsAndFilesRemoval` covers adb-backed managed app and managed file removal on a physical device.
 - `TestDeviceLogsUpload` covers adb-backed device log upload and recorded-log API verification on a physical device.
+- `TestDeviceInfoReporting` covers adb-backed device-info reporting and admin export on a physical device.
 - `TestKioskMode` covers adb-backed kiosk enforcement on a physical device.
 - `TestPackageRules` covers adb-backed package suspension enforcement on a physical device.
 - `TestPolicySync` covers adb-backed policy refresh after an admin update on a physical device.
@@ -69,6 +70,7 @@ Current coverage:
 - `TestManagedAppsAndFiles`
 - `TestManagedAppsAndFilesRemoval`
 - `TestDeviceLogsUpload`
+- `TestDeviceInfoReporting`
 - `TestKioskMode`
 - `TestPackageRules`
 - `TestPolicySync`
@@ -86,6 +88,19 @@ The device-log upload test covers the structured launcher events emitted by the 
 - `apps` apply and removal
 - `commands` transport, polling, and command-triggered sync
 
+### Device Info Flow
+
+`TestDeviceInfoReporting` is the physical-device device-info test. It does all of the following in one run:
+
+1. Starts a real HTTP handler stack with a real Postgres test database.
+2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
+3. Creates the managed file and Chrome app fixtures used by the content install test.
+4. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
+5. Starts the launcher with the bootstrap payload on the physical device.
+6. Waits for the launcher to enroll, fetch the signed device config snapshot, and upload a structured device-info report.
+7. Verifies the uploaded payload contains device inventory and config fields such as model, app package, config revision, and managed bucket versions.
+8. Verifies the server exports the recorded device-info rows through `GET /api/v1/device-info`.
+
 ### Recommended Taxonomy
 
 - [`TestAdminE2E`](/home/puong/xmdm/server/e2e/admin_test.go) for admin API coverage.
@@ -93,6 +108,7 @@ The device-log upload test covers the structured launcher events emitted by the 
 - [`TestManagedAppsAndFiles`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app delivery.
 - [`TestManagedAppsAndFilesRemoval`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app removal.
 - [`TestDeviceLogsUpload`](/home/puong/xmdm/server/e2e/content_test.go) for real-device device log upload.
+- [`TestDeviceInfoReporting`](/home/puong/xmdm/server/e2e/deviceinfo_test.go) for real-device device info reporting and export.
 - [`TestKioskMode`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk enforcement.
 - [`TestPackageRules`](/home/puong/xmdm/server/e2e/content_test.go) for real-device package suspension enforcement.
 - [`TestCommandMQTT`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command transport.
@@ -277,6 +293,16 @@ XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestDeviceLogsUpload -cou
 ```
 
 `TestDeviceLogsUpload` waits for the launcher to emit structured lifecycle logs and upload them through `POST /api/v1/devices/{deviceId}/logs`.
+
+For the adb-backed device info reporting test:
+
+```sh
+eval "$(../infra/test-db-env.sh)"
+cd server
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestDeviceInfoReporting -count=1 ./e2e
+```
+
+`TestDeviceInfoReporting` waits for the launcher to upload a structured device inventory report and then exports the recorded rows through the admin API.
 
 For the adb-backed kiosk enforcement test:
 

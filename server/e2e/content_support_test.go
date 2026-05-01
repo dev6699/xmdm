@@ -501,6 +501,14 @@ func waitForDeviceLogsUpload(t *testing.T, requests *requestRecorder, deviceID s
 	})
 }
 
+func waitForDeviceInfoUpload(t *testing.T, requests *requestRecorder, deviceID string) {
+	t.Helper()
+	requests.waitFor(t, time.Minute, "device info upload", func(r requestRecord) bool {
+		return r.method == http.MethodPost &&
+			r.path == "/api/v1/devices/"+deviceID+"/info"
+	})
+}
+
 func assertDeviceLogsUploadPayload(t *testing.T, requests *requestRecorder, deviceID string) {
 	t.Helper()
 	requests.mu.Lock()
@@ -558,6 +566,81 @@ func assertDeviceLogsRecordedViaAPI(t *testing.T, client *http.Client, baseURL, 
 	}
 }
 
+func assertDeviceInfoUploadPayload(t *testing.T, requests *requestRecorder, deviceID string) {
+	t.Helper()
+	requests.waitFor(t, time.Minute, "device info upload body", func(r requestRecord) bool {
+		if r.method != http.MethodPost || r.path != "/api/v1/devices/"+deviceID+"/info" || strings.TrimSpace(r.body) == "" {
+			return false
+		}
+		var upload struct {
+			ObservedAt string         `json:"observedAt"`
+			Payload    map[string]any `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(r.body), &upload); err != nil || upload.Payload == nil {
+			return false
+		}
+		return upload.Payload["deviceId"] == deviceID &&
+			upload.Payload["model"] != nil &&
+			upload.Payload["appPackage"] == "com.xmdm.launcher" &&
+			upload.Payload["configRevision"] != nil &&
+			upload.Payload["managedAppsVersion"] != nil &&
+			upload.Payload["managedFilesVersion"] != nil
+	})
+	requests.mu.Lock()
+	defer requests.mu.Unlock()
+	var payloads []string
+	for _, req := range requests.requests {
+		if req.method == http.MethodPost && req.path == "/api/v1/devices/"+deviceID+"/info" && strings.TrimSpace(req.body) != "" {
+			payloads = append(payloads, req.body)
+		}
+	}
+	if len(payloads) == 0 {
+		t.Fatalf("did not capture a device info upload body for %s", deviceID)
+	}
+	type deviceInfoUpload struct {
+		ObservedAt string         `json:"observedAt"`
+		Payload    map[string]any `json:"payload"`
+	}
+	hasBasic := false
+	hasConfig := false
+	for _, payloadBody := range payloads {
+		var upload deviceInfoUpload
+		if err := json.Unmarshal([]byte(payloadBody), &upload); err != nil {
+			t.Fatalf("decode device info upload body: %v", err)
+		}
+		if upload.Payload == nil {
+			t.Fatalf("device info upload body did not include payload: %s", payloadBody)
+		}
+		if upload.Payload["deviceId"] == deviceID &&
+			upload.Payload["model"] != nil &&
+			upload.Payload["appPackage"] == "com.xmdm.launcher" {
+			hasBasic = true
+		}
+		if upload.Payload["configRevision"] != nil &&
+			upload.Payload["managedAppsVersion"] != nil &&
+			upload.Payload["managedFilesVersion"] != nil {
+			hasConfig = true
+		}
+	}
+	if !hasBasic {
+		t.Fatalf("device info upload body did not include expected launcher inventory fields; bodies=%v", payloads)
+	}
+	if !hasConfig {
+		t.Fatalf("device info upload body did not include expected config fields; bodies=%v", payloads)
+	}
+}
+
+func assertDeviceInfoRecordedViaAPI(t *testing.T, client *http.Client, baseURL, deviceID string) {
+	t.Helper()
+	waitForCondition(t, time.Minute, "device info API record", func() string {
+		info := mustFetchDeviceInfo(t, client, baseURL, deviceID)
+		return deviceInfoSnapshot(info)
+	}, func() (bool, error) {
+		info := mustFetchDeviceInfo(t, client, baseURL, deviceID)
+		return deviceInfoMatch(info, deviceID), nil
+	})
+}
+
 func mustFetchDeviceLogs(t *testing.T, client *http.Client, baseURL, deviceID string) []any {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -581,6 +664,31 @@ func mustFetchDeviceLogs(t *testing.T, client *http.Client, baseURL, deviceID st
 	}
 	logs, _ := payload["logs"].([]any)
 	return logs
+}
+
+func mustFetchDeviceInfo(t *testing.T, client *http.Client, baseURL, deviceID string) []any {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/device-info?deviceId="+deviceID+"&limit=50", nil)
+	if err != nil {
+		t.Fatalf("build device info request: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("device info request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("device info request got %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode device info response: %v", err)
+	}
+	info, _ := payload["deviceInfo"].([]any)
+	return info
 }
 
 func deviceLogsMatch(logs []any, deviceID string) bool {
@@ -636,6 +744,52 @@ func deviceLogsSnapshot(logs []any) string {
 		level, _ := rec["level"].(string)
 		message, _ := rec["message"].(string)
 		parts = append(parts, source+"|"+level+"|"+message)
+	}
+	return strings.Join(parts, " | ")
+}
+
+func deviceInfoMatch(info []any, deviceID string) bool {
+	required := map[string]bool{
+		"model":               false,
+		"androidVersion":      false,
+		"appPackage":          false,
+		"configRevision":      false,
+		"managedAppsVersion":  false,
+		"managedFilesVersion": false,
+	}
+	for _, item := range info {
+		rec, _ := item.(map[string]any)
+		if rec["deviceId"] != deviceID {
+			continue
+		}
+		payload, _ := rec["payload"].(map[string]any)
+		if payload == nil {
+			continue
+		}
+		for key := range required {
+			if payload[key] != nil {
+				required[key] = true
+			}
+		}
+	}
+	for _, seen := range required {
+		if !seen {
+			return false
+		}
+	}
+	return true
+}
+
+func deviceInfoSnapshot(info []any) string {
+	if len(info) == 0 {
+		return "<empty>"
+	}
+	parts := make([]string, 0, len(info))
+	for _, item := range info {
+		rec, _ := item.(map[string]any)
+		deviceID, _ := rec["deviceId"].(string)
+		payload, _ := rec["payload"].(map[string]any)
+		parts = append(parts, deviceID+"|"+fmt.Sprintf("%v", payload))
 	}
 	return strings.Join(parts, " | ")
 }

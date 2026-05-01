@@ -25,6 +25,7 @@ import (
 	commandspg "xmdm/server/internal/commands/postgres"
 	device "xmdm/server/internal/device"
 	devicepg "xmdm/server/internal/device/postgres"
+	deviceinfopg "xmdm/server/internal/deviceinfo/postgres"
 	"xmdm/server/internal/enrollment"
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
 	filespg "xmdm/server/internal/files/postgres"
@@ -383,6 +384,7 @@ func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins
 		ManagedFiles:  managedfilespg.New(pool),
 		Logs:          logspg.New(pool),
 		Commands:      commandStore,
+		DeviceInfo:    deviceinfopg.New(pool),
 		Certificates:  certificatesspg.New(pool),
 		Groups:        grouppg.New(pool),
 		Policies:      policypg.New(pool),

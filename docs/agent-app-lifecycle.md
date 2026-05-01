@@ -41,7 +41,8 @@ flowchart TD
   - apply managed files from the signed snapshot
   - apply managed apps from the signed snapshot
   - start command transport when identity exists
-  - start device log upload when bootstrap and identity exist
+- start device log upload when bootstrap and identity exist
+- upload device info after enrollment and after config/app/file changes
 
 Relevant code:
 - [`MainActivity`](../app/src/main/java/com/xmdm/launcher/MainActivity.kt)
@@ -183,7 +184,27 @@ Relevant code:
 - [`DeviceLogStore`](../app/src/main/java/com/xmdm/launcher/logs/DeviceLogStore.kt)
 - [`HttpDeviceLogGateway`](../app/src/main/java/com/xmdm/launcher/logs/HttpDeviceLogGateway.kt)
 
-### 9. Device Log Categories
+### 9. Device Info Reporting
+
+- Once the launcher has bootstrap data and device identity, it uploads a structured device-info report.
+- The report captures device inventory and runtime state such as:
+  - device and app identifiers
+  - build and OS details
+  - battery state
+  - device-owner status
+  - current config revision and applied bucket versions
+- The launcher uploads the report to:
+  - `POST /api/v1/devices/{deviceId}/info`
+- The server stores each report as an exportable device-info record.
+- The admin export surface is:
+  - `GET /api/v1/device-info`
+- Device info is emitted after enrollment, then again when config, managed apps, or managed files change.
+
+Relevant code:
+- [`DeviceInfoReporter`](../app/src/main/java/com/xmdm/launcher/deviceinfo/DeviceInfoReporter.kt)
+- [`HttpDeviceInfoGateway`](../app/src/main/java/com/xmdm/launcher/deviceinfo/HttpDeviceInfoGateway.kt)
+
+### 10. Device Log Categories
 
 The device currently emits structured logs for these launcher events:
 
