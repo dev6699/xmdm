@@ -101,7 +101,7 @@ Note: `M5-01 MQTT Transport` is complete with the server constructing an interna
 | M6-04 Device Logs | ☑ |
 | M6-05 Device Info | ☑ |
 | M6-06 Messaging And Audit | ☑ |
-| M6-07 Image Upload | ☐ |
+| M6-07 Image Upload | Not Planned |
 | M6-08 Enterprise E2E | ☐ |
 | M6-09 Policy Gaps | ☐ |
 

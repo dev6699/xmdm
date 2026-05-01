@@ -402,7 +402,7 @@ Owner roles used below:
 - Owner: `AE`
 - Depends on: M4-02
 - Task: implement image upload and display.
-- Done when: a device can send an image and the server can store and show it.
+- State: Not Planned
 
 ### M6-08 Enterprise E2E
 
