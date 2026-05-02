@@ -801,6 +801,9 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 	if config.Policy.Name != "policy-one" || !config.Policy.KioskMode || config.Policy.KioskAppPackage != "com.example.kiosk" {
 		t.Fatalf("unexpected policy: %#v", config.Policy)
 	}
+	if config.Policy.Restrictions.KioskKeepScreenOn || config.Policy.Restrictions.KioskStayAwakeWhilePluggedIn || config.Policy.Restrictions.KioskUnlockOnBoot {
+		t.Fatalf("unexpected kiosk screen defaults: %#v", config.Policy.Restrictions)
+	}
 	if len(config.Apps) != 1 || len(config.Files) != 1 || len(config.Certificates) != 1 {
 		t.Fatalf("unexpected snapshot contents: apps=%d files=%d certs=%d", len(config.Apps), len(config.Files), len(config.Certificates))
 	}

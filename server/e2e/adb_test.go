@@ -151,6 +151,49 @@ func waitForKioskModeOffOnDevice(t *testing.T, serial string) {
 	)
 }
 
+// waitForGlobalSettingAny waits until the global setting matches one of the
+// expected values. Use this for bitmasks that Android may normalize.
+func waitForGlobalSettingAny(t *testing.T, serial, key string, wants ...string) {
+	t.Helper()
+	if len(wants) == 0 {
+		t.Fatalf("waitForGlobalSettingAny requires at least one expected value for %s", key)
+	}
+	waitForCondition(t, time.Minute, key+" global setting to match",
+		func() string { return adbGlobalSettingSnapshot(t, serial, key) },
+		func() (bool, error) {
+			out, err := adbShellOutput(serial, "settings", "get", "global", key)
+			if err != nil {
+				return false, nil
+			}
+			got := strings.TrimSpace(out)
+			for _, want := range wants {
+				if got == want {
+					return true, nil
+				}
+			}
+			return false, nil
+		},
+	)
+}
+
+func setBatteryPlugged(t *testing.T, serial string, plugged bool) {
+	t.Helper()
+	args := []string{"dumpsys", "battery", "set", "ac", "0", "usb", "0", "wireless", "0"}
+	if plugged {
+		args = []string{"dumpsys", "battery", "set", "ac", "1", "usb", "0", "wireless", "0"}
+	}
+	if _, err := adbShellOutput(serial, args...); err != nil {
+		t.Fatalf("set battery plugged=%t: %v", plugged, err)
+	}
+}
+
+func resetBatteryState(t *testing.T, serial string) {
+	t.Helper()
+	if _, err := adbShellOutput(serial, "dumpsys", "battery", "reset"); err != nil {
+		t.Fatalf("reset battery state: %v", err)
+	}
+}
+
 // waitForCommandTransportWarmup gives the launcher a short window to finish
 // bringing up its MQTT subscription after the config snapshot has landed.
 func waitForCommandTransportWarmup(t *testing.T) {
@@ -340,6 +383,15 @@ func adbForegroundSnapshot(t *testing.T, serial, packageName string) string {
 		return "foreground=unknown"
 	}
 	return strings.Join(filtered, " | ")
+}
+
+func adbGlobalSettingSnapshot(t *testing.T, serial, key string) string {
+	t.Helper()
+	out, err := adbShellOutput(serial, "settings", "get", "global", key)
+	if err != nil {
+		return "global_err=" + strings.TrimSpace(err.Error())
+	}
+	return key + "=" + strings.TrimSpace(out)
 }
 
 func isKioskModeDump(out string) bool {

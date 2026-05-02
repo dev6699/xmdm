@@ -13,6 +13,7 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestDeviceInfoReporting` covers adb-backed device-info reporting and admin export on a physical device.
 - `TestKioskModeChrome` covers adb-backed kiosk enforcement using Chrome on a physical device.
 - `TestKioskExitChrome` covers adb-backed kiosk unlock while Chrome remains foreground on a physical device.
+- `TestKioskStayAwakeWhilePluggedIn` covers adb-backed kiosk stay-awake policy application on a physical device.
 - `TestPackageRules` covers adb-backed package suspension enforcement on a physical device.
 - `TestPolicySync` covers adb-backed policy refresh after an admin update on a physical device.
 - `TestCommandMQTT` covers MQTT command transport on a physical device.
@@ -116,6 +117,7 @@ The device-log upload test covers the structured launcher events emitted by the 
 - [`TestDeviceInfoReporting`](/home/puong/xmdm/server/e2e/deviceinfo_test.go) for real-device device info reporting and export.
 - [`TestKioskModeChrome`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk enforcement using Chrome.
 - [`TestPackageRules`](/home/puong/xmdm/server/e2e/content_test.go) for real-device package suspension enforcement.
+- [`TestKioskStayAwakeWhilePluggedIn`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk stay-awake policy application.
 - [`TestCommandMQTT`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command transport.
 - [`TestCommandMQTTSyncConfig`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command-triggered config sync.
 - [`TestCommandPolling`](/home/puong/xmdm/server/e2e/content_test.go) for real-device HTTP polling command transport.

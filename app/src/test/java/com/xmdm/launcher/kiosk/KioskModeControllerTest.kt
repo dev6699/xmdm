@@ -19,12 +19,16 @@ class KioskModeControllerTest {
         assertTrue(host.setPackagesCalls.contains(listOf("com.xmdm.launcher")))
         assertTrue(host.startLockTaskCalls == 1)
         assertTrue(host.inLockTaskMode)
+        assertFalse(host.keepScreenOnCalls.last())
+        assertFalse(host.stayAwakeWhilePluggedInCalls.last())
 
         controller.apply(agentState("""{"policy":{"kioskMode":false}}"""))
 
         assertTrue(host.stopLockTaskCalls == 1)
         assertTrue(host.setPackagesCalls.contains(emptyList()))
         assertFalse(host.inLockTaskMode)
+        assertFalse(host.keepScreenOnCalls.last())
+        assertFalse(host.stayAwakeWhilePluggedInCalls.last())
     }
 
     @Test
@@ -43,6 +47,50 @@ class KioskModeControllerTest {
         assertTrue(host.stopLockTaskCalls == 1)
         assertTrue(host.finishHostActivityCalls == 1)
         assertFalse(host.inLockTaskMode)
+    }
+
+    @Test
+    fun keepsScreenOnWhenKioskPolicyRequestsIt() {
+        val host = FakeHost(deviceOwner = true, inLockTaskMode = false)
+        val controller = KioskModeController(host) { }
+
+        controller.apply(
+            agentState(
+                snapshotJson = """{"policy":{"kioskMode":true,"restrictions":{"kioskKeepScreenOn":true}}}""",
+            ),
+        )
+
+        assertTrue(host.keepScreenOnCalls.last())
+
+        controller.apply(
+            agentState(
+                snapshotJson = """{"policy":{"kioskMode":false,"restrictions":{"kioskKeepScreenOn":false}}}""",
+            ),
+        )
+
+        assertFalse(host.keepScreenOnCalls.last())
+    }
+
+    @Test
+    fun staysAwakeWhilePluggedInWhenKioskPolicyRequestsIt() {
+        val host = FakeHost(deviceOwner = true, inLockTaskMode = false)
+        val controller = KioskModeController(host) { }
+
+        controller.apply(
+            agentState(
+                snapshotJson = """{"policy":{"kioskMode":true,"restrictions":{"kioskStayAwakeWhilePluggedIn":true}}}""",
+            ),
+        )
+
+        assertTrue(host.stayAwakeWhilePluggedInCalls.last())
+
+        controller.apply(
+            agentState(
+                snapshotJson = """{"policy":{"kioskMode":false,"restrictions":{"kioskStayAwakeWhilePluggedIn":false}}}""",
+            ),
+        )
+
+        assertFalse(host.stayAwakeWhilePluggedInCalls.last())
     }
 
     @Test
@@ -126,12 +174,22 @@ class KioskModeControllerTest {
         var startLockTaskCalls = 0
         var stopLockTaskCalls = 0
         var finishHostActivityCalls = 0
+        val keepScreenOnCalls = mutableListOf<Boolean>()
+        val stayAwakeWhilePluggedInCalls = mutableListOf<Boolean>()
         val setPackagesCalls = mutableListOf<List<String>>()
         val launchCalls = mutableListOf<LaunchCall>()
 
         override fun isDeviceOwnerApp(): Boolean = deviceOwner
 
         override fun isInLockTaskMode(): Boolean = inLockTaskMode
+
+        override fun setKeepScreenOn(keepScreenOn: Boolean) {
+            keepScreenOnCalls += keepScreenOn
+        }
+
+        override fun setStayAwakeWhilePluggedIn(stayAwakeWhilePluggedIn: Boolean) {
+            stayAwakeWhilePluggedInCalls += stayAwakeWhilePluggedIn
+        }
 
         override fun setLockTaskPackages(packages: Array<String>) {
             setPackagesCalls += packages.toList()

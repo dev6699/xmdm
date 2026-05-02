@@ -126,6 +126,9 @@ flowchart TD
 - Apply server policy at startup and after every config refresh.
 - Enforce kiosk mode when the policy requires it.
 - If policy names a kiosk app package, launch that package after boot and on kiosk re-entry.
+- If policy requests kiosk keep-awake behavior, keep the kiosk activity screen on while kiosk policy is active.
+- If policy requests kiosk stay-awake-while-plugged-in behavior, update the device-owner global stay-on setting while kiosk policy is active.
+- If policy requests kiosk boot unlock, attempt a best-effort keyguard dismissal after reboot without password policy.
 - Enforce app allow/block lists and package suspension.
 - Enforce screen lock, restriction flags, and behavior toggles from the server.
 - Never treat local UI state as authoritative over the latest policy snapshot.

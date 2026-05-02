@@ -312,6 +312,45 @@ func TestKioskExitChrome(t *testing.T) {
 	waitForForegroundPackage(t, env.serial, launcherPackage)
 }
 
+// TestKioskStayAwakeWhilePluggedIn verifies that a kiosk policy can push the
+// device-owner stay-on-while-plugged-in setting onto the device.
+func TestKioskStayAwakeWhilePluggedIn(t *testing.T) {
+	env := newBaseTestEnv(t, false)
+	t.Cleanup(func() {
+		resetBatteryState(t, env.serial)
+	})
+	setBatteryPlugged(t, env.serial, true)
+
+	mustCreatePolicy(t, env.client, env.baseURL, `{
+		"name":"kiosk-stay-awake",
+		"version":1,
+		"kioskMode":true,
+		"kioskAppPackage":"com.xmdm.launcher",
+		"restrictions":{
+			"kioskStayAwakeWhilePluggedIn":true
+		}
+	}`)
+
+	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	// Android can normalize the stay-on mask depending on device power sources.
+	// Accept the supported kiosk masks instead of pinning the test to one exact value.
+	waitForGlobalSettingAny(
+		t,
+		env.serial,
+		"stay_on_while_plugged_in",
+		stayOnWhilePluggedInMask(false),
+		stayOnWhilePluggedInMask(true),
+	)
+}
+
 // TestPackageRules verifies that the launcher suspends packages that are
 // blocked by the signed policy snapshot on a physical device.
 func TestPackageRules(t *testing.T) {

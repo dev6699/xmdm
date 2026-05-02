@@ -32,6 +32,8 @@ import com.xmdm.launcher.enrollment.HttpEnrollmentGateway
 import com.xmdm.launcher.deviceinfo.DeviceInfoReporter
 import com.xmdm.launcher.kiosk.AndroidKioskModeHost
 import com.xmdm.launcher.kiosk.KioskModeController
+import com.xmdm.launcher.kiosk.kioskKeepScreenOn
+import com.xmdm.launcher.kiosk.kioskUnlockOnBoot
 import com.xmdm.launcher.logs.DeviceLogCoordinator
 import com.xmdm.launcher.logs.DeviceLogStore
 import com.xmdm.launcher.logs.HttpDeviceLogGateway
@@ -239,19 +241,29 @@ class MainActivity : AppCompatActivity() {
         if (isUserUnlocked()) {
             return
         }
-        prepareForUnlockScreen()
+        val policyCache = stateStore.state.first().policyCache
+        val keepScreenOn = policyCache?.let { kioskKeepScreenOn(it.snapshotJson) } == true
+        val unlockOnBoot = policyCache?.let { kioskUnlockOnBoot(it.snapshotJson) } ?: true
+        prepareForUnlockScreen(keepScreenOn)
         Log.w(TAG, "waiting for user unlock instance=$instanceId")
-        requestDismissKeyguard()
+        if (unlockOnBoot) {
+            requestDismissKeyguard()
+        }
         while (!isUserUnlocked()) {
             delay(250)
         }
     }
 
-    private fun prepareForUnlockScreen() {
+    private fun prepareForUnlockScreen(keepScreenOn: Boolean) {
         window.addFlags(
             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                 WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
         )
+        if (keepScreenOn) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     private fun requestDismissKeyguard() {

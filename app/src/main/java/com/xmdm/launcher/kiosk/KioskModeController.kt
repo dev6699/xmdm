@@ -6,9 +6,12 @@ import android.app.ActivityOptions
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
+import android.provider.Settings
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.xmdm.launcher.AdminReceiver
@@ -19,6 +22,8 @@ interface KioskModeHost {
     val packageName: String
     fun isDeviceOwnerApp(): Boolean
     fun isInLockTaskMode(): Boolean
+    fun setKeepScreenOn(keepScreenOn: Boolean)
+    fun setStayAwakeWhilePluggedIn(stayAwakeWhilePluggedIn: Boolean)
     fun setLockTaskPackages(packages: Array<String>)
     fun startLockTask()
     fun stopLockTask()
@@ -60,6 +65,37 @@ class AndroidKioskModeHost(
             activityManager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_LOCKED
         } else {
             activityManager.isInLockTaskMode()
+        }
+    }
+
+    override fun setKeepScreenOn(keepScreenOn: Boolean) {
+        if (keepScreenOn) {
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    override fun setStayAwakeWhilePluggedIn(stayAwakeWhilePluggedIn: Boolean) {
+        val dpm = devicePolicyManager ?: return
+        if (!isDeviceOwnerApp()) {
+            return
+        }
+        val value = if (stayAwakeWhilePluggedIn) {
+            BatteryManager.BATTERY_PLUGGED_AC or
+                BatteryManager.BATTERY_PLUGGED_USB or
+                BatteryManager.BATTERY_PLUGGED_WIRELESS
+        } else {
+            0
+        }
+        runCatching {
+            dpm.setGlobalSetting(
+                adminComponent,
+                Settings.Global.STAY_ON_WHILE_PLUGGED_IN,
+                value.toString(),
+            )
+        }.onFailure {
+            Log.w("XmdmLauncher", "failed to set stay-on-while-plugged-in=$stayAwakeWhilePluggedIn", it)
         }
     }
 
@@ -139,6 +175,14 @@ class KioskModeController(
                 isPolicyContentReady(state, cache.version) &&
                 !isKioskExitSuppressed(state, cache.version)
         } == true
+        val desiredKeepScreenOn = policyCache?.takeIf { desiredKioskMode }?.let { cache ->
+            kioskKeepScreenOn(cache.snapshotJson)
+        } == true
+        host.setKeepScreenOn(desiredKeepScreenOn)
+        val desiredStayAwakeWhilePluggedIn = policyCache?.takeIf { desiredKioskMode }?.let { cache ->
+            kioskStayAwakeWhilePluggedIn(cache.snapshotJson)
+        } == true
+        host.setStayAwakeWhilePluggedIn(desiredStayAwakeWhilePluggedIn)
         val desiredKioskPackage = policyCache?.takeIf { desiredKioskMode }?.let { cache ->
             kioskPackageName(cache.snapshotJson)?.takeIf { it.isNotBlank() } ?: host.packageName
         }
@@ -171,6 +215,9 @@ class KioskModeController(
             return
         }
 
+        if (!desiredKioskMode && host.isInLockTaskMode()) {
+            host.stopLockTask()
+        }
         host.setLockTaskPackages(emptyArray())
         logger.warn("kiosk mode disabled")
         appliedKioskMode = false
@@ -260,6 +307,30 @@ class KioskModeController(
         return stringValue(policy, "kioskAppPackage", "kiosk_app_package")
     }
 
+    private fun kioskKeepScreenOn(snapshotJson: String): Boolean {
+        val root = runCatching { JsonParser.parseString(snapshotJson).asJsonObject }.getOrNull()
+            ?: return false
+        val policy = root.getAsJsonObject("policy") ?: return false
+        val restrictions = policy.getAsJsonObject("restrictions") ?: return false
+        return booleanValue(
+            restrictions,
+            "kioskKeepScreenOn",
+            "kiosk_keep_screen_on",
+        )
+    }
+
+    private fun kioskStayAwakeWhilePluggedIn(snapshotJson: String): Boolean {
+        val root = runCatching { JsonParser.parseString(snapshotJson).asJsonObject }.getOrNull()
+            ?: return false
+        val policy = root.getAsJsonObject("policy") ?: return false
+        val restrictions = policy.getAsJsonObject("restrictions") ?: return false
+        return booleanValue(
+            restrictions,
+            "kioskStayAwakeWhilePluggedIn",
+            "kiosk_stay_awake_while_plugged_in",
+        )
+    }
+
     private fun isKioskExitSuppressed(state: AgentState, version: Long): Boolean {
         val suppressedUntil = state.kioskControl?.exitSuppressedUntilPolicyVersion ?: return false
         return version <= suppressedUntil
@@ -294,4 +365,40 @@ class KioskModeController(
         }
         return null
     }
+}
+
+internal fun kioskKeepScreenOn(snapshotJson: String): Boolean {
+    return kioskRestrictionBoolean(
+        snapshotJson,
+        "kioskKeepScreenOn",
+        "kiosk_keep_screen_on",
+    )
+}
+
+internal fun kioskUnlockOnBoot(snapshotJson: String): Boolean {
+    return kioskRestrictionBoolean(
+        snapshotJson,
+        "kioskUnlockOnBoot",
+        "kiosk_unlock_on_boot",
+    )
+}
+
+private fun kioskRestrictionBoolean(snapshotJson: String, vararg names: String): Boolean {
+    val root = runCatching { JsonParser.parseString(snapshotJson).asJsonObject }.getOrNull()
+        ?: return false
+    val policy = root.getAsJsonObject("policy") ?: return false
+    val restrictions = policy.getAsJsonObject("restrictions") ?: return false
+    for (name in names) {
+        val value = restrictions.get(name) ?: continue
+        if (value.isJsonNull) continue
+        when {
+            value.isJsonPrimitive && value.asJsonPrimitive.isBoolean -> return value.asBoolean
+            value.isJsonPrimitive && value.asJsonPrimitive.isString -> {
+                val raw = value.asString.trim()
+                if (raw.equals("true", ignoreCase = true)) return true
+                if (raw.equals("false", ignoreCase = true)) return false
+            }
+        }
+    }
+    return false
 }

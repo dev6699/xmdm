@@ -45,9 +45,12 @@ type PolicySnapshot struct {
 }
 
 type PolicyRestrictions struct {
-	AllowPackages   []string `json:"allowPackages,omitempty"`
-	BlockPackages   []string `json:"blockPackages,omitempty"`
-	SuspendPackages []string `json:"suspendPackages,omitempty"`
+	AllowPackages                []string `json:"allowPackages,omitempty"`
+	BlockPackages                []string `json:"blockPackages,omitempty"`
+	SuspendPackages              []string `json:"suspendPackages,omitempty"`
+	KioskKeepScreenOn            bool     `json:"kioskKeepScreenOn,omitempty"`
+	KioskStayAwakeWhilePluggedIn bool     `json:"kioskStayAwakeWhilePluggedIn,omitempty"`
+	KioskUnlockOnBoot            bool     `json:"kioskUnlockOnBoot,omitempty"`
 }
 
 type RuntimeSnapshot struct {
