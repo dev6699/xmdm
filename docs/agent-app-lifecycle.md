@@ -40,6 +40,7 @@ flowchart TD
   - fetch the signed config snapshot after enrollment
   - apply managed files from the signed snapshot
   - apply managed apps from the signed snapshot
+  - relaunch the launcher after boot so kiosk policy can be enforced
   - start command transport when identity exists
 - start device log upload when bootstrap and identity exist
 - upload device info after enrollment and after config/app/file changes
@@ -371,6 +372,7 @@ The signed config snapshot contains multiple buckets:
   - currently carried in the config envelope, but not yet applied by launcher code
 
 The launcher applies only the buckets it knows how to enforce today. Unknown or future fields remain part of the signed envelope so the contract can evolve without breaking verification.
+The policy snapshot can also name a kiosk app package. When kiosk is enabled, the launcher uses that package as the kiosk target; otherwise it falls back to the launcher package itself.
 
 ### Bucket Behavior
 

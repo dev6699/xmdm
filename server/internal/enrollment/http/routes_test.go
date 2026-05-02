@@ -727,9 +727,10 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 					TenantID: "tenant-1",
 					Status:   "active",
 				},
-				Name:      "policy-one",
-				Version:   3,
-				KioskMode: true,
+				Name:            "policy-one",
+				Version:         3,
+				KioskMode:       true,
+				KioskAppPackage: "com.example.kiosk",
 				Restrictions: json.RawMessage(`{
 					"blockPackages":["com.example.bad"],
 					"allowPackages":["com.example.good"]
@@ -797,7 +798,7 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 	if config.Runtime.MqttAddress != "127.0.0.1:1883" || config.Runtime.CommandPollIntervalMs != 1000 || config.Runtime.ConfigSyncIntervalMs != 1000 {
 		t.Fatalf("unexpected runtime config: %#v", config.Runtime)
 	}
-	if config.Policy.Name != "policy-one" || !config.Policy.KioskMode {
+	if config.Policy.Name != "policy-one" || !config.Policy.KioskMode || config.Policy.KioskAppPackage != "com.example.kiosk" {
 		t.Fatalf("unexpected policy: %#v", config.Policy)
 	}
 	if len(config.Apps) != 1 || len(config.Files) != 1 || len(config.Certificates) != 1 {

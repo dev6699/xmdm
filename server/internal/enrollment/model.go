@@ -37,10 +37,11 @@ type DeviceSnapshot struct {
 }
 
 type PolicySnapshot struct {
-	Name         string             `json:"name,omitempty"`
-	Version      int                `json:"version,omitempty"`
-	KioskMode    bool               `json:"kioskMode"`
-	Restrictions PolicyRestrictions `json:"restrictions,omitempty"`
+	Name            string             `json:"name,omitempty"`
+	Version         int                `json:"version,omitempty"`
+	KioskMode       bool               `json:"kioskMode"`
+	KioskAppPackage string             `json:"kioskAppPackage,omitempty"`
+	Restrictions    PolicyRestrictions `json:"restrictions,omitempty"`
 }
 
 type PolicyRestrictions struct {

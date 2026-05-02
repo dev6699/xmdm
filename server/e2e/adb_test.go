@@ -65,6 +65,35 @@ func waitForChromeUninstalled(t *testing.T, serial string) {
 	)
 }
 
+// waitForForegroundPackage polls until the requested package appears as the
+// foreground or resumed activity in dumpsys output.
+func waitForForegroundPackage(t *testing.T, serial, packageName string) {
+	t.Helper()
+	waitForCondition(t, time.Minute, packageName+" to be foreground on device",
+		func() string { return adbForegroundSnapshot(t, serial, packageName) },
+		func() (bool, error) {
+			activityOut, err := adbShellOutput(serial, "dumpsys", "activity", "activities")
+			if err != nil {
+				return false, nil
+			}
+			windowOut, err := adbShellOutput(serial, "dumpsys", "window", "windows")
+			if err != nil {
+				return false, nil
+			}
+			return isForegroundPackageDump(activityOut, packageName) && isWindowFocusPackageDump(windowOut, packageName), nil
+		},
+	)
+}
+
+// waitForForegroundPackageStable waits for the package to become foreground and
+// remain foreground long enough for a kiosk handoff to settle.
+func waitForForegroundPackageStable(t *testing.T, serial, packageName string, settle time.Duration) {
+	t.Helper()
+	waitForForegroundPackage(t, serial, packageName)
+	time.Sleep(settle)
+	waitForForegroundPackage(t, serial, packageName)
+}
+
 // waitForManagedFileRemovedFromDevice polls until the managed file disappears from the device.
 func waitForManagedFileRemovedFromDevice(t *testing.T, serial string) {
 	t.Helper()
@@ -103,6 +132,21 @@ func waitForKioskModeOnDevice(t *testing.T, serial string) {
 				return false, nil
 			}
 			return isKioskModeDump(out), nil
+		},
+	)
+}
+
+// waitForKioskModeOffOnDevice polls until the launcher exits lock-task mode.
+func waitForKioskModeOffOnDevice(t *testing.T, serial string) {
+	t.Helper()
+	waitForCondition(t, time.Minute, "launcher to exit kiosk mode",
+		func() string { return adbKioskSnapshot(t, serial) },
+		func() (bool, error) {
+			out, err := adbShellOutput(serial, "dumpsys", "activity", "activities")
+			if err != nil {
+				return false, nil
+			}
+			return !isKioskModeDump(out), nil
 		},
 	)
 }
@@ -280,6 +324,24 @@ func adbPackageSnapshot(t *testing.T, serial, packageName string) string {
 	return strings.Join(filtered, " | ")
 }
 
+func adbForegroundSnapshot(t *testing.T, serial, packageName string) string {
+	t.Helper()
+	activityOut, err := adbShellOutput(serial, "dumpsys", "activity", "activities")
+	if err != nil {
+		return "foreground_err=" + strings.TrimSpace(err.Error())
+	}
+	windowOut, err := adbShellOutput(serial, "dumpsys", "window", "windows")
+	if err != nil {
+		return "foreground_err=" + strings.TrimSpace(err.Error())
+	}
+	filtered := foregroundSnapshotLines(activityOut, packageName)
+	filtered = append(filtered, windowFocusSnapshotLines(windowOut, packageName)...)
+	if len(filtered) == 0 {
+		return "foreground=unknown"
+	}
+	return strings.Join(filtered, " | ")
+}
+
 func isKioskModeDump(out string) bool {
 	lower := strings.ToLower(out)
 	if strings.Contains(lower, "mlocktaskmodestate=locked") || strings.Contains(lower, "mlocktaskmodestate=1") {
@@ -289,6 +351,65 @@ func isKioskModeDump(out string) bool {
 		return true
 	}
 	return false
+}
+
+func isForegroundPackageDump(out, packageName string) bool {
+	lower := strings.ToLower(out)
+	pkg := strings.ToLower(packageName)
+	if !strings.Contains(lower, pkg) {
+		return false
+	}
+	return strings.Contains(lower, "mresumedactivity") ||
+		strings.Contains(lower, "topresumedactivity") ||
+		strings.Contains(lower, "mcurrentfocus") ||
+		strings.Contains(lower, "resumed activity")
+}
+
+func isWindowFocusPackageDump(out, packageName string) bool {
+	lower := strings.ToLower(out)
+	pkg := strings.ToLower(packageName)
+	if !strings.Contains(lower, pkg) {
+		return false
+	}
+	return strings.Contains(lower, "mcurrentfocus") ||
+		strings.Contains(lower, "mfocusedapp") ||
+		strings.Contains(lower, "mcurrentfocus=window")
+}
+
+func foregroundSnapshotLines(activityOut, packageName string) []string {
+	lines := strings.Split(activityOut, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, strings.ToLower(packageName)) &&
+			(strings.Contains(lower, "mresumedactivity") ||
+				strings.Contains(lower, "topresumedactivity") ||
+				strings.Contains(lower, "resumed activity")) {
+			filtered = append(filtered, line)
+		}
+	}
+	return filtered
+}
+
+func windowFocusSnapshotLines(windowOut, packageName string) []string {
+	lines := strings.Split(windowOut, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, strings.ToLower(packageName)) &&
+			(strings.Contains(lower, "mcurrentfocus") || strings.Contains(lower, "mfocusedapp")) {
+			filtered = append(filtered, line)
+		}
+	}
+	return filtered
 }
 
 func isPackageSuspendedDump(out string) bool {

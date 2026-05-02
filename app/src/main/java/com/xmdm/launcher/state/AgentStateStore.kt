@@ -86,6 +86,16 @@ class AgentStateStore(
         }
     }
 
+    suspend fun saveKioskControl(state: KioskControlState) {
+        dataStore.edit { prefs ->
+            if (state.exitSuppressedUntilPolicyVersion == null) {
+                prefs.remove(Keys.KIOSK_EXIT_SUPPRESSED_UNTIL_POLICY_VERSION)
+            } else {
+                prefs[Keys.KIOSK_EXIT_SUPPRESSED_UNTIL_POLICY_VERSION] = state.exitSuppressedUntilPolicyVersion
+            }
+        }
+    }
+
     suspend fun clearCertificates() {
         dataStore.edit { prefs ->
             prefs.remove(Keys.CERTIFICATES_SNAPSHOT_JSON)
@@ -107,6 +117,7 @@ class AgentStateStore(
         val managedApps = managedAppsFromPrefs(prefs)
         val managedFiles = managedFilesFromPrefs(prefs)
         val certificates = certificatesFromPrefs(prefs)
+        val kioskControl = kioskControlFromPrefs(prefs)
         return AgentState(
             bootstrap = bootstrap,
             identity = identity,
@@ -114,6 +125,7 @@ class AgentStateStore(
             managedApps = managedApps,
             managedFiles = managedFiles,
             certificates = certificates,
+            kioskControl = kioskControl,
         )
     }
 
@@ -193,6 +205,15 @@ class AgentStateStore(
         )
     }
 
+    private fun kioskControlFromPrefs(prefs: Preferences): KioskControlState? {
+        val exitSuppressedUntilPolicyVersion = prefs[Keys.KIOSK_EXIT_SUPPRESSED_UNTIL_POLICY_VERSION]
+        return if (exitSuppressedUntilPolicyVersion == null) {
+            null
+        } else {
+            KioskControlState(exitSuppressedUntilPolicyVersion = exitSuppressedUntilPolicyVersion)
+        }
+    }
+
     private object Keys {
         val BOOTSTRAP_SERVER_URL = stringPreferencesKey("bootstrap_server_url")
         val BOOTSTRAP_SECONDARY_SERVER_URL = stringPreferencesKey("bootstrap_secondary_server_url")
@@ -219,6 +240,7 @@ class AgentStateStore(
         val CERTIFICATES_SNAPSHOT_JSON = stringPreferencesKey("certificates_snapshot_json")
         val CERTIFICATES_VERSION = longPreferencesKey("certificates_version")
         val CERTIFICATES_LAST_APPLIED_AT_EPOCH_MILLIS = longPreferencesKey("certificates_last_applied_at_epoch_millis")
+        val KIOSK_EXIT_SUPPRESSED_UNTIL_POLICY_VERSION = longPreferencesKey("kiosk_exit_suppressed_until_policy_version")
     }
 
     companion object {

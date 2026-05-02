@@ -37,17 +37,17 @@ func (s *Store) CreatePolicy(ctx context.Context, tenantID string, req policy.Po
 		restrictions = []byte(`{}`)
 	}
 	row := s.pool.QueryRow(ctx,
-		`INSERT INTO policies (id, tenant_id, name, version, kiosk_mode, restrictions_json, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-		 RETURNING id::text, tenant_id::text, name, version, kiosk_mode, restrictions_json, status, updated_at, deleted_at`,
-		uuid.NewString(), tenantID, req.Name, req.Version, req.KioskMode, restrictions, s.now(),
+		`INSERT INTO policies (id, tenant_id, name, version, kiosk_mode, kiosk_app_package, restrictions_json, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+		 RETURNING id::text, tenant_id::text, name, version, kiosk_mode, kiosk_app_package, restrictions_json, status, updated_at, deleted_at`,
+		uuid.NewString(), tenantID, req.Name, req.Version, req.KioskMode, req.KioskAppPackage, restrictions, s.now(),
 	)
 	return scanPolicy(row)
 }
 
 func (s *Store) ListPolicies(ctx context.Context, tenantID string) ([]policy.Policy, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, tenant_id::text, name, version, kiosk_mode, restrictions_json, status, updated_at, deleted_at
+		`SELECT id::text, tenant_id::text, name, version, kiosk_mode, kiosk_app_package, restrictions_json, status, updated_at, deleted_at
 		 FROM policies
 		 WHERE tenant_id = $1
 		 ORDER BY created_at`,
@@ -82,10 +82,10 @@ func (s *Store) UpdatePolicy(ctx context.Context, tenantID, id string, req polic
 	}
 	row := s.pool.QueryRow(ctx,
 		`UPDATE policies
-		 SET name = $3, version = $4, kiosk_mode = $5, restrictions_json = $6::jsonb, updated_at = $7
+		 SET name = $3, version = $4, kiosk_mode = $5, kiosk_app_package = $6, restrictions_json = $7::jsonb, updated_at = $8
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, name, version, kiosk_mode, restrictions_json, status, updated_at, deleted_at`,
-		tenantID, id, req.Name, req.Version, req.KioskMode, restrictions, s.now(),
+		 RETURNING id::text, tenant_id::text, name, version, kiosk_mode, kiosk_app_package, restrictions_json, status, updated_at, deleted_at`,
+		tenantID, id, req.Name, req.Version, req.KioskMode, req.KioskAppPackage, restrictions, s.now(),
 	)
 	rec, err := scanPolicy(row)
 	if err != nil {
@@ -102,7 +102,7 @@ func (s *Store) RetirePolicy(ctx context.Context, tenantID, id string) (policy.P
 		`UPDATE policies
 		 SET status = 'retired', deleted_at = $3, updated_at = $3
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, name, version, kiosk_mode, restrictions_json, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, name, version, kiosk_mode, kiosk_app_package, restrictions_json, status, updated_at, deleted_at`,
 		tenantID, id, s.now(),
 	)
 	rec, err := scanPolicy(row)
@@ -118,9 +118,13 @@ func (s *Store) RetirePolicy(ctx context.Context, tenantID, id string) (policy.P
 func scanPolicy(scanner rowScanner) (policy.Policy, error) {
 	var rec policy.Policy
 	var deletedAt pgtype.Timestamptz
+	var kioskAppPackage pgtype.Text
 	var restrictions json.RawMessage
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &rec.Version, &rec.KioskMode, &restrictions, &rec.Status, &rec.UpdatedAt, &deletedAt); err != nil {
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &rec.Version, &rec.KioskMode, &kioskAppPackage, &restrictions, &rec.Status, &rec.UpdatedAt, &deletedAt); err != nil {
 		return policy.Policy{}, err
+	}
+	if kioskAppPackage.Valid {
+		rec.KioskAppPackage = kioskAppPackage.String
 	}
 	if deletedAt.Valid {
 		rec.DeletedAt = &deletedAt.Time

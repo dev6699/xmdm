@@ -34,7 +34,7 @@ The agent owns device-side state. The server owns policy truth. The device never
 
 ```mermaid
 flowchart TD
-    A[Boot or launcher start] --> B[Load local settings]
+    A[Boot receiver or launcher start] --> B[Load local settings]
     B --> C{Enrolled}
     C -->|No| D[Provisioning path]
     C -->|Yes| E[Fetch config]
@@ -69,7 +69,7 @@ flowchart TD
 - `SECONDARY_BASE_URL`
 - `SERVER_PROJECT`
 - `DEVICE_ID` and `DEVICE_ID_USE`
-- optional customer, config, group, and cert fields
+- optional customer, config, group, kiosk-app, and cert fields
 - device runtime settings such as MQTT address and polling intervals are delivered in the signed config snapshot after enrollment
 
 ## Runtime State Machine
@@ -125,6 +125,7 @@ flowchart TD
 
 - Apply server policy at startup and after every config refresh.
 - Enforce kiosk mode when the policy requires it.
+- If policy names a kiosk app package, launch that package after boot and on kiosk re-entry.
 - Enforce app allow/block lists and package suspension.
 - Enforce screen lock, restriction flags, and behavior toggles from the server.
 - Never treat local UI state as authoritative over the latest policy snapshot.
@@ -135,6 +136,7 @@ flowchart TD
 - HTTP polling is the fallback transport.
 - The agent uses the broker address from the signed config snapshot when present and otherwise keeps polling as the safe path.
 - The agent polls pending commands, executes supported ones, and acks the result back to the server.
+- The `exit_kiosk` command temporarily suppresses kiosk enforcement until a newer policy revision arrives.
 - WorkManager keeps telemetry, sync, and retry jobs alive across reboots.
 - The agent must recover from Wi-Fi changes, device restarts, and service kills.
 

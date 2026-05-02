@@ -18,7 +18,7 @@
 | Role | Permission bundle | `id`, `tenant_id`, `name`, `permissions` |
 | Device | Managed Android endpoint | `id`, `tenant_id`, `device_id`, `secret_hash`, `status`, `policy_id` |
 | Group | Device grouping | `id`, `tenant_id`, `name`, `status` |
-| Policy | Runtime device policy | `id`, `tenant_id`, `name`, `version`, `kiosk_mode`, `restrictions_json` |
+| Policy | Runtime device policy | `id`, `tenant_id`, `name`, `version`, `kiosk_mode`, `kiosk_app_package`, `restrictions_json` |
 | App | Logical app record | `id`, `tenant_id`, `package_name`, `name`, `status` |
 | AppVersion | Immutable package version | `id`, `app_id`, `version_name`, `version_code`, `artifact_id`, `checksum` |
 | File | Immutable file record | `id`, `tenant_id`, `name`, `artifact_id`, `checksum`, `mime_type` |

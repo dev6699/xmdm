@@ -411,6 +411,7 @@ func latestPolicySnapshot(ctx context.Context, store policy.Repository, tenantID
 	snapshot.Name = selected.Name
 	snapshot.Version = selected.Version
 	snapshot.KioskMode = selected.KioskMode
+	snapshot.KioskAppPackage = selected.KioskAppPackage
 	if len(selected.Restrictions) > 0 {
 		var restrictions enrollment.PolicyRestrictions
 		if err := json.Unmarshal(selected.Restrictions, &restrictions); err != nil {

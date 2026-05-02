@@ -2,14 +2,18 @@ package com.xmdm.launcher.kiosk
 
 import android.app.Activity
 import android.app.ActivityManager
+import android.app.ActivityOptions
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
+import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.xmdm.launcher.AdminReceiver
 import com.xmdm.launcher.state.AgentState
+import kotlinx.coroutines.delay
 
 interface KioskModeHost {
     val packageName: String
@@ -18,6 +22,9 @@ interface KioskModeHost {
     fun setLockTaskPackages(packages: Array<String>)
     fun startLockTask()
     fun stopLockTask()
+    fun finishHostActivity()
+    fun canLaunchPackage(packageName: String): Boolean
+    fun launchPackage(packageName: String, lockTaskEnabled: Boolean): Boolean
 }
 
 fun interface KioskModeLogger {
@@ -71,6 +78,51 @@ class AndroidKioskModeHost(
     override fun stopLockTask() {
         activity.stopLockTask()
     }
+
+    override fun finishHostActivity() {
+        if (!activity.moveTaskToBack(true)) {
+            activity.finishAndRemoveTask()
+        }
+    }
+
+    override fun canLaunchPackage(packageName: String): Boolean {
+        return kioskLaunchIntent(packageName) != null
+    }
+
+    override fun launchPackage(packageName: String, lockTaskEnabled: Boolean): Boolean {
+        val launchIntent = kioskLaunchIntent(packageName) ?: return false
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        return runCatching {
+            val options = if (lockTaskEnabled) createLaunchOptions() else null
+            if (options == null) {
+                activity.startActivity(launchIntent)
+            } else {
+                activity.startActivity(launchIntent, options)
+            }
+        }.fold(
+            onSuccess = { true },
+            onFailure = {
+                Log.w("XmdmLauncher", "failed to launch package=$packageName", it)
+                false
+            },
+        )
+    }
+
+    private fun kioskLaunchIntent(packageName: String): Intent? {
+        return activity.packageManager.getLaunchIntentForPackage(packageName)
+    }
+
+    private fun createLaunchOptions(): Bundle? {
+        val options = ActivityOptions.makeBasic()
+        runCatching {
+            val method = options.javaClass.methods.firstOrNull { candidate ->
+                candidate.name == "setLockTaskEnabled" && candidate.parameterTypes.size == 1 &&
+                    candidate.parameterTypes[0] == Boolean::class.javaPrimitiveType
+            } ?: return@runCatching
+            method.invoke(options, true)
+        }
+        return options.toBundle()
+    }
 }
 
 class KioskModeController(
@@ -78,14 +130,30 @@ class KioskModeController(
     private val logger: KioskModeLogger = AndroidKioskModeLogger,
 ) {
     private var appliedKioskMode: Boolean? = null
+    private var appliedKioskPackage: String? = null
 
-    fun apply(state: AgentState) {
+    fun apply(state: AgentState, forceLaunch: Boolean = false) {
         val policyCache = state.policyCache
         val desiredKioskMode = policyCache?.let { cache ->
-            isKioskModeEnabled(cache.snapshotJson) && isPolicyContentReady(state, cache.version)
+            isKioskModeEnabled(cache.snapshotJson) &&
+                isPolicyContentReady(state, cache.version) &&
+                !isKioskExitSuppressed(state, cache.version)
         } == true
+        val desiredKioskPackage = policyCache?.takeIf { desiredKioskMode }?.let { cache ->
+            kioskPackageName(cache.snapshotJson)?.takeIf { it.isNotBlank() } ?: host.packageName
+        }
 
-        if (appliedKioskMode == desiredKioskMode) {
+        if (desiredKioskMode &&
+            appliedKioskMode == true &&
+            appliedKioskPackage == desiredKioskPackage &&
+            !forceLaunch
+        ) {
+            if (desiredKioskPackage != host.packageName || host.isInLockTaskMode()) {
+                return
+            }
+        }
+
+        if (!desiredKioskMode && appliedKioskMode == false && !host.isInLockTaskMode()) {
             return
         }
 
@@ -94,21 +162,78 @@ class KioskModeController(
                 logger.warn("kiosk mode requested but device owner is unavailable")
                 return
             }
-            host.setLockTaskPackages(arrayOf(host.packageName))
-            if (!host.isInLockTaskMode()) {
-                host.startLockTask()
+            val launched = enforceKiosk(desiredKioskPackage ?: host.packageName, forceLaunch)
+            if (launched || host.isInLockTaskMode()) {
+                logger.warn("kiosk mode enabled")
+                appliedKioskMode = true
+                appliedKioskPackage = desiredKioskPackage ?: host.packageName
             }
-            logger.warn("kiosk mode enabled")
-            appliedKioskMode = true
             return
         }
 
         host.setLockTaskPackages(emptyArray())
-        if (host.isInLockTaskMode()) {
-            host.stopLockTask()
-        }
         logger.warn("kiosk mode disabled")
         appliedKioskMode = false
+        appliedKioskPackage = null
+    }
+
+    suspend fun launchConfiguredKioskApp(state: AgentState): Boolean {
+        val policyCache = state.policyCache ?: return false
+        if (!isKioskModeEnabled(policyCache.snapshotJson) ||
+            !isPolicyContentReady(state, policyCache.version) ||
+            isKioskExitSuppressed(state, policyCache.version)
+        ) {
+            return false
+        }
+        if (!host.isDeviceOwnerApp()) {
+            logger.warn("kiosk mode requested but device owner is unavailable")
+            return false
+        }
+        val kioskPackage = kioskPackageName(policyCache.snapshotJson)?.takeIf { it.isNotBlank() } ?: host.packageName
+        if (kioskPackage != host.packageName) {
+            var remainingWaitMs = 60_000L
+            while (remainingWaitMs > 0 && !host.canLaunchPackage(kioskPackage)) {
+                logger.warn("waiting for kiosk app package $kioskPackage to become launchable")
+                delay(500)
+                remainingWaitMs -= 500
+            }
+            if (!host.canLaunchPackage(kioskPackage)) {
+                logger.warn("kiosk app package $kioskPackage is still not launchable")
+                return false
+            }
+        }
+        return enforceKiosk(kioskPackage, forceLaunch = true)
+    }
+
+    private fun enforceKiosk(kioskPackage: String, forceLaunch: Boolean): Boolean {
+        val lockTaskPackages = linkedSetOf(host.packageName, kioskPackage).toTypedArray()
+        host.setLockTaskPackages(lockTaskPackages)
+        if (kioskPackage == host.packageName) {
+            if (!host.isInLockTaskMode()) {
+                host.startLockTask()
+            }
+            return true
+        }
+        logger.warn("launching kiosk app package $kioskPackage force=$forceLaunch")
+        val launched = host.launchPackage(kioskPackage, lockTaskEnabled = true)
+        if (!launched) {
+            logger.warn("kiosk app package $kioskPackage could not be launched")
+            if (!host.isInLockTaskMode()) {
+                host.startLockTask()
+            }
+            appliedKioskMode = true
+            appliedKioskPackage = host.packageName
+            return false
+        }
+        appliedKioskMode = true
+        appliedKioskPackage = kioskPackage
+        if (kioskPackage != host.packageName) {
+            if (host.isInLockTaskMode()) {
+                host.stopLockTask()
+            }
+            host.finishHostActivity()
+        }
+        return true
     }
 
     private fun isPolicyContentReady(state: AgentState, version: Long): Boolean {
@@ -128,6 +253,18 @@ class KioskModeController(
         )
     }
 
+    private fun kioskPackageName(snapshotJson: String): String? {
+        val root = runCatching { JsonParser.parseString(snapshotJson).asJsonObject }.getOrNull()
+            ?: return null
+        val policy = root.getAsJsonObject("policy") ?: return null
+        return stringValue(policy, "kioskAppPackage", "kiosk_app_package")
+    }
+
+    private fun isKioskExitSuppressed(state: AgentState, version: Long): Boolean {
+        val suppressedUntil = state.kioskControl?.exitSuppressedUntilPolicyVersion ?: return false
+        return version <= suppressedUntil
+    }
+
     private fun booleanValue(source: JsonObject, vararg names: String): Boolean {
         for (name in names) {
             val value = source.get(name) ?: continue
@@ -142,5 +279,19 @@ class KioskModeController(
             }
         }
         return false
+    }
+
+    private fun stringValue(source: JsonObject, vararg names: String): String? {
+        for (name in names) {
+            val value = source.get(name) ?: continue
+            if (value.isJsonNull) continue
+            if (value.isJsonPrimitive && value.asJsonPrimitive.isString) {
+                val raw = value.asString.trim()
+                if (raw.isNotEmpty()) {
+                    return raw
+                }
+            }
+        }
+        return null
     }
 }

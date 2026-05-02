@@ -119,6 +119,48 @@ class DeviceCommandCoordinatorTest {
     }
 
     @Test
+    fun executesAndAcksExitKioskCommands() = runTest {
+        val command = DeviceCommandRecord(
+            id = "cmd-exit",
+            type = "exit_kiosk",
+            status = "queued",
+            payload = null,
+            expiresAt = null,
+        )
+        val gateway = RecordingGateway(commands = listOf(command))
+        var exitRequested = false
+        val coordinator = DeviceCommandCoordinator(
+            gateway = gateway,
+            executor = DeviceCommandExecutor(
+                rebootAction = object : DeviceRebooter {
+                    override fun reboot() = error("not expected")
+                },
+                kioskExitAction = {
+                    exitRequested = true
+                    DeviceCommandExecutionResult(
+                        status = "acked",
+                        message = "kiosk exit requested",
+                        details = mapOf("policyVersion" to 9L),
+                    )
+                },
+            ),
+        )
+
+        val handled = coordinator.pollAndExecute(
+            serverUrl = "https://mdm.example",
+            deviceId = "device-123",
+            deviceSecret = "secret-abc",
+        )
+
+        assertTrue(exitRequested)
+        assertEquals(listOf("cmd-exit"), handled.map { it.id })
+        assertEquals(1, gateway.acks.size)
+        assertEquals("acked", gateway.acks[0].request.status)
+        assertEquals("kiosk exit requested", gateway.acks[0].request.message)
+        assertEquals(9L, gateway.acks[0].request.details?.get("policyVersion"))
+    }
+
+    @Test
     fun acksExecutionFailures() = runTest {
         val command = DeviceCommandRecord(
             id = "cmd-2",

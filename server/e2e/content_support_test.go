@@ -295,6 +295,86 @@ func (e *commandTestEnv) mustIssueSyncConfigCommand(t *testing.T) string {
 	return id
 }
 
+func (e *commandTestEnv) mustIssueExitKioskCommand(t *testing.T) string {
+	t.Helper()
+
+	sessionID := mustAdminSessionID(t, e.baseURL)
+	req, err := http.NewRequest(http.MethodPost, e.baseURL+"/api/v1/admin/commands", strings.NewReader(fmt.Sprintf(`{
+		"type":"exit_kiosk",
+		"target":{
+			"type":"device",
+			"deviceId":"%s"
+		}
+	}`, e.deviceID)))
+	if err != nil {
+		t.Fatalf("build exit kiosk command request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", auth.SessionCookieName+"="+sessionID)
+
+	res, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("issue exit kiosk command: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 200, got %d for POST %s: %s", res.StatusCode, req.URL, strings.TrimSpace(string(body)))
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode exit kiosk command response: %v", err)
+	}
+
+	commands, _ := resp["commands"].([]any)
+	if len(commands) != 1 {
+		t.Fatalf("expected one command row, got %#v", resp["commands"])
+	}
+	cmd, _ := commands[0].(map[string]any)
+	id, _ := cmd["id"].(string)
+	if id == "" {
+		t.Fatalf("command response did not include an id: %#v", cmd)
+	}
+	if cmd["type"] != "exit_kiosk" {
+		t.Fatalf("unexpected command type: %#v", cmd["type"])
+	}
+	return id
+}
+
+func mustAdminSessionID(t *testing.T, baseURL string) string {
+	t.Helper()
+	client := newHTTPClient(t)
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/admin/login", strings.NewReader(fmt.Sprintf("username=%s&password=%s", adminUsername, adminPassword)))
+	if err != nil {
+		t.Fatalf("build admin login request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("admin login request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusSeeOther {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected login redirect, got %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var sessionCookie *http.Cookie
+	for _, cookie := range res.Cookies() {
+		if cookie.Name == auth.SessionCookieName {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatalf("admin session cookie was not returned")
+	}
+	if strings.TrimSpace(sessionCookie.Value) == "" {
+		t.Fatalf("admin session cookie was empty")
+	}
+	return sessionCookie.Value
+}
+
 func (e *commandTestEnv) waitForCommandAck(t *testing.T, commandID, expectedMessage string) {
 	t.Helper()
 	waitForCondition(t, time.Minute, "command ack to reach the server",

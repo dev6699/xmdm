@@ -33,13 +33,26 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 		"device-123",
 		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
-		PolicySnapshot{Name: "policy", Version: 2, KioskMode: true},
+		PolicySnapshot{Name: "policy", Version: 2, KioskMode: true, KioskAppPackage: "com.example.kiosk"},
 		nil,
 		nil,
 		nil,
 	)
 	if changedPolicy.Version == base.Version {
 		t.Fatalf("expected policy change to affect revision")
+	}
+
+	changedKioskPackage := NewBootstrapConfigSnapshot(
+		"device-123",
+		"serial",
+		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
+		PolicySnapshot{KioskMode: false, KioskAppPackage: "com.example.kiosk"},
+		nil,
+		nil,
+		nil,
+	)
+	if changedKioskPackage.Version == base.Version {
+		t.Fatalf("expected kiosk app package change to affect revision")
 	}
 
 	changedRuntime := NewBootstrapConfigSnapshot(

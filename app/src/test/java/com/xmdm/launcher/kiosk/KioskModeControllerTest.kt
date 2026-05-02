@@ -1,6 +1,7 @@
 package com.xmdm.launcher.kiosk
 
 import com.xmdm.launcher.state.AgentState
+import com.xmdm.launcher.state.KioskControlState
 import com.xmdm.launcher.state.PolicyCacheState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,6 +28,41 @@ class KioskModeControllerTest {
     }
 
     @Test
+    fun launchesConfiguredKioskAppWhenPolicyNamesOne() {
+        val host = FakeHost(deviceOwner = true, inLockTaskMode = true)
+        val controller = KioskModeController(host) { }
+
+        controller.apply(
+            agentState(
+                snapshotJson = """{"policy":{"kioskMode":true,"kioskAppPackage":"com.example.kiosk"}}""",
+            ),
+        )
+
+        assertTrue(host.setPackagesCalls.contains(listOf("com.xmdm.launcher", "com.example.kiosk")))
+        assertTrue(host.launchCalls.contains(LaunchCall(packageName = "com.example.kiosk", lockTaskEnabled = true)))
+        assertTrue(host.stopLockTaskCalls == 1)
+        assertTrue(host.finishHostActivityCalls == 1)
+        assertFalse(host.inLockTaskMode)
+    }
+
+    @Test
+    fun keepsKioskExitedUntilPolicyVersionChanges() {
+        val host = FakeHost(deviceOwner = true, inLockTaskMode = true)
+        val controller = KioskModeController(host) { }
+
+        controller.apply(
+            agentState(
+                snapshotJson = """{"policy":{"kioskMode":true}}""",
+                policyVersion = 7,
+                kioskExitSuppressedUntilPolicyVersion = 7,
+            ),
+        )
+
+        assertTrue(host.stopLockTaskCalls == 1)
+        assertFalse(host.inLockTaskMode)
+    }
+
+    @Test
     fun doesNotEnableKioskUntilContentForThatPolicyVersionIsReady() {
         val host = FakeHost(deviceOwner = true, inLockTaskMode = false)
         val controller = KioskModeController(host) { }
@@ -48,6 +84,7 @@ class KioskModeControllerTest {
         policyVersion: Long = 1,
         managedAppsVersion: Long? = null,
         managedFilesVersion: Long? = null,
+        kioskExitSuppressedUntilPolicyVersion: Long? = null,
     ): AgentState {
         return AgentState(
             policyCache = PolicyCacheState(
@@ -69,17 +106,28 @@ class KioskModeControllerTest {
                     lastAppliedAtEpochMillis = 1L,
                 )
             },
+            kioskControl = kioskExitSuppressedUntilPolicyVersion?.let {
+                KioskControlState(exitSuppressedUntilPolicyVersion = it)
+            },
         )
     }
+
+    private data class LaunchCall(
+        val packageName: String,
+        val lockTaskEnabled: Boolean,
+    )
 
     private class FakeHost(
         override val packageName: String = "com.xmdm.launcher",
         var deviceOwner: Boolean = true,
         var inLockTaskMode: Boolean = false,
+        var launchablePackages: MutableSet<String> = mutableSetOf(),
     ) : KioskModeHost {
         var startLockTaskCalls = 0
         var stopLockTaskCalls = 0
+        var finishHostActivityCalls = 0
         val setPackagesCalls = mutableListOf<List<String>>()
+        val launchCalls = mutableListOf<LaunchCall>()
 
         override fun isDeviceOwnerApp(): Boolean = deviceOwner
 
@@ -97,6 +145,22 @@ class KioskModeControllerTest {
         override fun stopLockTask() {
             stopLockTaskCalls += 1
             inLockTaskMode = false
+        }
+
+        override fun finishHostActivity() {
+            finishHostActivityCalls += 1
+        }
+
+        override fun canLaunchPackage(packageName: String): Boolean {
+            return packageName in launchablePackages
+        }
+
+        override fun launchPackage(packageName: String, lockTaskEnabled: Boolean): Boolean {
+            launchCalls += LaunchCall(packageName = packageName, lockTaskEnabled = lockTaskEnabled)
+            if (lockTaskEnabled) {
+                inLockTaskMode = true
+            }
+            return true
         }
     }
 }

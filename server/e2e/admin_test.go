@@ -245,7 +245,7 @@ func crudCreateBody(kind string) string {
 	case "apps":
 		return `{"packageName":"com.example.app","name":"apps-one"}`
 	case "policies":
-		return `{"name":"policies-one","version":1,"kioskMode":false,"restrictions":{"camera":false}}`
+		return `{"name":"policies-one","version":1,"kioskMode":false,"kioskAppPackage":"com.example.kiosk","restrictions":{"camera":false}}`
 	case "devices":
 		return `{"name":"devices-one","secretHash":"hash-devices-one"}`
 	default:
@@ -264,7 +264,7 @@ func crudUpdateBody(kind string) string {
 	case "apps":
 		return `{"packageName":"com.example.app.two","name":"apps-two"}`
 	case "policies":
-		return `{"name":"policies-two","version":2,"kioskMode":true,"restrictions":{"camera":true}}`
+		return `{"name":"policies-two","version":2,"kioskMode":true,"kioskAppPackage":"com.example.kiosk.two","restrictions":{"camera":true}}`
 	case "devices":
 		return `{"name":"devices-two","secretHash":"hash-devices-two"}`
 	default:

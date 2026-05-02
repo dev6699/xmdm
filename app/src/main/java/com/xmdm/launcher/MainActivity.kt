@@ -1,7 +1,9 @@
 package com.xmdm.launcher
 
-import android.os.Bundle
 import android.app.admin.DevicePolicyManager
+import android.app.KeyguardManager
+import android.content.Intent
+import android.os.Bundle
 import android.util.Base64
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
@@ -38,6 +40,7 @@ import com.xmdm.launcher.packages.PackageRulesController
 import com.xmdm.launcher.state.AgentState
 import com.xmdm.launcher.state.AgentStateStore
 import com.xmdm.launcher.state.CertificatesState
+import com.xmdm.launcher.state.KioskControlState
 import com.xmdm.launcher.state.LauncherEnrollmentStateMachine
 import com.xmdm.launcher.state.ManagedAppsState
 import com.xmdm.launcher.state.ManagedFilesState
@@ -45,11 +48,13 @@ import com.xmdm.launcher.sync.ConfigSyncEngine
 import com.xmdm.launcher.sync.HttpConfigSnapshotFetcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import java.io.File
@@ -59,6 +64,8 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.max
 import kotlin.math.min
 import java.util.UUID
+import android.os.UserManager
+import android.view.WindowManager
 
 class MainActivity : AppCompatActivity() {
     private val stateStore by lazy { AgentStateStore.from(applicationContext) }
@@ -109,6 +116,9 @@ class MainActivity : AppCompatActivity() {
                 configSyncAction = {
                     requestConfigSyncFromCommand()
                 },
+                kioskExitAction = {
+                    requestExitKioskFromCommand()
+                },
             ),
         )
     }
@@ -135,6 +145,8 @@ class MainActivity : AppCompatActivity() {
     private var configSyncTargetKey: String? = null
     private var deviceLogUploadJob: Job? = null
     private var deviceLogUploadTargetKey: String? = null
+    private var startedFromBoot = false
+    private var launcherRuntimeStarted = false
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
     private var cachedPrettySnapshotJson: String? = null
     private var cachedPrettySnapshotText: String = ""
@@ -152,17 +164,50 @@ class MainActivity : AppCompatActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        startedFromBoot = intent.getBooleanExtra(EXTRA_STARTED_FROM_BOOT, false)
 
         binding.launcherTitle.text = getString(R.string.launcher_title)
+        lifecycleScope.launch {
+            managedAppProgress.collectLatest {
+                renderManagedAppProgress()
+            }
+        }
+        lifecycleScope.launch {
+            awaitUserUnlockIfNeeded()
+            startLauncherRuntime()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        Log.w(TAG, "onNewIntent instance=$instanceId")
+        if (launcherRuntimeStarted || isUserUnlocked()) {
+            consumeBootstrapIntent()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        packageRulesController.apply(latestState)
+        kioskModeController.apply(latestState)
+    }
+
+    private suspend fun startLauncherRuntime() {
+        if (launcherRuntimeStarted) {
+            return
+        }
+        launcherRuntimeStarted = true
         recordDeviceLog(
             source = "launcher",
             level = "info",
             message = "launcher started",
             payload = mapOf("instanceId" to instanceId),
         )
-        lifecycleScope.launch {
-            consumeBootstrapIntent()
+        if (startedFromBoot) {
+            clearBootKioskExitSuppression()
         }
+        consumeBootstrapIntent()
         lifecycleScope.launch {
             stateStore.state.collectLatest { state ->
                 latestState = state
@@ -178,26 +223,55 @@ class MainActivity : AppCompatActivity() {
                 maybeStartCommandTransport(state)
             }
         }
-        lifecycleScope.launch {
-            managedAppProgress.collectLatest {
-                renderManagedAppProgress()
-            }
+    }
+
+    private suspend fun clearBootKioskExitSuppression() {
+        val state = stateStore.state.first()
+        val kioskControl = state.kioskControl ?: return
+        if (kioskControl.exitSuppressedUntilPolicyVersion == null) {
+            return
+        }
+        stateStore.saveKioskControl(KioskControlState())
+        latestState = state.copy(kioskControl = null)
+    }
+
+    private suspend fun awaitUserUnlockIfNeeded() {
+        if (isUserUnlocked()) {
+            return
+        }
+        prepareForUnlockScreen()
+        Log.w(TAG, "waiting for user unlock instance=$instanceId")
+        requestDismissKeyguard()
+        while (!isUserUnlocked()) {
+            delay(250)
         }
     }
 
-    override fun onNewIntent(intent: android.content.Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        Log.w(TAG, "onNewIntent instance=$instanceId")
-        lifecycleScope.launch {
-            consumeBootstrapIntent()
+    private fun prepareForUnlockScreen() {
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+        )
+    }
+
+    private fun requestDismissKeyguard() {
+        val keyguardManager = getSystemService(KeyguardManager::class.java) ?: return
+        if (!keyguardManager.isKeyguardLocked) {
+            return
+        }
+        runCatching {
+            keyguardManager.requestDismissKeyguard(
+                this,
+                object : KeyguardManager.KeyguardDismissCallback() {},
+            )
+        }.onFailure {
+            Log.w(TAG, "failed to request keyguard dismissal", it)
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        packageRulesController.apply(latestState)
-        kioskModeController.apply(latestState)
+    private fun isUserUnlocked(): Boolean {
+        val userManager = getSystemService(UserManager::class.java) ?: return true
+        return userManager.isUserUnlocked
     }
 
     private fun renderUi() {
@@ -680,6 +754,33 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private suspend fun requestExitKioskFromCommand(): DeviceCommandExecutionResult {
+        val state = stateStore.state.first()
+        val policyCache = state.policyCache ?: error("policy cache unavailable")
+        val updatedState = state.copy(
+            kioskControl = KioskControlState(exitSuppressedUntilPolicyVersion = policyCache.version),
+        )
+        stateStore.saveKioskControl(updatedState.kioskControl!!)
+        withContext(Dispatchers.Main) {
+            kioskModeController.apply(updatedState)
+        }
+        recordDeviceLogSafely(
+            source = "commands",
+            level = "info",
+            message = "kiosk exit requested by command",
+            payload = mapOf(
+                "policyVersion" to policyCache.version,
+            ),
+        )
+        return DeviceCommandExecutionResult(
+            status = "acked",
+            message = "kiosk exit requested",
+            details = mapOf(
+                "policyVersion" to policyCache.version,
+            ),
+        )
+    }
+
     private fun maybeApplyManagedFiles(state: AgentState) {
         val policyCache = state.policyCache ?: return
         val identity = state.identity ?: return
@@ -884,12 +985,13 @@ class MainActivity : AppCompatActivity() {
                     previousSnapshotJson = state.managedApps?.snapshotJson,
                     onProgress = { progress -> managedAppProgress.value = progress },
                 )
+                val appliedManagedAppsState = ManagedAppsState(
+                    snapshotJson = policyCache.snapshotJson,
+                    version = policyCache.version,
+                    lastAppliedAtEpochMillis = System.currentTimeMillis(),
+                )
                 stateStore.saveManagedApps(
-                    ManagedAppsState(
-                        snapshotJson = policyCache.snapshotJson,
-                        version = policyCache.version,
-                        lastAppliedAtEpochMillis = System.currentTimeMillis(),
-                    ),
+                    appliedManagedAppsState,
                 )
                 lastManagedAppsSnapshotVersion = policyCache.version
                 recordDeviceLogSafely(
@@ -904,7 +1006,17 @@ class MainActivity : AppCompatActivity() {
                 )
                 requestDeviceLogUpload(bootstrap, identity)
                 requestDeviceInfoUpload()
+                val kioskState = latestState.copy(managedApps = appliedManagedAppsState)
                 withContext(Dispatchers.Main) {
+                    Log.w(TAG, "attempting kiosk handoff instance=$instanceId")
+                    if (!kioskModeController.launchConfiguredKioskApp(kioskState)) {
+                        Log.w(TAG, "kiosk handoff fell back to launcher instance=$instanceId")
+                        kioskModeController.apply(
+                            kioskState,
+                            forceLaunch = true,
+                        )
+                    }
+                    Log.w(TAG, "kiosk handoff finished instance=$instanceId")
                     managedAppProgress.value = ManagedAppInstallProgress.Completed(
                         installed = result.installed,
                         uninstalled = result.uninstalled,
@@ -928,43 +1040,42 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun consumeBootstrapIntent() {
+    private fun consumeBootstrapIntent() {
         val rawBootstrapJson = resolveBootstrapJson()
             ?: return
         Log.w(TAG, "consumeBootstrapIntent instance=$instanceId bootstrap=${rawBootstrapJson.hashCode()}")
 
+        val normalizedBootstrap = rawBootstrapJson.trim()
+        if (normalizedBootstrap.isEmpty()) {
+            return
+        }
         try {
-            val normalizedBootstrap = rawBootstrapJson.trim()
-            val shouldReset = normalizedBootstrap.isNotEmpty()
-            recordDeviceLogSafely(
+            runBlocking(Dispatchers.IO + NonCancellable) {
+                stateStore.clearAllState()
+                BootstrapProvisioner(stateStore).persist(rawBootstrapJson)
+            }
+            recordDeviceLog(
                 source = "bootstrap",
                 level = "info",
                 message = "bootstrap intent received",
-                payload = mapOf("bootstrapHash" to normalizedBootstrap.hashCode()),
+                payload = mapOf("bootstrapHash" to rawBootstrapJson.hashCode()),
             )
-
-            if (shouldReset) {
-                withContext(Dispatchers.IO) {
-                    stateStore.clearAllState()
-                }
-                fileInstallInFlight = false
-                appInstallInFlight = false
-                lastManagedFilesSnapshotVersion = null
-                lastCertificatesSnapshotVersion = null
-                lastManagedAppsSnapshotVersion = null
-                certInstallInFlight = false
-                lastEnrollmentAttemptBootstrapJson = null
-                cachedPrettySnapshotJson = null
-                cachedPrettySnapshotText = ""
-                managedAppProgress.value = ManagedAppInstallProgress.Idle
-                renderManagedAppProgress()
-            }
+            fileInstallInFlight = false
+            appInstallInFlight = false
+            lastManagedFilesSnapshotVersion = null
+            lastCertificatesSnapshotVersion = null
+            lastManagedAppsSnapshotVersion = null
+            certInstallInFlight = false
+            lastEnrollmentAttemptBootstrapJson = null
+            cachedPrettySnapshotJson = null
+            cachedPrettySnapshotText = ""
+            managedAppProgress.value = ManagedAppInstallProgress.Idle
+            renderManagedAppProgress()
             enrollmentStateMachine.reset()
             enrollmentStateMachine.onBootstrapReceived(normalizedBootstrap)
-            BootstrapProvisioner(stateStore).persist(rawBootstrapJson)
         } catch (t: Throwable) {
             Log.w(TAG, "bootstrap parsing failed", t)
-            recordDeviceLogSafely(
+            recordDeviceLog(
                 source = "bootstrap",
                 level = "warn",
                 message = "bootstrap parsing failed",
@@ -1169,6 +1280,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_BOOTSTRAP_JSON = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON"
         const val EXTRA_BOOTSTRAP_JSON_B64 = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64"
+        const val EXTRA_STARTED_FROM_BOOT = "com.xmdm.launcher.EXTRA_STARTED_FROM_BOOT"
         const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
         private const val DEVICE_LOG_UPLOAD_INITIAL_DELAY_MS = 5_000L

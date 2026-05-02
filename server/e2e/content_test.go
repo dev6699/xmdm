@@ -18,7 +18,7 @@ func TestManagedAppsAndFiles(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
-	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
 	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
 	env.requests.waitFor(t, time.Minute, "managed file artifact download", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
@@ -44,7 +44,7 @@ func TestManagedAppsAndFilesRemoval(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
-	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
 	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
 	env.requests.waitFor(t, time.Minute, "managed file artifact download", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
@@ -109,7 +109,7 @@ func TestCommandMQTT(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
-	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
 	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
 	waitForCommandTransportWarmup(t)
 
@@ -139,7 +139,7 @@ func TestCommandMQTTSyncConfig(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
-	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
 	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
 	waitForCommandTransportWarmup(t)
 
@@ -205,7 +205,7 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
-	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
 	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
 	waitForCommandTransportWarmup(t)
 
@@ -244,14 +244,18 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 	})
 }
 
-// TestKioskMode verifies that a kiosk policy snapshot pushes the launcher into
+// TestKioskModeChrome verifies that a kiosk policy snapshot pushes Chrome into
 // lock-task mode on a physical device.
-func TestKioskMode(t *testing.T) {
+func TestKioskModeChrome(t *testing.T) {
 	env := newBaseTestEnv(t, false)
+	artifactStore := newTestArtifactStore(t)
+
+	mustRegisterChromeApp(t, env.client, env.baseURL, artifactStore)
 	mustCreatePolicy(t, env.client, env.baseURL, `{
 		"name":"kiosk-mode",
 		"version":1,
 		"kioskMode":true,
+		"kioskAppPackage":"com.android.chrome",
 		"restrictions":{}
 	}`)
 
@@ -262,9 +266,50 @@ func TestKioskMode(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
-	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
 	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	waitForChromeInstalled(t, env.serial)
+	waitForForegroundPackage(t, env.serial, chromePackage)
 	waitForKioskModeOnDevice(t, env.serial)
+}
+
+// TestKioskExitChrome verifies that an exit_kiosk command unlocks the device
+// while Chrome stays foreground after Chrome has been launched as the kiosk app.
+func TestKioskExitChrome(t *testing.T) {
+	ensureMQTTBrokerRunning(t)
+	env := commandTestEnv{baseTestEnv: newBaseTestEnv(t, true)}
+	env.reverseMQTTPort(t)
+
+	artifactStore := newTestArtifactStore(t)
+	mustRegisterChromeApp(t, env.client, env.baseURL, artifactStore)
+	mustCreatePolicy(t, env.client, env.baseURL, `{
+		"name":"kiosk-exit",
+		"version":1,
+		"kioskMode":true,
+		"kioskAppPackage":"com.android.chrome",
+		"restrictions":{}
+	}`)
+
+	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	waitForChromeInstalled(t, env.serial)
+	waitForForegroundPackageStable(t, env.serial, chromePackage, 15*time.Second)
+	waitForKioskModeOnDevice(t, env.serial)
+
+	commandID := env.mustIssueExitKioskCommand(t)
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
+	})
+	env.waitForCommandAck(t, commandID, "kiosk exit requested")
+	waitForKioskModeOffOnDevice(t, env.serial)
+	waitForForegroundPackage(t, env.serial, launcherPackage)
 }
 
 // TestPackageRules verifies that the launcher suspends packages that are
@@ -292,6 +337,7 @@ func TestPolicySync(t *testing.T) {
 		"name":"policy-sync",
 		"version":1,
 		"kioskMode":false,
+		"kioskAppPackage":"com.android.chrome",
 		"restrictions":{}
 	}`)
 	policyID, _ := policyResp["id"].(string)
@@ -320,6 +366,7 @@ func TestPolicySync(t *testing.T) {
 		"name":"policy-sync",
 		"version":2,
 		"kioskMode":false,
+		"kioskAppPackage":"com.android.chrome",
 		"restrictions":{
 			"blockPackages":["com.android.chrome"]
 		}

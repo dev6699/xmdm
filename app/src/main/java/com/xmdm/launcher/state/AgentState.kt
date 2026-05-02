@@ -41,6 +41,10 @@ data class CertificatesState(
     val lastAppliedAtEpochMillis: Long,
 )
 
+data class KioskControlState(
+    val exitSuppressedUntilPolicyVersion: Long? = null,
+)
+
 data class AgentState(
     val bootstrap: BootstrapState? = null,
     val identity: DeviceIdentityState? = null,
@@ -48,6 +52,7 @@ data class AgentState(
     val managedApps: ManagedAppsState? = null,
     val managedFiles: ManagedFilesState? = null,
     val certificates: CertificatesState? = null,
+    val kioskControl: KioskControlState? = null,
 ) {
     val isBootstrapped: Boolean
         get() = bootstrap != null
@@ -66,6 +71,9 @@ data class AgentState(
 
     val hasCertificates: Boolean
         get() = certificates != null
+
+    val hasKioskControl: Boolean
+        get() = kioskControl != null
 
     companion object {
         fun empty(): AgentState = AgentState()

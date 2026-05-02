@@ -11,7 +11,8 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestCertificatesApplied` covers adb-backed certificate download and install on a physical device.
 - `TestDeviceLogsUpload` covers adb-backed device log upload and recorded-log API verification on a physical device.
 - `TestDeviceInfoReporting` covers adb-backed device-info reporting and admin export on a physical device.
-- `TestKioskMode` covers adb-backed kiosk enforcement on a physical device.
+- `TestKioskModeChrome` covers adb-backed kiosk enforcement using Chrome on a physical device.
+- `TestKioskExitChrome` covers adb-backed kiosk unlock while Chrome remains foreground on a physical device.
 - `TestPackageRules` covers adb-backed package suspension enforcement on a physical device.
 - `TestPolicySync` covers adb-backed policy refresh after an admin update on a physical device.
 - `TestCommandMQTT` covers MQTT command transport on a physical device.
@@ -74,7 +75,8 @@ Current coverage:
 - `TestCertificatesApplied`
 - `TestDeviceLogsUpload`
 - `TestDeviceInfoReporting`
-- `TestKioskMode`
+- `TestKioskModeChrome`
+- `TestKioskExitChrome`
 - `TestPackageRules`
 - `TestPolicySync`
 - `TestCommandMQTT`
@@ -112,7 +114,7 @@ The device-log upload test covers the structured launcher events emitted by the 
 - [`TestManagedAppsAndFilesRemoval`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app removal.
 - [`TestDeviceLogsUpload`](/home/puong/xmdm/server/e2e/content_test.go) for real-device device log upload.
 - [`TestDeviceInfoReporting`](/home/puong/xmdm/server/e2e/deviceinfo_test.go) for real-device device info reporting and export.
-- [`TestKioskMode`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk enforcement.
+- [`TestKioskModeChrome`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk enforcement using Chrome.
 - [`TestPackageRules`](/home/puong/xmdm/server/e2e/content_test.go) for real-device package suspension enforcement.
 - [`TestCommandMQTT`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command transport.
 - [`TestCommandMQTTSyncConfig`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command-triggered config sync.
@@ -185,16 +187,14 @@ The admin E2E verifies:
 
 ## Kiosk Flow
 
-`TestKioskMode` is the physical-device kiosk test. It does all of the following in one run:
+`TestKioskModeChrome` is the Chrome kiosk-target variant. It reuses the same setup but additionally installs Chrome from a managed app fixture and verifies Chrome becomes the foreground kiosk app before exiting.
 
-1. Starts a real HTTP handler stack with a real Postgres test database.
-2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
-3. Resets server-side enrollment state for the chosen device ID.
-4. Creates an active kiosk policy and keeps the enrollment payload itself free of kiosk-specific extras.
-5. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
-6. Starts the launcher with the bootstrap payload on the physical device.
-7. Waits for the launcher to enroll and fetch the signed device config snapshot.
-8. Verifies on-device kiosk state with `dumpsys activity activities`.
+`TestKioskExitChrome` exercises the paired exit path:
+
+1. Reuses the same launcher bootstrap and Chrome kiosk target setup.
+2. Issues an `exit_kiosk` command through the admin command API.
+3. Waits for the device to acknowledge the command.
+4. Verifies Chrome remains foreground after kiosk exit and lock-task mode is cleared.
 
 ## Package Rules Flow
 
@@ -326,7 +326,7 @@ For the adb-backed kiosk enforcement test:
 ```sh
 eval "$(../infra/test-db-env.sh)"
 cd server
-XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestKioskMode -count=1 ./e2e
+XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestKioskModeChrome -count=1 ./e2e
 ```
 
 For the adb-backed package rules test:

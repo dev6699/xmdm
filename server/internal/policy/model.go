@@ -15,17 +15,19 @@ type RecordBase struct {
 
 type Policy struct {
 	RecordBase
-	Name         string          `json:"name"`
-	Version      int             `json:"version"`
-	KioskMode    bool            `json:"kioskMode"`
-	Restrictions json.RawMessage `json:"restrictions"`
+	Name            string          `json:"name"`
+	Version         int             `json:"version"`
+	KioskMode       bool            `json:"kioskMode"`
+	KioskAppPackage string          `json:"kioskAppPackage,omitempty"`
+	Restrictions    json.RawMessage `json:"restrictions"`
 }
 
 type PolicyUpsert struct {
-	Name         string          `json:"name"`
-	Version      int             `json:"version"`
-	KioskMode    bool            `json:"kioskMode"`
-	Restrictions json.RawMessage `json:"restrictions"`
+	Name            string          `json:"name"`
+	Version         int             `json:"version"`
+	KioskMode       bool            `json:"kioskMode"`
+	KioskAppPackage string          `json:"kioskAppPackage,omitempty"`
+	Restrictions    json.RawMessage `json:"restrictions"`
 }
 
 func (p Policy) RecordID() string {

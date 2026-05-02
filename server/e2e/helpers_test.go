@@ -126,11 +126,40 @@ func waitForDeviceEnrollment(t *testing.T, client *http.Client, baseURL, deviceI
 					continue
 				}
 				status, _ := rec["status"].(string)
-				return status == "enrolled", nil
+				return status == "enrolled" || status == "active", nil
 			}
 			return false, nil
 		},
 	)
+}
+
+// waitForDeviceEnrollmentInDB waits until the device row reaches enrolled status
+// using the test database directly.
+func waitForDeviceEnrollmentInDB(t *testing.T, pool *pgxpool.Pool, deviceID string) {
+	t.Helper()
+	waitForCondition(t, time.Minute, "device enrollment to complete in DB",
+		func() string { return deviceStatusSnapshotInDB(t, pool, deviceID) },
+		func() (bool, error) {
+			var status string
+			if err := pool.QueryRow(context.Background(),
+				`SELECT status FROM devices WHERE device_id = $1`, deviceID,
+			).Scan(&status); err != nil {
+				return false, nil
+			}
+			return status == "enrolled" || status == "active", nil
+		},
+	)
+}
+
+func deviceStatusSnapshotInDB(t *testing.T, pool *pgxpool.Pool, deviceID string) string {
+	t.Helper()
+	var status string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT status FROM devices WHERE device_id = $1`, deviceID,
+	).Scan(&status); err != nil {
+		return "device_err=" + strings.TrimSpace(err.Error())
+	}
+	return "status=" + status
 }
 
 // tailLines returns the last maxLines of newline-separated text joined with " | ".
