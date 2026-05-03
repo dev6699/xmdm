@@ -109,19 +109,19 @@ The device-log upload test covers the structured launcher events emitted by the 
 
 ### Recommended Taxonomy
 
-- [`TestAdminE2E`](/home/puong/xmdm/server/e2e/admin_test.go) for admin API coverage.
-- [`TestEnrollmentE2E`](/home/puong/xmdm/server/e2e/enrollment_test.go) for server-simulated device enrollment and sync behavior.
-- [`TestManagedAppsAndFiles`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app delivery.
-- [`TestManagedAppsAndFilesRemoval`](/home/puong/xmdm/server/e2e/content_test.go) for real-device managed file and app removal.
-- [`TestDeviceLogsUpload`](/home/puong/xmdm/server/e2e/content_test.go) for real-device device log upload.
-- [`TestDeviceInfoReporting`](/home/puong/xmdm/server/e2e/deviceinfo_test.go) for real-device device info reporting and export.
-- [`TestKioskModeChrome`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk enforcement using Chrome.
-- [`TestPackageRules`](/home/puong/xmdm/server/e2e/content_test.go) for real-device package suspension enforcement.
-- [`TestKioskStayAwakeWhilePluggedIn`](/home/puong/xmdm/server/e2e/content_test.go) for real-device kiosk stay-awake policy application.
-- [`TestCommandMQTT`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command transport.
-- [`TestCommandMQTTSyncConfig`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT command-triggered config sync.
-- [`TestCommandPolling`](/home/puong/xmdm/server/e2e/content_test.go) for real-device HTTP polling command transport.
-- [`TestCommandBrokerOutageRecovery`](/home/puong/xmdm/server/e2e/content_test.go) for real-device MQTT outage fallback and recovery.
+- `TestAdminE2E` for admin API coverage.
+- `TestEnrollmentE2E` for server-simulated device enrollment and sync behavior.
+- `TestManagedAppsAndFiles` for real-device managed file and app delivery.
+- `TestManagedAppsAndFilesRemoval` for real-device managed file and app removal.
+- `TestDeviceLogsUpload` for real-device device log upload.
+- `TestDeviceInfoReporting` for real-device device info reporting and export.
+- `TestKioskModeChrome` for real-device kiosk enforcement using Chrome.
+- `TestPackageRules` for real-device package suspension enforcement.
+- `TestKioskStayAwakeWhilePluggedIn` for real-device kiosk stay-awake policy application.
+- `TestCommandMQTT` for real-device MQTT command transport.
+- `TestCommandMQTTSyncConfig` for real-device MQTT command-triggered config sync.
+- `TestCommandPolling` for real-device HTTP polling command transport.
+- `TestCommandBrokerOutageRecovery` for real-device MQTT outage fallback and recovery.
 
 ## Admin Flow
 
