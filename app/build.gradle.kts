@@ -30,6 +30,15 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    buildTypes {
+        getByName("debug") {
+            manifestPlaceholders["testOnly"] = "true"
+        }
+        getByName("release") {
+            manifestPlaceholders["testOnly"] = "false"
+        }
+    }
 }
 
 dependencies {

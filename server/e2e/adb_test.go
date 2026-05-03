@@ -216,40 +216,75 @@ func removeADBPortReverse(serial, baseURL string) error {
 	if err != nil {
 		return err
 	}
-	_, err = adb(serial, "reverse", "--remove", "tcp:"+port, "tcp:"+port)
+	_, err = adb(serial, "reverse", "--remove", "tcp:"+port)
 	return err
+}
+
+// setDeviceOwner grants device owner to the launcher via ADB.
+// Must be called after the APK is installed and before the launcher is started.
+func setDeviceOwner(t *testing.T, serial string) {
+	t.Helper()
+
+	out, err := adb(serial, "shell", "dpm", "set-device-owner",
+		"com.xmdm.launcher/.AdminReceiver",
+	)
+	if err == nil {
+		return // successfully set
+	}
+	if strings.Contains(out, "already set") || strings.Contains(err.Error(), "already set") {
+		t.Logf("device owner already set to com.xmdm.launcher, skipping")
+		return
+	}
+	t.Fatalf("set device owner: %v", err)
+}
+
+func clearDeviceOwner(t *testing.T, serial string) {
+	t.Helper()
+
+	// Wake the app before sending the broadcast — Android 8+ won't deliver
+	// implicit broadcasts to a stopped process.
+	if _, err := adb(serial, "shell", "am", "start", "-n",
+		"com.xmdm.launcher/.MainActivity",
+	); err != nil {
+		t.Logf("start launcher before clear broadcast: %v", err)
+	}
+	time.Sleep(time.Second)
+
+	out, err := adb(serial, "shell", "am", "broadcast",
+		"-a", "com.xmdm.launcher.CLEAR_DEVICE_OWNER",
+		"-p", "com.xmdm.launcher",
+	)
+	if err != nil {
+		t.Logf("clear device owner broadcast output: %q err: %v", out, err)
+	} else {
+		t.Logf("clear device owner broadcast: %s", out)
+	}
 }
 
 // resetADBLauncherState uninstalls the launcher (and Chrome), wipes app data, then reinstalls the APK.
 func resetADBLauncherState(t *testing.T, serial, launcherAPKPath string) {
 	t.Helper()
 
-	stopAndUninstallLauncher(t, serial)
 	uninstallChrome(serial)
 
 	if strings.TrimSpace(launcherAPKPath) == "" {
 		return
 	}
-	if _, err := adb(serial, "install", "-r", launcherAPKPath); err != nil {
-		t.Fatalf("install launcher apk: %v", err)
+
+	needClearDeviceOwner := false
+	if needClearDeviceOwner {
+		clearDeviceOwner(t, serial)
 	}
+
 	if _, err := adb(serial, "shell", "run-as", "com.xmdm.launcher", "rm", "-rf",
 		"files", "cache", "shared_prefs", "databases",
 	); err != nil {
 		t.Fatalf("wipe launcher app data: %v", err)
 	}
-}
-
-// stopAndUninstallLauncher force-stops and removes the launcher package and its device-admin registration.
-func stopAndUninstallLauncher(t *testing.T, serial string) {
-	t.Helper()
-	if _, err := adb(serial, "shell", "am", "force-stop", "com.xmdm.launcher"); err != nil {
-		t.Fatalf("force-stop launcher: %v", err)
+	if _, err := adb(serial, "install", "-t", "-r", launcherAPKPath); err != nil {
+		t.Fatalf("install launcher apk: %v", err)
 	}
-	_, _ = adb(serial, "shell", "dpm", "remove-active-admin", "com.xmdm.launcher/.AdminReceiver")
-	_, _ = adb(serial, "shell", "dpm", "remove-active-admin", "--user", "0", "com.xmdm.launcher/.AdminReceiver")
-	_, _ = adb(serial, "shell", "pm", "uninstall", "--user", "0", "com.xmdm.launcher")
-	_, _ = adb(serial, "shell", "pm", "clear", "com.xmdm.launcher")
+	setDeviceOwner(t, serial)
 }
 
 // uninstallChrome removes Chrome from the device (best-effort).

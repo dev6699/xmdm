@@ -8,6 +8,7 @@
 
     <application
         android:name=".XmdmApplication"
+        android:testOnly="${testOnly}"
         android:allowBackup="false"
         android:usesCleartextTraffic="true"
         android:label="@string/app_name"
@@ -35,6 +36,8 @@
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
@@ -51,6 +54,15 @@
         <receiver
             android:name=".apps.ManagedAppInstallResultReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".ClearAdminReceiver"
+            android:exported="true"
+            android:enabled="${testOnly}">
+            <intent-filter>
+                <action android:name="com.xmdm.launcher.CLEAR_DEVICE_OWNER" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

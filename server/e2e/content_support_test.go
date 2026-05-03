@@ -82,7 +82,11 @@ func newBaseTestEnv(t *testing.T, enableMQTT bool) baseTestEnv {
 	login(client, t, baseURL, adminUsername, adminPassword)
 
 	reverseADBPort(t, serial, baseURL)
-	t.Cleanup(func() { _ = removeADBPortReverse(serial, baseURL) })
+	t.Cleanup(func() {
+		if err := removeADBPortReverse(serial, baseURL); err != nil {
+			t.Logf("removeADBPortReverse: %v", err)
+		}
+	})
 
 	resetADBLauncherState(t, serial, launcherAPKPath)
 	resetDeviceEnrollmentState(t, pool)
@@ -224,7 +228,9 @@ func (e *commandTestEnv) reverseMQTTPort(t *testing.T) {
 		t.Fatalf("adb reverse mqtt: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = adb(e.serial, "reverse", "--remove", "tcp:1883", "tcp:1883")
+		if _, err := adb(e.serial, "reverse", "--remove", "tcp:1883"); err != nil {
+			t.Fatalf("adb reverse mqtt: %v", err)
+		}
 	})
 }
 
