@@ -153,6 +153,9 @@
 }
 ```
 
+- `policy.restrictions` must include `kioskExitPasscodeHash` for kiosk policies so the device can perform local recovery.
+- The launcher verifies that hash locally and never needs the cleartext passcode after policy signing.
+
 ### Command Record
 
 ```json

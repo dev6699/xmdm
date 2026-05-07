@@ -41,6 +41,7 @@
 - A device has one active policy snapshot at a time.
 - An app has many versions.
 - A policy references app versions, file assets, certificates, and command defaults.
+- A kiosk policy's `restrictions_json` must carry a kiosk exit passcode hash used only by the device-local kiosk recovery flow.
 - A command belongs to one device and is eventually acked or expired.
 - A push message may map to a command or a device notification.
 - An artifact may be referenced by multiple logical objects if the checksum is identical and the lifecycle rules allow it.

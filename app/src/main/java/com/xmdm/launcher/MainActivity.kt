@@ -6,8 +6,19 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Base64
 import android.util.Log
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.view.KeyEvent
+import android.text.InputType
+import android.text.method.DigitsKeyListener
+import android.view.inputmethod.EditorInfo
+import android.widget.EditText
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonParser
 import com.xmdm.launcher.bootstrap.BootstrapProvisioner
@@ -32,6 +43,13 @@ import com.xmdm.launcher.enrollment.HttpEnrollmentGateway
 import com.xmdm.launcher.deviceinfo.DeviceInfoReporter
 import com.xmdm.launcher.kiosk.AndroidKioskModeHost
 import com.xmdm.launcher.kiosk.KioskModeController
+import com.xmdm.launcher.kiosk.KioskExitGestureTracker
+import com.xmdm.launcher.kiosk.kioskExitPasscodeHash
+import com.xmdm.launcher.kiosk.kioskExitPasscodeMatches
+import com.xmdm.launcher.kiosk.kioskExitPasscodeConfigured
+import com.xmdm.launcher.kiosk.isPolicyContentReady
+import com.xmdm.launcher.kiosk.kioskModeEnabled
+import com.xmdm.launcher.kiosk.kioskPolicyActive
 import com.xmdm.launcher.kiosk.kioskKeepScreenOn
 import com.xmdm.launcher.kiosk.kioskUnlockOnBoot
 import com.xmdm.launcher.logs.DeviceLogCoordinator
@@ -57,17 +75,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import kotlin.math.max
-import kotlin.math.min
 import java.util.UUID
 import android.os.UserManager
-import android.view.WindowManager
+import kotlin.math.max
+import kotlin.math.min
 
 class MainActivity : AppCompatActivity() {
     private val stateStore by lazy { AgentStateStore.from(applicationContext) }
@@ -152,7 +170,15 @@ class MainActivity : AppCompatActivity() {
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
     private var cachedPrettySnapshotJson: String? = null
     private var cachedPrettySnapshotText: String = ""
+    private val kioskExitGestureTracker = KioskExitGestureTracker()
+    private var kioskAdminMenuDialog: AlertDialog? = null
+    private var kioskExitDialog: AlertDialog? = null
+    private var kioskPolicySyncDialog: AlertDialog? = null
+    private var kioskPolicySyncInFlight = false
     private var latestState: AgentState = AgentState.empty()
+    private var pendingOpenKioskAdminMenu = false
+    private var kioskAdminMenuShouldReapply = false
+    private var kioskExitDialogShouldReapply = false
 
     private data class RuntimeSnapshotConfig(
         val mqttAddress: String?,
@@ -163,15 +189,27 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.w(TAG, "onCreate instance=$instanceId")
+        startService(Intent(this, com.xmdm.launcher.kiosk.KioskAdminOverlayService::class.java))
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         startedFromBoot = intent.getBooleanExtra(EXTRA_STARTED_FROM_BOOT, false)
+        pendingOpenKioskAdminMenu = intent.getBooleanExtra(EXTRA_OPEN_KIOSK_ADMIN_MENU, false)
+        kioskAdminMenuShouldReapply = pendingOpenKioskAdminMenu
 
         binding.launcherTitle.text = getString(R.string.launcher_title)
+        binding.kioskAdminButton.setOnClickListener {
+            requestKioskAdminMenu()
+        }
         lifecycleScope.launch {
             managedAppProgress.collectLatest {
                 renderManagedAppProgress()
+            }
+        }
+        lifecycleScope.launch {
+            if (pendingOpenKioskAdminMenu) {
+                pendingOpenKioskAdminMenu = false
+                requestKioskAdminMenu()
             }
         }
         lifecycleScope.launch {
@@ -184,15 +222,39 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         Log.w(TAG, "onNewIntent instance=$instanceId")
+        pendingOpenKioskAdminMenu = intent.getBooleanExtra(EXTRA_OPEN_KIOSK_ADMIN_MENU, false)
+        kioskAdminMenuShouldReapply = pendingOpenKioskAdminMenu || kioskAdminMenuShouldReapply
         if (launcherRuntimeStarted || isUserUnlocked()) {
             consumeBootstrapIntent()
+            if (pendingOpenKioskAdminMenu) {
+                pendingOpenKioskAdminMenu = false
+                requestKioskAdminMenu()
+            }
         }
     }
 
     override fun onResume() {
         super.onResume()
         packageRulesController.apply(latestState)
+        if (kioskAdminMenuShouldReapply) {
+            return
+        }
         kioskModeController.apply(latestState)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        handleKioskExitGesture(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun onDestroy() {
+        kioskAdminMenuDialog?.dismiss()
+        kioskAdminMenuDialog = null
+        kioskExitDialog?.dismiss()
+        kioskExitDialog = null
+        kioskPolicySyncDialog?.dismiss()
+        kioskPolicySyncDialog = null
+        super.onDestroy()
     }
 
     private suspend fun startLauncherRuntime() {
@@ -213,14 +275,16 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             stateStore.state.collectLatest { state ->
                 latestState = state
-                renderLauncherStatus()
+                renderUi()
                 maybeStartEnrollment(state)
                 maybeApplyManagedFiles(state)
                 maybeApplyCertificates(state)
                 maybeApplyManagedApps(state)
                 maybeStartConfigSync(state)
                 packageRulesController.apply(state)
-                kioskModeController.apply(state)
+                if (!kioskAdminMenuShouldReapply) {
+                    kioskModeController.apply(state)
+                }
                 maybeStartDeviceLogUpload(state)
                 maybeStartCommandTransport(state)
             }
@@ -235,6 +299,318 @@ class MainActivity : AppCompatActivity() {
         }
         stateStore.saveKioskControl(KioskControlState())
         latestState = state.copy(kioskControl = null)
+    }
+
+    private fun handleKioskExitGesture(event: MotionEvent) {
+        val state = latestState
+        if (!state.hasPolicyCache) {
+            kioskExitGestureTracker.reset()
+            return
+        }
+        if (kioskExitDialog?.isShowing == true) {
+            kioskExitGestureTracker.reset()
+            return
+        }
+        when (event.actionMasked) {
+            MotionEvent.ACTION_UP -> {
+                if (isTopLeftKioskExitTap(event.x, event.y)) {
+                    Log.w(TAG, "kiosk exit hotspot tap instance=$instanceId")
+                    if (kioskExitGestureTracker.registerTap(event.eventTime)) {
+                        requestKioskAdminMenu()
+                    }
+                } else {
+                    kioskExitGestureTracker.reset()
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> kioskExitGestureTracker.reset()
+        }
+    }
+
+    private fun isTopLeftKioskExitTap(x: Float, y: Float): Boolean {
+        val hotspot = 96f * resources.displayMetrics.density
+        return x >= 0f && y >= 0f && x <= hotspot && y <= hotspot
+    }
+
+    private fun showKioskExitDialog() {
+        val state = latestState
+        val policyCache = state.policyCache ?: return
+        if (kioskExitPasscodeHash(policyCache.snapshotJson).isNullOrBlank()) {
+            return
+        }
+        if (kioskExitDialog?.isShowing == true) {
+            return
+        }
+
+        Log.w(TAG, "showing kiosk exit dialog instance=$instanceId")
+        val passcodeInput = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            keyListener = DigitsKeyListener.getInstance("0123456789")
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            hint = getString(R.string.kiosk_exit_passcode_hint)
+            setSingleLine()
+        }
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.kiosk_exit_dialog_title)
+            .setMessage(R.string.kiosk_exit_dialog_message)
+            .setView(passcodeInput)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.kiosk_exit_dialog_unlock, null)
+            .create()
+
+        dialog.setOnShowListener {
+            val button = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            button.setOnClickListener {
+                submitKioskExitPasscode(passcodeInput, policyCache.snapshotJson, dialog)
+            }
+            passcodeInput.setOnEditorActionListener { _, actionId, event ->
+                if (actionId == EditorInfo.IME_ACTION_DONE ||
+                    (event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_UP)
+                ) {
+                    submitKioskExitPasscode(passcodeInput, policyCache.snapshotJson, dialog)
+                    true
+                } else {
+                    false
+                }
+            }
+            passcodeInput.requestFocus()
+        }
+        dialog.setOnDismissListener {
+            kioskExitDialog = null
+            kioskExitGestureTracker.reset()
+            if (kioskExitDialogShouldReapply) {
+                kioskExitDialogShouldReapply = false
+                kioskModeController.apply(latestState)
+            }
+        }
+        kioskExitDialog = dialog
+        kioskExitDialogShouldReapply = true
+        dialog.show()
+    }
+
+    private fun submitKioskExitPasscode(
+        passcodeInput: EditText,
+        snapshotJson: String,
+        dialog: AlertDialog,
+    ) {
+        val candidate = passcodeInput.text?.toString().orEmpty()
+        if (candidate.isBlank()) {
+            passcodeInput.error = getString(R.string.kiosk_exit_dialog_invalid_code)
+            return
+        }
+        if (kioskExitPasscodeMatches(snapshotJson, candidate)) {
+            Log.w(TAG, "kiosk exit passcode accepted instance=$instanceId")
+            passcodeInput.error = null
+            kioskExitDialogShouldReapply = false
+            dialog.dismiss()
+            lifecycleScope.launch {
+                requestLocalKioskExitFromUser()
+            }
+        } else {
+            Log.w(TAG, "kiosk exit passcode rejected instance=$instanceId")
+            passcodeInput.setText("")
+            passcodeInput.error = getString(R.string.kiosk_exit_dialog_invalid_code)
+        }
+    }
+
+    private suspend fun requestLocalKioskExitFromUser() {
+        val state = stateStore.state.first()
+        if (!kioskPolicyActive(state)) {
+            return
+        }
+        Log.w(TAG, "requesting local kiosk exit instance=$instanceId")
+        suppressKioskUntilCurrentPolicyVersion(
+            state = state,
+            source = "kiosk",
+            message = "kiosk exit requested locally",
+        )
+    }
+
+    private suspend fun requestLocalKioskEntryFromUser() {
+        val state = stateStore.state.first()
+        val policyCache = state.policyCache ?: return
+        if (!kioskModeEnabled(policyCache.snapshotJson) ||
+            !kioskExitPasscodeConfigured(policyCache.snapshotJson) ||
+            !isPolicyContentReady(state, policyCache.version)
+        ) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.kiosk_admin_passcode_required),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+            return
+        }
+        Log.w(TAG, "requesting local kiosk entry instance=$instanceId")
+        val updatedState = state.copy(kioskControl = KioskControlState())
+        stateStore.saveKioskControl(updatedState.kioskControl!!)
+        withContext(Dispatchers.Main) {
+            latestState = updatedState
+            kioskModeController.apply(updatedState, forceLaunch = true)
+        }
+        recordDeviceLogSafely(
+            source = "kiosk",
+            level = "info",
+            message = "kiosk enter requested locally",
+            payload = mapOf(
+                "policyVersion" to policyCache.version,
+            ),
+        )
+    }
+
+    private fun requestLocalPolicySyncFromUser() {
+        if (kioskPolicySyncInFlight) {
+            Toast.makeText(
+                this@MainActivity,
+                getString(R.string.kiosk_admin_sync_in_progress),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        kioskPolicySyncInFlight = true
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                withContext(Dispatchers.Main) {
+                    showKioskPolicySyncDialog()
+                }
+                delay(250)
+                val state = stateStore.state.first()
+                val cached = withTimeoutOrNull(15_000) {
+                    performPolicySync(
+                        state = state,
+                        source = "kiosk",
+                        message = "config sync requested locally",
+                    )
+                }
+                val refreshedState = stateStore.state.first()
+                withContext(Dispatchers.Main) {
+                    dismissKioskPolicySyncDialog()
+                    if (cached != null) {
+                        latestState = refreshedState
+                        kioskModeController.apply(refreshedState)
+                        Toast.makeText(
+                            this@MainActivity,
+                            getString(R.string.kiosk_admin_sync_success),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    } else {
+                        Toast.makeText(
+                            this@MainActivity,
+                            getString(R.string.kiosk_admin_sync_timed_out),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+                if (cached != null) {
+                    Log.w(TAG, "local config sync completed instance=$instanceId version=${cached.version}")
+                } else {
+                    Log.w(TAG, "local config sync timed out instance=$instanceId")
+                }
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) {
+                    throw t
+                }
+                Log.w(TAG, "local config sync failed", t)
+                withContext(Dispatchers.Main) {
+                    dismissKioskPolicySyncDialog()
+                    Toast.makeText(
+                        this@MainActivity,
+                        getString(R.string.kiosk_admin_sync_failed),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    dismissKioskPolicySyncDialog()
+                }
+                kioskPolicySyncInFlight = false
+            }
+        }
+    }
+
+    private fun showKioskPolicySyncDialog() {
+        if (kioskPolicySyncDialog?.isShowing == true) {
+            return
+        }
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.kiosk_admin_sync_title)
+            .setMessage(R.string.kiosk_admin_sync_in_progress)
+            .setCancelable(false)
+            .create()
+        dialog.setOnDismissListener {
+            kioskPolicySyncDialog = null
+        }
+        kioskPolicySyncDialog = dialog
+        dialog.show()
+    }
+
+    private fun dismissKioskPolicySyncDialog() {
+        runCatching {
+            kioskPolicySyncDialog?.dismiss()
+        }
+        kioskPolicySyncDialog = null
+    }
+
+    private suspend fun performPolicySync(
+        state: AgentState,
+        source: String,
+        message: String,
+    ): com.xmdm.launcher.state.PolicyCacheState? {
+        return try {
+            val bootstrap = state.bootstrap ?: return null
+            val identity = state.identity ?: return null
+            val cached = configSyncEngine.sync(bootstrap, identity)
+            maybeApplyCertificates(cached.snapshotJson, state)
+            recordDeviceLogSafely(
+                source = source,
+                level = "info",
+                message = message,
+                payload = mapOf(
+                    "configRevision" to cached.version,
+                    "syncedAtEpochMillis" to cached.lastSyncAtEpochMillis,
+                ),
+            )
+            requestDeviceLogUpload(bootstrap, identity)
+            requestDeviceInfoUpload()
+            cached
+        } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException) {
+                throw t
+            }
+            Log.w(TAG, "$source config sync failed", t)
+            recordDeviceLogSafely(
+                source = source,
+                level = "warn",
+                message = message.replace("requested", "failed"),
+                payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+            )
+            null
+        }
+    }
+
+    private suspend fun suppressKioskUntilCurrentPolicyVersion(
+        state: AgentState,
+        source: String,
+        message: String,
+    ): Long? {
+        val policyCache = state.policyCache ?: return null
+        val updatedState = state.copy(
+            kioskControl = KioskControlState(exitSuppressedUntilPolicyVersion = policyCache.version),
+        )
+        stateStore.saveKioskControl(updatedState.kioskControl!!)
+        withContext(Dispatchers.Main) {
+            latestState = updatedState
+            kioskModeController.apply(updatedState)
+        }
+        recordDeviceLogSafely(
+            source = source,
+            level = "info",
+            message = message,
+            payload = mapOf(
+                "policyVersion" to policyCache.version,
+            ),
+        )
+        return policyCache.version
     }
 
     private suspend fun awaitUserUnlockIfNeeded() {
@@ -289,6 +665,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderUi() {
         renderManagedAppProgress()
         renderLauncherStatus()
+        renderKioskExitControl()
     }
 
     private fun renderManagedAppProgress() {
@@ -297,6 +674,63 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderLauncherStatus() {
         binding.launcherStatus.text = renderStatus(latestState, enrollmentStateMachine.isEnrollmentInFlight, enrollmentStateMachine.enrollmentError)
+    }
+
+    private fun renderKioskExitControl() {
+        binding.kioskAdminButton.visibility = View.GONE
+    }
+
+    private fun requestKioskAdminMenu() {
+        lifecycleScope.launch {
+            val state = stateStore.state.first()
+            latestState = state
+            kioskAdminMenuShouldReapply = true
+            showKioskAdminMenu(state)
+        }
+    }
+
+    private fun showKioskAdminMenu(state: AgentState) {
+        if (kioskAdminMenuDialog?.isShowing == true) {
+            return
+        }
+        kioskExitGestureTracker.reset()
+        val kioskAction = if (kioskPolicyActive(state)) {
+            getString(R.string.kiosk_admin_menu_exit)
+        } else {
+            getString(R.string.kiosk_admin_menu_enter)
+        }
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.kiosk_admin_menu_title)
+            .setItems(
+                arrayOf(
+                    kioskAction,
+                    getString(R.string.kiosk_admin_menu_sync),
+                ),
+            ) { menuDialog, index ->
+                kioskAdminMenuShouldReapply = false
+                menuDialog.dismiss()
+                when (index) {
+                    0 -> {
+                        if (kioskPolicyActive(latestState)) {
+                            showKioskExitDialog()
+                        } else {
+                            lifecycleScope.launch { requestLocalKioskEntryFromUser() }
+                        }
+                    }
+                    1 -> requestLocalPolicySyncFromUser()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        dialog.setOnDismissListener {
+            kioskAdminMenuDialog = null
+            if (kioskAdminMenuShouldReapply) {
+                kioskAdminMenuShouldReapply = false
+                kioskModeController.apply(latestState)
+            }
+        }
+        kioskAdminMenuDialog = dialog
+        dialog.show()
     }
 
     private fun renderStatus(state: AgentState, enrollmentInFlight: Boolean, enrollmentError: String?): CharSequence {
@@ -741,21 +1175,11 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun requestConfigSyncFromCommand(): DeviceCommandExecutionResult {
         val state = stateStore.state.first()
-        val bootstrap = state.bootstrap ?: error("bootstrap state unavailable")
-        val identity = state.identity ?: error("device identity unavailable")
-        val cached = configSyncEngine.sync(bootstrap, identity)
-        maybeApplyCertificates(cached.snapshotJson, state)
-        recordDeviceLogSafely(
+        val cached = performPolicySync(
+            state = state,
             source = "commands",
-            level = "info",
             message = "config sync requested by command",
-            payload = mapOf(
-                "configRevision" to cached.version,
-                "syncedAtEpochMillis" to cached.lastSyncAtEpochMillis,
-            ),
-        )
-        requestDeviceLogUpload(bootstrap, identity)
-        requestDeviceInfoUpload()
+        ) ?: error("bootstrap state unavailable")
         return DeviceCommandExecutionResult(
             status = "acked",
             message = "config refreshed",
@@ -768,27 +1192,16 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun requestExitKioskFromCommand(): DeviceCommandExecutionResult {
         val state = stateStore.state.first()
-        val policyCache = state.policyCache ?: error("policy cache unavailable")
-        val updatedState = state.copy(
-            kioskControl = KioskControlState(exitSuppressedUntilPolicyVersion = policyCache.version),
-        )
-        stateStore.saveKioskControl(updatedState.kioskControl!!)
-        withContext(Dispatchers.Main) {
-            kioskModeController.apply(updatedState)
-        }
-        recordDeviceLogSafely(
+        val policyVersion = suppressKioskUntilCurrentPolicyVersion(
+            state = state,
             source = "commands",
-            level = "info",
             message = "kiosk exit requested by command",
-            payload = mapOf(
-                "policyVersion" to policyCache.version,
-            ),
-        )
+        ) ?: error("policy cache unavailable")
         return DeviceCommandExecutionResult(
             status = "acked",
             message = "kiosk exit requested",
             details = mapOf(
-                "policyVersion" to policyCache.version,
+                "policyVersion" to policyVersion,
             ),
         )
     }
@@ -1293,6 +1706,7 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_BOOTSTRAP_JSON = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON"
         const val EXTRA_BOOTSTRAP_JSON_B64 = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64"
         const val EXTRA_STARTED_FROM_BOOT = "com.xmdm.launcher.EXTRA_STARTED_FROM_BOOT"
+        const val EXTRA_OPEN_KIOSK_ADMIN_MENU = "com.xmdm.launcher.EXTRA_OPEN_KIOSK_ADMIN_MENU"
         const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
         private const val DEVICE_LOG_UPLOAD_INITIAL_DELAY_MS = 5_000L

@@ -82,6 +82,7 @@
 
 - Store admin passwords as salted hashes.
 - Store device secrets hashed or encrypted at rest.
+- Store kiosk exit passcodes only as derived hashes in the signed policy snapshot, and require kiosk policies to include one, never as device-readable cleartext.
 - Keep signing keys and MQTT credentials in environment-managed secrets.
 - Never log secrets, tokens, or raw enrollment payloads.
 - Rotate signing and broker credentials on a documented schedule.

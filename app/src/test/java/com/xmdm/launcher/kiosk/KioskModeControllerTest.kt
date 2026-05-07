@@ -14,7 +14,11 @@ class KioskModeControllerTest {
         val host = FakeHost(deviceOwner = true, inLockTaskMode = false)
         val controller = KioskModeController(host) { }
 
-        controller.apply(agentState("""{"policy":{"kioskMode":true}}"""))
+        controller.apply(
+            agentState(
+                """{"policy":{"kioskMode":true,"restrictions":{"kioskExitPasscodeHash":"${hashKioskExitPasscode("1234")}"}}}""",
+            ),
+        )
 
         assertTrue(host.setPackagesCalls.contains(listOf("com.xmdm.launcher")))
         assertTrue(host.startLockTaskCalls == 1)
@@ -32,13 +36,24 @@ class KioskModeControllerTest {
     }
 
     @Test
+    fun doesNotEnableKioskWithoutPasscodeHash() {
+        val host = FakeHost(deviceOwner = true, inLockTaskMode = false)
+        val controller = KioskModeController(host) { }
+
+        controller.apply(agentState("""{"policy":{"kioskMode":true}}"""))
+
+        assertEquals(0, host.startLockTaskCalls)
+        assertFalse(host.inLockTaskMode)
+    }
+
+    @Test
     fun launchesConfiguredKioskAppWhenPolicyNamesOne() {
         val host = FakeHost(deviceOwner = true, inLockTaskMode = true)
         val controller = KioskModeController(host) { }
 
         controller.apply(
             agentState(
-                snapshotJson = """{"policy":{"kioskMode":true,"kioskAppPackage":"com.example.kiosk"}}""",
+                snapshotJson = """{"policy":{"kioskMode":true,"kioskAppPackage":"com.example.kiosk","restrictions":{"kioskExitPasscodeHash":"${hashKioskExitPasscode("1234")}"}}}""",
             ),
         )
 
@@ -56,7 +71,7 @@ class KioskModeControllerTest {
 
         controller.apply(
             agentState(
-                snapshotJson = """{"policy":{"kioskMode":true,"restrictions":{"kioskKeepScreenOn":true}}}""",
+                snapshotJson = """{"policy":{"kioskMode":true,"restrictions":{"kioskKeepScreenOn":true,"kioskExitPasscodeHash":"${hashKioskExitPasscode("1234")}"}}}""",
             ),
         )
 
@@ -78,7 +93,7 @@ class KioskModeControllerTest {
 
         controller.apply(
             agentState(
-                snapshotJson = """{"policy":{"kioskMode":true,"restrictions":{"kioskStayAwakeWhilePluggedIn":true}}}""",
+                snapshotJson = """{"policy":{"kioskMode":true,"restrictions":{"kioskStayAwakeWhilePluggedIn":true,"kioskExitPasscodeHash":"${hashKioskExitPasscode("1234")}"}}}""",
             ),
         )
 
@@ -100,7 +115,7 @@ class KioskModeControllerTest {
 
         controller.apply(
             agentState(
-                snapshotJson = """{"policy":{"kioskMode":true}}""",
+                snapshotJson = """{"policy":{"kioskMode":true,"restrictions":{"kioskExitPasscodeHash":"${hashKioskExitPasscode("1234")}"}}}""",
                 policyVersion = 7,
                 kioskExitSuppressedUntilPolicyVersion = 7,
             ),
@@ -117,7 +132,7 @@ class KioskModeControllerTest {
 
         controller.apply(
             agentState(
-                snapshotJson = """{"policy":{"kioskMode":true}}""",
+                snapshotJson = """{"policy":{"kioskMode":true,"restrictions":{"kioskExitPasscodeHash":"${hashKioskExitPasscode("1234")}"}}}""",
                 policyVersion = 2,
                 managedAppsVersion = 1,
             ),

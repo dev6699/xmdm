@@ -171,7 +171,8 @@ class KioskModeController(
     fun apply(state: AgentState, forceLaunch: Boolean = false) {
         val policyCache = state.policyCache
         val desiredKioskMode = policyCache?.let { cache ->
-            isKioskModeEnabled(cache.snapshotJson) &&
+            kioskModeEnabled(cache.snapshotJson) &&
+                kioskExitPasscodeConfigured(cache.snapshotJson) &&
                 isPolicyContentReady(state, cache.version) &&
                 !isKioskExitSuppressed(state, cache.version)
         } == true
@@ -226,7 +227,8 @@ class KioskModeController(
 
     suspend fun launchConfiguredKioskApp(state: AgentState): Boolean {
         val policyCache = state.policyCache ?: return false
-        if (!isKioskModeEnabled(policyCache.snapshotJson) ||
+        if (!kioskModeEnabled(policyCache.snapshotJson) ||
+            !kioskExitPasscodeConfigured(policyCache.snapshotJson) ||
             !isPolicyContentReady(state, policyCache.version) ||
             isKioskExitSuppressed(state, policyCache.version)
         ) {
@@ -283,23 +285,6 @@ class KioskModeController(
         return true
     }
 
-    private fun isPolicyContentReady(state: AgentState, version: Long): Boolean {
-        val managedAppsReady = state.managedApps?.version?.let { it == version } ?: true
-        val managedFilesReady = state.managedFiles?.version?.let { it == version } ?: true
-        return managedAppsReady && managedFilesReady
-    }
-
-    private fun isKioskModeEnabled(snapshotJson: String): Boolean {
-        val root = runCatching { JsonParser.parseString(snapshotJson).asJsonObject }.getOrNull()
-            ?: return false
-        val policy = root.getAsJsonObject("policy") ?: return false
-        return booleanValue(
-            policy,
-            "kioskMode",
-            "kiosk_mode",
-        )
-    }
-
     private fun kioskPackageName(snapshotJson: String): String? {
         val root = runCatching { JsonParser.parseString(snapshotJson).asJsonObject }.getOrNull()
             ?: return null
@@ -331,40 +316,6 @@ class KioskModeController(
         )
     }
 
-    private fun isKioskExitSuppressed(state: AgentState, version: Long): Boolean {
-        val suppressedUntil = state.kioskControl?.exitSuppressedUntilPolicyVersion ?: return false
-        return version <= suppressedUntil
-    }
-
-    private fun booleanValue(source: JsonObject, vararg names: String): Boolean {
-        for (name in names) {
-            val value = source.get(name) ?: continue
-            if (value.isJsonNull) continue
-            when {
-                value.isJsonPrimitive && value.asJsonPrimitive.isBoolean -> return value.asBoolean
-                value.isJsonPrimitive && value.asJsonPrimitive.isString -> {
-                    val raw = value.asString.trim()
-                    if (raw.equals("true", ignoreCase = true)) return true
-                    if (raw.equals("false", ignoreCase = true)) return false
-                }
-            }
-        }
-        return false
-    }
-
-    private fun stringValue(source: JsonObject, vararg names: String): String? {
-        for (name in names) {
-            val value = source.get(name) ?: continue
-            if (value.isJsonNull) continue
-            if (value.isJsonPrimitive && value.asJsonPrimitive.isString) {
-                val raw = value.asString.trim()
-                if (raw.isNotEmpty()) {
-                    return raw
-                }
-            }
-        }
-        return null
-    }
 }
 
 internal fun kioskKeepScreenOn(snapshotJson: String): Boolean {

@@ -17,4 +17,20 @@
     <string name="launcher_live_completed">provisioning complete</string>
     <string name="launcher_live_completed_details">managed apps: %1$d installed, %2$d removed</string>
     <string name="launcher_live_failed">managed apps: failed: %1$s</string>
+    <string name="kiosk_exit_passcode_hint">Passcode</string>
+    <string name="kiosk_exit_dialog_title">Exit kiosk</string>
+    <string name="kiosk_exit_dialog_message">Enter the kiosk exit passcode to leave kiosk mode.</string>
+    <string name="kiosk_exit_dialog_unlock">Unlock</string>
+    <string name="kiosk_exit_dialog_invalid_code">Incorrect passcode</string>
+    <string name="kiosk_admin_menu_title">Kiosk actions</string>
+    <string name="kiosk_admin_menu_enter">Enter kiosk mode</string>
+    <string name="kiosk_admin_menu_exit">Exit kiosk mode</string>
+    <string name="kiosk_admin_menu_sync">Sync config policy</string>
+    <string name="kiosk_admin_passcode_required">Kiosk passcode required</string>
+    <string name="kiosk_admin_sync_title">Sync config policy</string>
+    <string name="kiosk_admin_sync_in_progress">Syncing config policy...</string>
+    <string name="kiosk_admin_sync_success">Config policy synced</string>
+    <string name="kiosk_admin_sync_timed_out">Config sync timed out</string>
+    <string name="kiosk_admin_button_content_description">Open kiosk actions menu</string>
+    <string name="kiosk_admin_sync_failed">Config sync failed</string>
     </resources>

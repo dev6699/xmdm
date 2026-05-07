@@ -3,6 +3,8 @@ package e2e_test
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -151,6 +153,181 @@ func waitForKioskModeOffOnDevice(t *testing.T, serial string) {
 	)
 }
 
+func tapKioskAdminMenuButton(t *testing.T, serial string) {
+	t.Helper()
+	windowDump, err := adbShellOutput(serial, "dumpsys", "window", "windows")
+	if err != nil {
+		t.Fatalf("dump window hierarchy: %v", err)
+	}
+	x1, y1, x2, y2, err := boundsForOverlayWindow(windowDump)
+	if err != nil {
+		t.Fatalf("find kiosk admin menu button: %v", err)
+	}
+	x, y := (x1+x2)/2, (y1+y2)/2
+	for i := 0; i < 5; i++ {
+		tapAt(t, serial, x, y)
+	}
+}
+
+func enterKioskExitPasscode(t *testing.T, serial, passcode string) {
+	t.Helper()
+	waitForCondition(t, time.Minute, "kiosk exit passcode field to appear",
+		func() string { return adbUIHierarchy(t, serial) },
+		func() (bool, error) {
+			_, _, _, _, err := boundsForNode(adbUIHierarchy(t, serial), `class="android.widget.EditText"`)
+			if err != nil {
+				return false, nil
+			}
+			return true, nil
+		},
+	)
+	tapKioskExitPasscodeField(t, serial)
+	if _, err := adbShellOutput(serial, "input", "text", passcode); err != nil {
+		t.Fatalf("enter kiosk exit passcode: %v", err)
+	}
+	tapKioskExitDialogButton(t, serial, "Unlock")
+}
+
+func tapKioskExitPasscodeField(t *testing.T, serial string) {
+	t.Helper()
+	xml := adbUIHierarchy(t, serial)
+	x1, y1, x2, y2, err := boundsForNode(xml, `class="android.widget.EditText"`)
+	if err != nil {
+		t.Fatalf("find kiosk exit passcode field: %v", err)
+	}
+	tapAt(t, serial, (x1+x2)/2, (y1+y2)/2)
+}
+
+func tapKioskExitDialogButton(t *testing.T, serial, text string) {
+	t.Helper()
+	xml := adbUIHierarchy(t, serial)
+	x1, y1, x2, y2, err := boundsForNode(xml, `text="`+text+`"`)
+	if err != nil {
+		t.Fatalf("find kiosk exit dialog button %q: %v", text, err)
+	}
+	tapAt(t, serial, (x1+x2)/2, (y1+y2)/2)
+}
+
+func tapKioskMenuItem(t *testing.T, serial, text string) {
+	t.Helper()
+	var x1, y1, x2, y2 int
+	waitForCondition(t, time.Minute, "kiosk menu item to appear: "+text,
+		func() string { return adbUIHierarchy(t, serial) },
+		func() (bool, error) {
+			xml := adbUIHierarchy(t, serial)
+			x, y, xx, yy, err := boundsForNode(xml, `text="`+text+`"`)
+			if err != nil {
+				return false, nil
+			}
+			x1, y1, x2, y2 = x, y, xx, yy
+			return true, nil
+		},
+	)
+	tapAt(t, serial, (x1+x2)/2, (y1+y2)/2)
+}
+
+func waitForUIContains(t *testing.T, serial, want string, timeout time.Duration) {
+	t.Helper()
+	waitForCondition(t, timeout, "ui text to contain: "+want,
+		func() string { return adbUIHierarchy(t, serial) },
+		func() (bool, error) {
+			xml := adbUIHierarchy(t, serial)
+			return strings.Contains(xml, want), nil
+		},
+	)
+}
+
+func waitForUITextAbsent(t *testing.T, serial, text string) {
+	t.Helper()
+	waitForCondition(t, time.Minute, "ui text to disappear: "+text,
+		func() string { return adbUIHierarchy(t, serial) },
+		func() (bool, error) {
+			_, _, _, _, err := boundsForNode(adbUIHierarchy(t, serial), `text="`+text+`"`)
+			if err != nil {
+				return true, nil
+			}
+			return false, nil
+		},
+	)
+}
+
+func switchToForegroundApp(t *testing.T, serial, packageName string) {
+	t.Helper()
+	if _, err := adbShellOutput(serial, "monkey", "-p", packageName, "-c", "android.intent.category.LAUNCHER", "1"); err != nil {
+		t.Fatalf("switch to foreground app %s: %v", packageName, err)
+	}
+	waitForForegroundPackageStable(t, serial, packageName, 2*time.Second)
+}
+
+func tapAt(t *testing.T, serial string, x, y int) {
+	t.Helper()
+	if _, err := adbShellOutput(serial, "input", "tap", strconv.Itoa(x), strconv.Itoa(y)); err != nil {
+		t.Fatalf("tap at %d,%d: %v", x, y, err)
+	}
+}
+
+func adbUIHierarchy(t *testing.T, serial string) string {
+	t.Helper()
+	if _, err := adb(serial, "shell", "uiautomator", "dump", "/sdcard/mdm-ui.xml"); err != nil {
+		t.Fatalf("dump ui hierarchy: %v", err)
+	}
+	xml, err := adbShellOutput(serial, "cat", "/sdcard/mdm-ui.xml")
+	if err != nil {
+		t.Fatalf("read ui hierarchy: %v", err)
+	}
+	return xml
+}
+
+func boundsForNode(xml, fragment string) (int, int, int, int, error) {
+	pattern := regexp.MustCompile(regexp.QuoteMeta(fragment) + `[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"`)
+	match := pattern.FindStringSubmatch(xml)
+	if len(match) != 5 {
+		return 0, 0, 0, 0, fmt.Errorf("node with %s not found", fragment)
+	}
+	x1, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	y1, err := strconv.Atoi(match[2])
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	x2, err := strconv.Atoi(match[3])
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	y2, err := strconv.Atoi(match[4])
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	return x1, y1, x2, y2, nil
+}
+
+func boundsForOverlayWindow(windowDump string) (int, int, int, int, error) {
+	pattern := regexp.MustCompile(`(?s)package=com\.xmdm\.launcher appop=SYSTEM_ALERT_WINDOW.*?mFrame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]`)
+	match := pattern.FindStringSubmatch(windowDump)
+	if len(match) != 5 {
+		return 0, 0, 0, 0, fmt.Errorf("overlay window not found")
+	}
+	x1, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	y1, err := strconv.Atoi(match[2])
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	x2, err := strconv.Atoi(match[3])
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	y2, err := strconv.Atoi(match[4])
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	return x1, y1, x2, y2, nil
+}
+
 // waitForGlobalSettingAny waits until the global setting matches one of the
 // expected values. Use this for bitmasks that Android may normalize.
 func waitForGlobalSettingAny(t *testing.T, serial, key string, wants ...string) {
@@ -285,6 +462,14 @@ func resetADBLauncherState(t *testing.T, serial, launcherAPKPath string) {
 		t.Fatalf("install launcher apk: %v", err)
 	}
 	setDeviceOwner(t, serial)
+	grantOverlayPermission(t, serial)
+}
+
+func grantOverlayPermission(t *testing.T, serial string) {
+	t.Helper()
+	if _, err := adb(serial, "shell", "appops", "set", "com.xmdm.launcher", "SYSTEM_ALERT_WINDOW", "allow"); err != nil {
+		t.Fatalf("grant overlay permission: %v", err)
+	}
 }
 
 // uninstallChrome removes Chrome from the device (best-effort).

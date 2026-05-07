@@ -33,7 +33,15 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 		"device-123",
 		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
-		PolicySnapshot{Name: "policy", Version: 2, KioskMode: true, KioskAppPackage: "com.example.kiosk"},
+		PolicySnapshot{
+			Name:            "policy",
+			Version:         2,
+			KioskMode:       true,
+			KioskAppPackage: "com.example.kiosk",
+			Restrictions: PolicyRestrictions{
+				KioskExitPasscodeHash: "hash-1",
+			},
+		},
 		nil,
 		nil,
 		nil,
@@ -53,6 +61,24 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 	)
 	if changedKioskPackage.Version == base.Version {
 		t.Fatalf("expected kiosk app package change to affect revision")
+	}
+
+	changedKioskExitPasscode := NewBootstrapConfigSnapshot(
+		"device-123",
+		"serial",
+		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
+		PolicySnapshot{
+			KioskMode: false,
+			Restrictions: PolicyRestrictions{
+				KioskExitPasscodeHash: "hash-1",
+			},
+		},
+		nil,
+		nil,
+		nil,
+	)
+	if changedKioskExitPasscode.Version == base.Version {
+		t.Fatalf("expected kiosk exit passcode change to affect revision")
 	}
 
 	changedRuntime := NewBootstrapConfigSnapshot(

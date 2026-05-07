@@ -51,6 +51,7 @@ type PolicyRestrictions struct {
 	KioskKeepScreenOn            bool     `json:"kioskKeepScreenOn,omitempty"`
 	KioskStayAwakeWhilePluggedIn bool     `json:"kioskStayAwakeWhilePluggedIn,omitempty"`
 	KioskUnlockOnBoot            bool     `json:"kioskUnlockOnBoot,omitempty"`
+	KioskExitPasscodeHash        string   `json:"kioskExitPasscodeHash,omitempty"`
 }
 
 type RuntimeSnapshot struct {

@@ -1,10 +1,13 @@
 package e2e_test
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"xmdm/server/internal/enrollment"
 )
 
 // ── Test cases ───────────────────────────────────────────────────────────────
@@ -249,15 +252,18 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 func TestKioskModeChrome(t *testing.T) {
 	env := newBaseTestEnv(t, false)
 	artifactStore := newTestArtifactStore(t)
+	passcodeHash := enrollment.HashToken("1234")
 
 	mustRegisterChromeApp(t, env.client, env.baseURL, artifactStore)
-	mustCreatePolicy(t, env.client, env.baseURL, `{
+	mustCreatePolicy(t, env.client, env.baseURL, fmt.Sprintf(`{
 		"name":"kiosk-mode",
 		"version":1,
 		"kioskMode":true,
 		"kioskAppPackage":"com.android.chrome",
-		"restrictions":{}
-	}`)
+		"restrictions":{
+			"kioskExitPasscodeHash":"%s"
+		}
+	}`, passcodeHash))
 
 	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
 	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
@@ -273,25 +279,198 @@ func TestKioskModeChrome(t *testing.T) {
 	waitForKioskModeOnDevice(t, env.serial)
 }
 
-// TestKioskExitChrome verifies that an exit_kiosk command unlocks the device
-// while Chrome stays foreground after Chrome has been launched as the kiosk app.
-func TestKioskExitChrome(t *testing.T) {
+// TestKioskExitChromeLocal verifies that the local kiosk exit overlay unlocks
+// Chrome when Chrome is the kiosk app.
+func TestKioskExitChromeLocal(t *testing.T) {
+	env := newBaseTestEnv(t, false)
+	artifactStore := newTestArtifactStore(t)
+
+	mustRegisterChromeApp(t, env.client, env.baseURL, artifactStore)
+
+	passcodeHash := enrollment.HashToken("1234")
+	mustCreatePolicy(t, env.client, env.baseURL, fmt.Sprintf(`{
+		"name":"kiosk-exit",
+		"version":1,
+		"kioskMode":true,
+		"kioskAppPackage":"%s",
+		"restrictions":{
+			"kioskExitPasscodeHash":"%s"
+		}
+	}`, chromePackage, passcodeHash))
+
+	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	waitForChromeInstalled(t, env.serial)
+	waitForForegroundPackageStable(t, env.serial, chromePackage, 15*time.Second)
+	waitForKioskModeOnDevice(t, env.serial)
+	tapKioskAdminMenuButton(t, env.serial)
+	tapKioskMenuItem(t, env.serial, "Exit kiosk mode")
+	enterKioskExitPasscode(t, env.serial, "1234")
+	waitForKioskModeOffOnDevice(t, env.serial)
+
+	switchToForegroundApp(t, env.serial, "com.android.settings")
+	tapKioskAdminMenuButton(t, env.serial)
+	tapKioskMenuItem(t, env.serial, "Enter kiosk mode")
+	waitForKioskModeOnDevice(t, env.serial)
+	waitForForegroundPackage(t, env.serial, chromePackage)
+
+	switchToForegroundApp(t, env.serial, "com.android.settings")
+	tapKioskAdminMenuButton(t, env.serial)
+	tapKioskMenuItem(t, env.serial, "Exit kiosk mode")
+}
+
+// TestKioskAdminConfigSyncStatus verifies that the local kiosk admin menu
+// refreshes the displayed config snapshot after a local sync.
+func TestKioskAdminConfigSyncStatus(t *testing.T) {
+	env := newBaseTestEnv(t, false)
+	passcodeHash := enrollment.HashToken("1234")
+
+	policyResp := mustCreatePolicy(t, env.client, env.baseURL, fmt.Sprintf(`{
+		"name":"kiosk-sync-status",
+		"version":1,
+		"kioskMode":true,
+		"kioskAppPackage":"com.xmdm.launcher",
+		"restrictions":{
+			"kioskExitPasscodeHash":"%s"
+		}
+	}`, passcodeHash))
+	policyID, _ := policyResp["id"].(string)
+	if policyID == "" {
+		t.Fatalf("policy create returned empty id: %#v", policyResp)
+	}
+
+	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+
+	requestMarker := env.requests.len()
+	patchJSON(t, env.client, env.baseURL+"/api/v1/policies/"+policyID, fmt.Sprintf(`{
+		"name":"kiosk-sync-status-updated",
+		"version":2,
+		"kioskMode":true,
+		"kioskAppPackage":"com.xmdm.launcher",
+		"restrictions":{
+			"kioskExitPasscodeHash":"%s",
+			"allowCamera":false
+		}
+	}`, passcodeHash))
+	waitForKioskModeOnDevice(t, env.serial)
+	tapKioskAdminMenuButton(t, env.serial)
+	tapKioskMenuItem(t, env.serial, "Sync config policy")
+	env.requests.waitForAfter(t, requestMarker, time.Minute, "config snapshot fetch after local sync", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			r.path == "/api/v1/devices/"+env.deviceID+"/config"
+	})
+	waitForUIContains(t, env.serial, `"name": "kiosk-sync-status-updated"`, time.Minute)
+}
+
+// TestKioskAdminConfigSyncTwice verifies that repeated local config syncs do
+// not strand the progress dialog and that the displayed config snapshot updates
+// on each refresh.
+func TestKioskAdminConfigSyncTwice(t *testing.T) {
+	env := newBaseTestEnv(t, false)
+	passcodeHash := enrollment.HashToken("1234")
+
+	policyResp := mustCreatePolicy(t, env.client, env.baseURL, fmt.Sprintf(`{
+		"name":"kiosk-sync-twice",
+		"version":1,
+		"kioskMode":true,
+		"kioskAppPackage":"com.xmdm.launcher",
+		"restrictions":{
+			"kioskExitPasscodeHash":"%s"
+		}
+	}`, passcodeHash))
+	policyID, _ := policyResp["id"].(string)
+	if policyID == "" {
+		t.Fatalf("policy create returned empty id: %#v", policyResp)
+	}
+
+	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
+	startLauncher(t, env.serial, bootstrapURI)
+
+	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
+		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
+	})
+	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
+	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
+	waitForKioskModeOnDevice(t, env.serial)
+
+	requestMarker := env.requests.len()
+	patchJSON(t, env.client, env.baseURL+"/api/v1/policies/"+policyID, fmt.Sprintf(`{
+		"name":"kiosk-sync-twice-v2",
+		"version":2,
+		"kioskMode":true,
+		"kioskAppPackage":"com.xmdm.launcher",
+		"restrictions":{
+			"kioskExitPasscodeHash":"%s",
+			"allowCamera":false
+		}
+	}`, passcodeHash))
+	tapKioskAdminMenuButton(t, env.serial)
+	tapKioskMenuItem(t, env.serial, "Sync config policy")
+	env.requests.waitForAfter(t, requestMarker, time.Minute, "first config snapshot fetch after local sync", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			r.path == "/api/v1/devices/"+env.deviceID+"/config"
+	})
+	waitForUIContains(t, env.serial, `"name": "kiosk-sync-twice-v2"`, time.Minute)
+
+	requestMarker = env.requests.len()
+	patchJSON(t, env.client, env.baseURL+"/api/v1/policies/"+policyID, fmt.Sprintf(`{
+		"name":"kiosk-sync-twice-v3",
+		"version":3,
+		"kioskMode":true,
+		"kioskAppPackage":"com.xmdm.launcher",
+		"restrictions":{
+			"kioskExitPasscodeHash":"%s",
+			"allowCamera":true
+		}
+	}`, passcodeHash))
+	tapKioskAdminMenuButton(t, env.serial)
+	tapKioskMenuItem(t, env.serial, "Sync config policy")
+	env.requests.waitForAfter(t, requestMarker, time.Minute, "second config snapshot fetch after local sync", func(r requestRecord) bool {
+		return r.method == http.MethodGet &&
+			r.path == "/api/v1/devices/"+env.deviceID+"/config"
+	})
+	waitForUIContains(t, env.serial, `"name": "kiosk-sync-twice-v3"`, time.Minute)
+}
+
+// TestKioskExitChromeCommand verifies that the server-issued exit_kiosk
+// command unlocks the device while Chrome stays foreground after Chrome has
+// been launched as the kiosk app.
+func TestKioskExitChromeCommand(t *testing.T) {
 	ensureMQTTBrokerRunning(t)
 	env := commandTestEnv{baseTestEnv: newBaseTestEnv(t, true)}
 	env.reverseMQTTPort(t)
 
 	artifactStore := newTestArtifactStore(t)
+	passcodeHash := enrollment.HashToken("1234")
 	mustRegisterChromeApp(t, env.client, env.baseURL, artifactStore)
-	mustCreatePolicy(t, env.client, env.baseURL, `{
-		"name":"kiosk-exit",
+	mustCreatePolicy(t, env.client, env.baseURL, fmt.Sprintf(`{
+		"name":"kiosk-exit-command",
 		"version":1,
 		"kioskMode":true,
 		"kioskAppPackage":"com.android.chrome",
-		"restrictions":{}
-	}`)
+		"restrictions":{
+			"kioskExitPasscodeHash":"%s"
+		}
+	}`, passcodeHash))
 
-	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
-	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
+	token := env.mustCreateEnrollmentToken(t)
+	bootstrapURI := env.mustBuildBootstrapURI(t, token)
 	startLauncher(t, env.serial, bootstrapURI)
 
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
@@ -320,16 +499,18 @@ func TestKioskStayAwakeWhilePluggedIn(t *testing.T) {
 		resetBatteryState(t, env.serial)
 	})
 	setBatteryPlugged(t, env.serial, true)
+	passcodeHash := enrollment.HashToken("1234")
 
-	mustCreatePolicy(t, env.client, env.baseURL, `{
+	mustCreatePolicy(t, env.client, env.baseURL, fmt.Sprintf(`{
 		"name":"kiosk-stay-awake",
 		"version":1,
 		"kioskMode":true,
 		"kioskAppPackage":"com.xmdm.launcher",
 		"restrictions":{
+			"kioskExitPasscodeHash":"%s",
 			"kioskStayAwakeWhilePluggedIn":true
 		}
-	}`)
+	}`, passcodeHash))
 
 	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
 	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -264,7 +265,7 @@ func crudUpdateBody(kind string) string {
 	case "apps":
 		return `{"packageName":"com.example.app.two","name":"apps-two"}`
 	case "policies":
-		return `{"name":"policies-two","version":2,"kioskMode":true,"kioskAppPackage":"com.example.kiosk.two","restrictions":{"camera":true}}`
+		return fmt.Sprintf(`{"name":"policies-two","version":2,"kioskMode":true,"kioskAppPackage":"com.example.kiosk.two","restrictions":{"camera":true,"kioskExitPasscodeHash":"%s"}}`, enrollment.HashToken("1234"))
 	case "devices":
 		return `{"name":"devices-two","secretHash":"hash-devices-two"}`
 	default:

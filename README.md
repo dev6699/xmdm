@@ -5,7 +5,7 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-05-02
+Snapshot last updated: 2026-05-07
 
 ### M0 - Foundation
 
@@ -105,7 +105,7 @@ Note: `M5-01 MQTT Transport` is complete with the server constructing an interna
 | M6-08 Enterprise E2E | ☑ |
 | M6-09 Policy Gaps | ☑ |
 
-Note: `M6-01 Kiosk Enforcement` now also supports a policy-defined kiosk app package, kiosk keep-awake behavior, stay-awake-while-plugged-in device-owner control, best-effort boot unlock for kiosk devices without password policy, and a physical-device e2e check for the stay-on global setting, explicitly releases the launcher before handing off to the kiosk app, and keeps the temporary `exit_kiosk` command path as of 2026-05-02, while keeping the kiosk enforcement item marked complete.
+Note: `M6-01 Kiosk Enforcement` now also supports a policy-defined kiosk app package, kiosk keep-awake behavior, stay-awake-while-plugged-in device-owner control, best-effort boot unlock for kiosk devices without password policy, a required kiosk exit passcode hash for kiosk policies, a device-local persistent admin menu with enter/exit/sync actions plus the existing `exit_kiosk` command path, and a physical-device e2e check for the stay-on global setting, explicitly releases the launcher before handing off to the kiosk app, and keeps the kiosk enforcement item marked complete.
 Note: `M6-06 Messaging And Audit` is complete as of 2026-05-01 with API endpoints for command listing, command creation, and audit event listing; a separate admin UI is still future work.
 Note: `M6-08 Enterprise E2E` is complete as of 2026-05-01 with device-backed coverage for kiosk enforcement, package rules, managed files and apps, device logs, device info, and API-backed messaging/audit flows; `M6-07 Image Upload` remains not planned.
 Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enforcement matrix documented in [docs/agent-app-lifecycle.md](docs/agent-app-lifecycle.md).

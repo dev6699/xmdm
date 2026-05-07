@@ -70,6 +70,9 @@ class AgentStateStoreTest {
                 lastAppliedAtEpochMillis = 123456980L,
             ),
         )
+        store.saveKioskControl(
+            KioskControlState(exitSuppressedUntilPolicyVersion = 7L),
+        )
         first.scope.cancel()
 
         val reloaded = newStore(storeFile)
@@ -101,6 +104,7 @@ class AgentStateStoreTest {
         assertEquals("""{"version":"1","certificates":[]}""", state.certificates?.snapshotJson)
         assertEquals(7L, state.certificates?.version)
         assertEquals(123456980L, state.certificates?.lastAppliedAtEpochMillis)
+        assertEquals(7L, state.kioskControl?.exitSuppressedUntilPolicyVersion)
         reloaded.scope.cancel()
     }
 

@@ -2,10 +2,12 @@ package policyhttp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 	policy "xmdm/server/internal/policy"
 )
@@ -42,5 +44,19 @@ func decodePolicyRequest(r *http.Request) (policy.PolicyUpsert, error) {
 	if payload.Name == "" {
 		return policy.PolicyUpsert{}, httpx.ErrInvalidInput
 	}
+	if payload.KioskMode && !kioskExitPasscodeConfigured(payload.Restrictions) {
+		return policy.PolicyUpsert{}, httpx.ErrInvalidInput
+	}
 	return payload, nil
+}
+
+func kioskExitPasscodeConfigured(restrictions json.RawMessage) bool {
+	if len(restrictions) == 0 || string(restrictions) == "null" {
+		return false
+	}
+	var parsed enrollment.PolicyRestrictions
+	if err := json.Unmarshal(restrictions, &parsed); err != nil {
+		return false
+	}
+	return parsed.KioskExitPasscodeHash != ""
 }

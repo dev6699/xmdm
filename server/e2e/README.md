@@ -12,7 +12,10 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestDeviceLogsUpload` covers adb-backed device log upload and recorded-log API verification on a physical device.
 - `TestDeviceInfoReporting` covers adb-backed device-info reporting and admin export on a physical device.
 - `TestKioskModeChrome` covers adb-backed kiosk enforcement using Chrome on a physical device.
-- `TestKioskExitChrome` covers adb-backed kiosk unlock while Chrome remains foreground on a physical device.
+- `TestKioskExitChromeLocal` covers adb-backed local kiosk unlock using the persistent admin menu, passcode prompt, and passcode while Chrome remains foreground on a physical device.
+- `TestKioskAdminConfigSyncStatus` covers adb-backed local kiosk config sync status from the persistent admin menu on a physical device.
+- `TestKioskAdminConfigSyncTwice` covers repeated adb-backed local kiosk config sync from the persistent admin menu on a physical device.
+- `TestKioskExitChromeCommand` covers adb-backed server command kiosk unlock while Chrome remains foreground on a physical device.
 - `TestKioskStayAwakeWhilePluggedIn` covers adb-backed kiosk stay-awake policy application on a physical device.
 - `TestPackageRules` covers adb-backed package suspension enforcement on a physical device.
 - `TestPolicySync` covers adb-backed policy refresh after an admin update on a physical device.
@@ -191,7 +194,26 @@ The admin E2E verifies:
 
 `TestKioskModeChrome` is the Chrome kiosk-target variant. It reuses the same setup but additionally installs Chrome from a managed app fixture and verifies Chrome becomes the foreground kiosk app before exiting.
 
-`TestKioskExitChrome` exercises the paired exit path:
+`TestKioskExitChromeLocal` exercises the paired local exit path:
+
+1. Reuses the same launcher bootstrap and kiosk shell setup.
+2. Applies a kiosk policy with a hashed exit passcode.
+3. Taps the persistent admin overlay, chooses `Exit kiosk mode`, and submits the passcode through the launcher UI.
+4. Verifies the launcher remains foreground after kiosk exit and lock-task mode is cleared.
+
+`TestKioskAdminConfigSyncStatus` exercises the local config sync status path:
+
+1. Reuses the same launcher bootstrap and kiosk shell setup.
+2. Opens the persistent admin overlay from the launcher.
+3. Chooses `Sync config policy` and verifies the launcher updates its displayed config snapshot after a refresh.
+
+`TestKioskAdminConfigSyncTwice` exercises repeated local config sync:
+
+1. Reuses the same kiosk shell setup.
+2. Applies one policy update and syncs it into the launcher display.
+3. Applies a second policy update, syncs again, and verifies the display updates a second time.
+
+`TestKioskExitChromeCommand` exercises the server command exit path:
 
 1. Reuses the same launcher bootstrap and Chrome kiosk target setup.
 2. Issues an `exit_kiosk` command through the admin command API.
