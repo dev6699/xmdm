@@ -73,6 +73,9 @@ func (a *app) resourceCmd(opts *config.Options, spec resourceSpec) *cobra.Comman
 		cmd.AddCommand(a.resourceUpdateCmd(opts, spec))
 		cmd.AddCommand(a.resourceRetireCmd(opts, spec))
 	}
+	if cmds := a.contentCmds(opts, spec); len(cmds) > 0 {
+		cmd.AddCommand(cmds...)
+	}
 	return cmd
 }
 

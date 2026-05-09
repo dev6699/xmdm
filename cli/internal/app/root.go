@@ -77,7 +77,7 @@ func (a *app) printRootHelp(opts config.Options) {
 		"config",
 		"  show",
 		"  validate",
-	}, append(a.resourceHelpLines(), a.managedResourceHelpLines()...)...))
+	}, append(append(a.resourceHelpLines(), a.managedResourceHelpLines()...), a.contentHelpLines()...)...))
 	fmt.Fprintln(a.stdout)
 	fmt.Fprintln(a.stdout, "Global flags:")
 	printIndentedTree(a.stdout, []string{

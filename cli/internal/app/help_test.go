@@ -20,7 +20,7 @@ func TestRunPrintsVersionedHelpTree(t *testing.T) {
 	}
 
 	out := stdout.String()
-	for _, want := range []string{"xmdm 1.2.3", "auth", "login", "whoami", "logout", "config", "users", "create", "update", "retire", "managed-files", "commands", "device-info", "audit", "--base-url"} {
+	for _, want := range []string{"xmdm 1.2.3", "auth", "login", "whoami", "logout", "config", "users", "create", "update", "retire", "files", "managed-files", "certificates", "versions", "publish", "commands", "device-info", "audit", "--base-url"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help output missing %q:\n%s", want, out)
 		}
