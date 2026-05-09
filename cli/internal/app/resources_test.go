@@ -171,9 +171,12 @@ func seedLiveResources(t *testing.T) seededResource {
 	managedFilePath := "/data/cli-file-" + nonce + ".txt"
 
 	sql := fmt.Sprintf(`
+DELETE FROM device_info WHERE device_id = '%[21]s';
 DELETE FROM device_info WHERE id = '%[27]s';
+DELETE FROM device_logs WHERE device_id = '%[21]s';
 DELETE FROM device_logs WHERE id = '%[25]s';
 DELETE FROM commands WHERE id = '%[24]s';
+DELETE FROM commands WHERE device_id = '%[21]s';
 DELETE FROM managed_files WHERE id = '%[16]s';
 DELETE FROM certificates WHERE id = '%[20]s';
 DELETE FROM files WHERE id = '%[15]s';

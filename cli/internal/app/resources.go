@@ -58,6 +58,10 @@ func (a *app) resourceHelpLines() []string {
 		if spec.Name == "devices" {
 			lines = append(lines, "  inspect")
 		}
+		if spec.Name == "commands" {
+			lines = append(lines, "  send")
+			lines = append(lines, "  ack")
+		}
 	}
 	return lines
 }
@@ -66,6 +70,13 @@ func (a *app) resourceCmd(opts *config.Options, spec resourceSpec) *cobra.Comman
 	cmd := &cobra.Command{
 		Use:   spec.Name,
 		Short: fmt.Sprintf("Inspect %s", spec.Name),
+	}
+	if spec.Name == "commands" {
+		cmd.AddCommand(a.commandListCmd(opts))
+		cmd.AddCommand(a.commandSendCmd(opts))
+		cmd.AddCommand(a.commandShowCmd(opts))
+		cmd.AddCommand(a.commandAckCmd(opts))
+		return cmd
 	}
 	cmd.AddCommand(a.resourceListCmd(opts, spec))
 	if spec.IncludeShow {
