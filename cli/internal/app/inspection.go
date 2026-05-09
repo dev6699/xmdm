@@ -85,7 +85,7 @@ func (a *app) deviceInspectCmd(opts *config.Options) *cobra.Command {
 				}
 			}
 
-			return a.writeIndentedJSON(cmd.OutOrStdout(), view)
+			return a.writeSuccess(cmd.OutOrStdout(), resolved, cmd.CommandPath(), view)
 		},
 	}
 	cmd.Flags().StringVar(&deviceSecret, "device-secret", "", "device secret for signed config inspection")
@@ -117,7 +117,7 @@ func (a *app) fetchDeviceSnapshot(ctx context.Context, resolved config.Resolved,
 	req.Header.Set("X-XMDM-Device-Secret", strings.TrimSpace(deviceSecret))
 	resp, err := client.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, transportFailureError("device snapshot request failed", err)
 	}
 	defer resp.Body.Close()
 	payload, err := io.ReadAll(resp.Body)
@@ -125,10 +125,7 @@ func (a *app) fetchDeviceSnapshot(ctx context.Context, resolved config.Resolved,
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		if len(payload) > 0 {
-			return nil, fmt.Errorf("device config fetch failed: %s: %s", resp.Status, strings.TrimSpace(string(payload)))
-		}
-		return nil, fmt.Errorf("device config fetch failed: %s", resp.Status)
+		return nil, httpFailureError("device config fetch failed", resp.StatusCode, payload)
 	}
 	var snapshot json.RawMessage
 	if err := json.Unmarshal(payload, &snapshot); err != nil {

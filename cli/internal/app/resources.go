@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -119,7 +120,7 @@ func (a *app) resourceListCmd(opts *config.Options, spec resourceSpec) *cobra.Co
 			if err != nil {
 				return err
 			}
-			return a.printListEnvelope(cmd.OutOrStdout(), items)
+			return a.printListEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), items)
 		},
 	}
 }
@@ -152,7 +153,7 @@ func (a *app) resourceShowCmd(opts *config.Options, spec resourceSpec) *cobra.Co
 			if !ok {
 				return fmt.Errorf("%s %q not found", spec.Singular, args[0])
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 }
@@ -172,10 +173,14 @@ func (a *app) fetchResourceItems(ctx context.Context, resolved config.Resolved, 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s list failed: %s", spec.Name, resp.Status)
+	payload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
-	return decodeResourceItems(resp.Body, spec.ListField)
+	if resp.StatusCode != http.StatusOK {
+		return nil, httpFailureError(spec.Name+" list failed", resp.StatusCode, payload)
+	}
+	return decodeResourceItems(bytes.NewReader(payload), spec.ListField)
 }
 
 func decodeResourceItems(body io.Reader, field string) ([]json.RawMessage, error) {
@@ -216,23 +221,20 @@ func findResourceItem(items []json.RawMessage, id string) (json.RawMessage, bool
 	return nil, false
 }
 
-func (a *app) printListEnvelope(w ioWriter, items []json.RawMessage) error {
+func (a *app) printListEnvelope(resolved config.Resolved, command string, w ioWriter, items []json.RawMessage) error {
 	payload := map[string]any{
 		"items":  items,
 		"count":  len(items),
 		"cursor": nil,
 	}
-	return a.writeIndentedJSON(w, payload)
+	if strings.EqualFold(resolved.OutputFormat, "json") {
+		return a.writeSuccess(w, resolved, command, payload)
+	}
+	return writeItemsTable(w, items)
 }
 
-func (a *app) printShowEnvelope(w ioWriter, item json.RawMessage) error {
-	return a.writeIndentedJSON(w, map[string]any{"item": item})
-}
-
-func (a *app) writeIndentedJSON(w ioWriter, value any) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(value)
+func (a *app) printShowEnvelope(resolved config.Resolved, command string, w ioWriter, item json.RawMessage) error {
+	return a.writeSuccess(w, resolved, command, map[string]any{"item": item})
 }
 
 func isManagedResource(name string) bool {

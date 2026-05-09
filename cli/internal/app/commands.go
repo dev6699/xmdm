@@ -43,7 +43,7 @@ func (a *app) commandListCmd(opts *config.Options) *cobra.Command {
 				return err
 			}
 			items = filterCommandItems(items, deviceID, commandType, status, limit)
-			return a.printListEnvelope(cmd.OutOrStdout(), items)
+			return a.printListEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), items)
 		},
 	}
 	cmd.Flags().StringVar(&deviceID, "device-id", "", "filter by device id")
@@ -81,7 +81,7 @@ func (a *app) commandSendCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 	input.bind(cmd)
@@ -123,7 +123,7 @@ func (a *app) commandShowCmd(opts *config.Options) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("command %q not found", args[0])
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 	cmd.Flags().StringVar(&deviceID, "device-id", "", "filter by device id before selecting")
@@ -178,7 +178,7 @@ func (a *app) commandAckCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), payload)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), payload)
 		},
 	}
 	cmd.Flags().StringVar(&deviceSecret, "device-secret", "", "device secret used for acknowledgement")
@@ -225,7 +225,7 @@ func (a *app) doDeviceJSON(ctx context.Context, resolved config.Resolved, device
 	req.Header.Set("X-XMDM-Device-Secret", strings.TrimSpace(deviceSecret))
 	resp, err := client.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, transportFailureError(path+" request failed", err)
 	}
 	defer resp.Body.Close()
 	payload, err := io.ReadAll(resp.Body)
@@ -233,10 +233,7 @@ func (a *app) doDeviceJSON(ctx context.Context, resolved config.Resolved, device
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		if len(payload) > 0 {
-			return nil, fmt.Errorf("%s failed: %s: %s", path, resp.Status, strings.TrimSpace(string(payload)))
-		}
-		return nil, fmt.Errorf("%s failed: %s", path, resp.Status)
+		return nil, httpFailureError(path+" failed", resp.StatusCode, payload)
 	}
 	var item json.RawMessage
 	if err := json.Unmarshal(payload, &item); err != nil {

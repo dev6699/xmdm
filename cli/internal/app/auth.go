@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -139,12 +140,13 @@ func (a *app) performLogin(resolved config.Resolved, username, password string) 
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return session.State{}, err
+		return session.State{}, transportFailureError("login request failed", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusSeeOther {
-		return session.State{}, fmt.Errorf("login failed: %s", resp.Status)
+		payload, _ := io.ReadAll(resp.Body)
+		return session.State{}, httpFailureError("login failed", resp.StatusCode, payload)
 	}
 
 	cookie := findCookie(resp.Cookies(), session.CookieName)
@@ -179,12 +181,13 @@ func (a *app) fetchCurrentUser(state session.State) (*meResponse, error) {
 
 	resp, err := client.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, transportFailureError("whoami request failed", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("whoami failed: %s", resp.Status)
+		payload, _ := io.ReadAll(resp.Body)
+		return nil, httpFailureError("whoami failed", resp.StatusCode, payload)
 	}
 
 	var payload meResponse
@@ -207,12 +210,13 @@ func (a *app) performLogout(state session.State) error {
 
 	resp, err := client.HTTP.Do(req)
 	if err != nil {
-		return err
+		return transportFailureError("logout request failed", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("logout failed: %s", resp.Status)
+		payload, _ := io.ReadAll(resp.Body)
+		return httpFailureError("logout failed", resp.StatusCode, payload)
 	}
 	return nil
 }

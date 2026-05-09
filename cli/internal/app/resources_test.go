@@ -86,6 +86,31 @@ func TestRunResourceListAndShowAgainstLiveServer(t *testing.T) {
 	}
 }
 
+func TestRunResourceListDefaultsToTableOutputAgainstLiveServer(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.json")
+	t.Setenv("XMDM_SESSION_FILE", sessionPath)
+
+	loginLiveAdmin(t)
+	seed := seedLiveResources(t)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"--config", "../../config.yaml", "users", "list"}, &stdout, &stderr, "1.2.3")
+	if code != 0 {
+		t.Fatalf("unexpected exit code: %d stderr=%s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if strings.Contains(out, "\"ok\": true") {
+		t.Fatalf("expected human/table output, got json envelope:\n%s", out)
+	}
+	if !strings.Contains(out, "id") || !strings.Contains(out, "name") || !strings.Contains(out, "status") {
+		t.Fatalf("expected table header in output:\n%s", out)
+	}
+	if !strings.Contains(out, seed.userEmail) {
+		t.Fatalf("expected seeded row in output:\n%s", out)
+	}
+}
+
 type cliRunResult struct {
 	stdout string
 	stderr string
@@ -95,11 +120,24 @@ type cliRunResult struct {
 func runCLI(t *testing.T, args []string, version string) cliRunResult {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
+	args = ensureJSONFormat(args)
 	code := Run(args, &stdout, &stderr, version)
 	if code != 0 {
 		t.Fatalf("cli failed: code=%d stderr=%s", code, stderr.String())
 	}
 	return cliRunResult{stdout: stdout.String(), stderr: stderr.String(), code: code}
+}
+
+func ensureJSONFormat(args []string) []string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--format" {
+			return args
+		}
+	}
+	out := make([]string, 0, len(args)+2)
+	out = append(out, "--format", "json")
+	out = append(out, args...)
+	return out
 }
 
 type seededResource struct {
@@ -401,12 +439,14 @@ SET tenant_id = EXCLUDED.tenant_id,
 func extractIDFromListOutput(t *testing.T, stdout, want string) string {
 	t.Helper()
 	var envelope struct {
-		Items []json.RawMessage `json:"items"`
+		Data struct {
+			Items []json.RawMessage `json:"items"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
 		t.Fatalf("decode list output: %v\n%s", err, stdout)
 	}
-	for _, raw := range envelope.Items {
+	for _, raw := range envelope.Data.Items {
 		if strings.Contains(string(raw), want) {
 			var item map[string]any
 			if err := json.Unmarshal(raw, &item); err != nil {
@@ -419,6 +459,30 @@ func extractIDFromListOutput(t *testing.T, stdout, want string) string {
 	}
 	t.Fatalf("could not find item containing %q in %s", want, stdout)
 	return ""
+}
+
+func decodeEnvelopeDataRaw(t *testing.T, out string) json.RawMessage {
+	t.Helper()
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		t.Fatalf("decode envelope: %v\noutput=%s", err, out)
+	}
+	return envelope.Data
+}
+
+func decodeEnvelopeItemRaw(t *testing.T, out string) json.RawMessage {
+	t.Helper()
+	var envelope struct {
+		Data struct {
+			Item json.RawMessage `json:"item"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		t.Fatalf("decode envelope item: %v\noutput=%s", err, out)
+	}
+	return envelope.Data.Item
 }
 
 func hashToken(secret string) string {

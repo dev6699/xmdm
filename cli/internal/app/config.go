@@ -25,7 +25,7 @@ func (a *app) configCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printResolved(cmd.OutOrStdout(), resolved)
+			return a.printResolved(resolved, cmd.CommandPath(), cmd.OutOrStdout())
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
@@ -53,10 +53,13 @@ func (a *app) configCmd(opts *config.Options) *cobra.Command {
 			}
 			resp, err := client.HTTP.Do(req)
 			if err != nil {
-				return err
+				return transportFailureError("config validate request failed", err)
 			}
 			defer resp.Body.Close()
-			_, _ = io.Copy(io.Discard, resp.Body)
+			payload, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+				return httpFailureError("config validate failed", resp.StatusCode, payload)
+			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "target reachable: %s (status: %d)\n", joined, resp.StatusCode)
 			return err
 		},
@@ -64,7 +67,7 @@ func (a *app) configCmd(opts *config.Options) *cobra.Command {
 	return cmd
 }
 
-func (a *app) printResolved(w ioWriter, resolved config.Resolved) error {
+func (a *app) printResolved(resolved config.Resolved, command string, w ioWriter) error {
 	payload := map[string]any{
 		"configPath":   resolved.ConfigPath,
 		"profile":      resolved.ProfileName,
@@ -73,5 +76,5 @@ func (a *app) printResolved(w ioWriter, resolved config.Resolved) error {
 		"outputFormat": resolved.OutputFormat,
 		"timeout":      resolved.Timeout.String(),
 	}
-	return a.writeIndentedJSON(w, payload)
+	return a.writeSuccess(w, resolved, command, payload)
 }

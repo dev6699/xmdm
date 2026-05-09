@@ -21,7 +21,7 @@ func TestRunDeviceInspectAgainstLiveServer(t *testing.T) {
 	}, "1.2.3").stdout
 
 	var payload map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+	if err := json.Unmarshal(decodeEnvelopeDataRaw(t, out), &payload); err != nil {
 		t.Fatalf("decode inspect output: %v\noutput=%s", err, out)
 	}
 

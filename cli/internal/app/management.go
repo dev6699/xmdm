@@ -64,7 +64,7 @@ func (a *app) resourceCreateCmd(opts *config.Options, spec resourceSpec) *cobra.
 			if err != nil {
 				return err
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 	input.bind(cmd)
@@ -100,7 +100,7 @@ func (a *app) resourceUpdateCmd(opts *config.Options, spec resourceSpec) *cobra.
 			if err != nil {
 				return err
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 	input.bind(cmd)
@@ -131,7 +131,7 @@ func (a *app) resourceRetireCmd(opts *config.Options, spec resourceSpec) *cobra.
 			if err != nil {
 				return err
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 	return cmd
@@ -156,7 +156,7 @@ func (a *app) mutateResource(ctx context.Context, resolved config.Resolved, stat
 	req.AddCookie(&http.Cookie{Name: cookieNameOrDefault(state), Value: state.CookieValue})
 	resp, err := client.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, transportFailureError(method+" "+requestPath+" request failed", err)
 	}
 	defer resp.Body.Close()
 	payload, err := io.ReadAll(resp.Body)
@@ -164,10 +164,7 @@ func (a *app) mutateResource(ctx context.Context, resolved config.Resolved, stat
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		if len(payload) > 0 {
-			return nil, fmt.Errorf("%s %s failed: %s: %s", method, requestPath, resp.Status, strings.TrimSpace(string(payload)))
-		}
-		return nil, fmt.Errorf("%s %s failed: %s", method, requestPath, resp.Status)
+		return nil, httpFailureError(method+" "+requestPath+" failed", resp.StatusCode, payload)
 	}
 	var item json.RawMessage
 	if err := json.Unmarshal(payload, &item); err != nil {

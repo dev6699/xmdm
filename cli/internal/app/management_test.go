@@ -3,12 +3,17 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestRunCoreResourceManagementAgainstLiveServer(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.json")
+	t.Setenv("XMDM_SESSION_FILE", sessionPath)
+	loginLiveAdmin(t)
+
 	nonce := fmt.Sprintf("%d", time.Now().UnixNano())
 
 	roleName := "cli-role-" + nonce
@@ -67,7 +72,9 @@ func retireManagedResource(t *testing.T, resource, id string) string {
 func envelopeID(t *testing.T, out string) string {
 	t.Helper()
 	var envelope struct {
-		Item json.RawMessage `json:"item"`
+		Data struct {
+			Item json.RawMessage `json:"item"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
 		t.Fatalf("unmarshal envelope: %v\noutput=%s", err, out)
@@ -77,7 +84,7 @@ func envelopeID(t *testing.T, out string) string {
 		Status string `json:"status"`
 		Name   string `json:"name"`
 	}
-	if err := json.Unmarshal(envelope.Item, &payload); err != nil {
+	if err := json.Unmarshal(envelope.Data.Item, &payload); err != nil {
 		t.Fatalf("unmarshal item: %v\noutput=%s", err, out)
 	}
 	if payload.ID == "" {
@@ -89,12 +96,14 @@ func envelopeID(t *testing.T, out string) string {
 func assertEnvelopeFieldContains(t *testing.T, out, field, want string) {
 	t.Helper()
 	var envelope struct {
-		Item map[string]any `json:"item"`
+		Data struct {
+			Item map[string]any `json:"item"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
 		t.Fatalf("unmarshal envelope: %v\noutput=%s", err, out)
 	}
-	raw, ok := envelope.Item[field]
+	raw, ok := envelope.Data.Item[field]
 	if !ok {
 		t.Fatalf("missing %q in output: %s", field, out)
 	}

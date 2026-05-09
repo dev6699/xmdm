@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
 )
@@ -21,6 +22,11 @@ func Run(args []string, stdout, stderr io.Writer, version string) int {
 	root := a.rootCmd()
 	root.SetArgs(args)
 	if err := root.Execute(); err != nil {
+		var ce *cliError
+		if errors.As(err, &ce) {
+			fmt.Fprintln(stderr, ce.err)
+			return ce.code
+		}
 		fmt.Fprintln(stderr, err)
 		return 1
 	}

@@ -87,7 +87,7 @@ func (a *app) uploadContentCmd(opts *config.Options, resourceName, singular, pat
 			if err != nil {
 				return err
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 	input.bind(cmd)
@@ -120,7 +120,7 @@ func (a *app) retireContentCmd(opts *config.Options, resourceName, singular, pat
 			if err != nil {
 				return err
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 	cmd.Long = fmt.Sprintf("Retire a %s record.", resourceName)
@@ -155,7 +155,7 @@ func (a *app) managedFileCreateCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 	input.bind(cmd)
@@ -186,7 +186,7 @@ func (a *app) managedFileRetireCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 	return cmd
@@ -230,7 +230,7 @@ func (a *app) publishAppVersionCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printShowEnvelope(cmd.OutOrStdout(), item)
+			return a.printShowEnvelope(resolved, cmd.CommandPath(), cmd.OutOrStdout(), item)
 		},
 	}
 	input.bind(cmd)
@@ -303,7 +303,7 @@ func (a *app) uploadArtifact(ctx context.Context, resolved config.Resolved, stat
 
 	resp, err := client.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, transportFailureError("content upload request failed", err)
 	}
 	defer resp.Body.Close()
 	payload, err := io.ReadAll(resp.Body)

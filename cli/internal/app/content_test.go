@@ -12,6 +12,10 @@ import (
 )
 
 func TestRunContentManagementAgainstLiveServer(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.json")
+	t.Setenv("XMDM_SESSION_FILE", sessionPath)
+	loginLiveAdmin(t)
+
 	seed := seedLiveResources(t)
 	nonce := fmt.Sprintf("%d", time.Now().UnixNano())
 	sourcePath := filepath.Join(t.TempDir(), "artifact.bin")
@@ -105,13 +109,15 @@ func TestRunContentManagementAgainstLiveServer(t *testing.T) {
 func decodeContentItem[T any](t *testing.T, out string) T {
 	t.Helper()
 	var envelope struct {
-		Item json.RawMessage `json:"item"`
+		Data struct {
+			Item json.RawMessage `json:"item"`
+		} `json:"data"`
 	}
 	var zero T
 	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
 		t.Fatalf("unmarshal envelope: %v\noutput=%s", err, out)
 	}
-	if err := json.Unmarshal(envelope.Item, &zero); err != nil {
+	if err := json.Unmarshal(envelope.Data.Item, &zero); err != nil {
 		t.Fatalf("unmarshal item: %v\noutput=%s", err, out)
 	}
 	return zero

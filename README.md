@@ -135,7 +135,7 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 | M8-06 Enrollment And Bootstrap | ☑ |
 | M8-07 Device, Log, And Audit Inspection | ☑ |
 | M8-08 Command Operations | ☑ |
-| M8-09 Output Formats And Error Handling | ☐ |
+| M8-09 Output Formats And Error Handling | ☑ |
 | M8-10 Packaging And Release Documentation | ☐ |
 
 Note: the detailed CLI command tree and output contract live in [docs/admin-operator-story.md](docs/admin-operator-story.md).
@@ -147,6 +147,7 @@ Note: `M8-05 Content Management` is complete as of 2026-05-09 with live-server-b
 Note: `M8-06 Enrollment And Bootstrap` is complete as of 2026-05-09 with live-server-backed enrollment token issue, validate, consume, and revoke flows plus QR JSON and PNG bootstrap generation, with command-level tests against the real server and Postgres-backed API.
 Note: `M8-07 Device, Log, And Audit Inspection` is complete as of 2026-05-09 with a live-server-backed `devices inspect` support view plus log, device-info, command, and audit aggregation against the seeded Postgres-backed API.
 Note: `M8-08 Command Operations` is complete as of 2026-05-09 with live-server-backed command send, list, show, and acknowledgement flows plus command lifecycle tests against the real server and Postgres-backed API.
+Note: `M8-09 Output Formats And Error Handling` is complete as of 2026-05-09 with JSON envelope output, readable table/default human output, live-server-backed command tests that decode the envelope contract, and stable CLI exit-code mapping for HTTP and transport failures.
 
 ## Blueprint Index
 

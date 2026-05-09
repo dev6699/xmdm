@@ -81,30 +81,34 @@ func TestRunCommandOperationsAgainstLiveServer(t *testing.T) {
 func decodeSentCommandID(t *testing.T, out string) string {
 	t.Helper()
 	var envelope struct {
-		Item struct {
-			Commands []map[string]any `json:"commands"`
-		} `json:"item"`
+		Data struct {
+			Item struct {
+				Commands []map[string]any `json:"commands"`
+			} `json:"item"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
 		t.Fatalf("decode send output: %v\noutput=%s", err, out)
 	}
-	if len(envelope.Item.Commands) == 0 {
+	if len(envelope.Data.Item.Commands) == 0 {
 		t.Fatalf("expected at least one command in send output: %s", out)
 	}
-	id, _ := envelope.Item.Commands[0]["id"].(string)
+	id, _ := envelope.Data.Item.Commands[0]["id"].(string)
 	return id
 }
 
 func decodeCommandEnvelope(t *testing.T, out string) map[string]any {
 	t.Helper()
 	var envelope struct {
-		Item json.RawMessage `json:"item"`
+		Data struct {
+			Item json.RawMessage `json:"item"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
 		t.Fatalf("decode command envelope: %v\noutput=%s", err, out)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(envelope.Item, &payload); err != nil {
+	if err := json.Unmarshal(envelope.Data.Item, &payload); err != nil {
 		t.Fatalf("decode command item: %v\noutput=%s", err, out)
 	}
 	return payload

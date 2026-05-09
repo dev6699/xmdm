@@ -68,7 +68,7 @@ func (a *app) enrollmentIssueTokenCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printRawJSON(cmd.OutOrStdout(), payload)
+			return a.writeSuccess(cmd.OutOrStdout(), resolved, cmd.CommandPath(), map[string]any{"item": json.RawMessage(payload)})
 		},
 	}
 	cmd.Flags().DurationVar(&ttl, "ttl", 24*time.Hour, "token time to live")
@@ -101,7 +101,7 @@ func (a *app) enrollmentLookupTokenCmd(opts *config.Options, use, path, verb str
 			if err != nil {
 				return err
 			}
-			return a.printRawJSON(cmd.OutOrStdout(), payload)
+			return a.writeSuccess(cmd.OutOrStdout(), resolved, cmd.CommandPath(), map[string]any{"item": json.RawMessage(payload)})
 		},
 	}
 }
@@ -130,7 +130,7 @@ func (a *app) enrollmentRevokeTokenCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printRawJSON(cmd.OutOrStdout(), payload)
+			return a.writeSuccess(cmd.OutOrStdout(), resolved, cmd.CommandPath(), map[string]any{"item": json.RawMessage(payload)})
 		},
 	}
 }
@@ -214,7 +214,7 @@ func (a *app) enrollmentQRJSONCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printRawJSON(cmd.OutOrStdout(), payload)
+			return a.writeSuccess(cmd.OutOrStdout(), resolved, cmd.CommandPath(), map[string]any{"item": json.RawMessage(payload)})
 		},
 	}
 	input.bind(cmd)
@@ -242,7 +242,7 @@ func (a *app) doEnrollmentJSON(ctx context.Context, resolved config.Resolved, st
 	}
 	resp, err := client.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, transportFailureError(method+" "+path+" request failed", err)
 	}
 	defer resp.Body.Close()
 	payload, err := io.ReadAll(resp.Body)
@@ -250,24 +250,13 @@ func (a *app) doEnrollmentJSON(ctx context.Context, resolved config.Resolved, st
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		if len(payload) > 0 {
-			return nil, fmt.Errorf("%s %s failed: %s: %s", method, path, resp.Status, strings.TrimSpace(string(payload)))
-		}
-		return nil, fmt.Errorf("%s %s failed: %s", method, path, resp.Status)
+		return nil, httpFailureError(method+" "+path+" failed", resp.StatusCode, payload)
 	}
 	return payload, nil
 }
 
 func (a *app) doEnrollmentBinary(ctx context.Context, resolved config.Resolved, state session.State, method, path string, body []byte) ([]byte, error) {
 	return a.doEnrollmentJSON(ctx, resolved, state, method, path, body)
-}
-
-func (a *app) printRawJSON(w ioWriter, payload []byte) error {
-	var value any
-	if err := json.Unmarshal(payload, &value); err != nil {
-		return err
-	}
-	return a.writeIndentedJSON(w, value)
 }
 
 type qrInput struct {

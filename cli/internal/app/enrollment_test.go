@@ -30,7 +30,7 @@ func TestRunEnrollmentCommandsAgainstLiveServer(t *testing.T) {
 		t.Fatalf("unexpected issue status: %q", validateIssued.Status)
 	}
 
-	validateOut := runCLI(t, []string{"--config", "../../config.yaml", "enrollment", "tokens", "validate", validateIssued.Secret}, "1.2.3").stdout
+	validateOut := runCLI(t, []string{"--config", "../../config.yaml", "enrollment", "tokens", "validate", "--", validateIssued.Secret}, "1.2.3").stdout
 	validated := decodeEnrollmentTokenRecord(t, validateOut)
 	if validated.ID != validateIssued.ID {
 		t.Fatalf("validate id mismatch: got %q want %q", validated.ID, validateIssued.ID)
@@ -52,7 +52,7 @@ func TestRunEnrollmentCommandsAgainstLiveServer(t *testing.T) {
 	t.Cleanup(func() {
 		deleteEnrollmentTokenByID(t, consumeIssued.ID)
 	})
-	consumeOut := runCLI(t, []string{"--config", "../../config.yaml", "enrollment", "tokens", "consume", consumeIssued.Secret}, "1.2.3").stdout
+	consumeOut := runCLI(t, []string{"--config", "../../config.yaml", "enrollment", "tokens", "consume", "--", consumeIssued.Secret}, "1.2.3").stdout
 	consumed := decodeEnrollmentTokenRecord(t, consumeOut)
 	if consumed.ID != consumeIssued.ID {
 		t.Fatalf("consume id mismatch: got %q want %q", consumed.ID, consumeIssued.ID)
@@ -154,7 +154,7 @@ func issueEnrollmentToken(t *testing.T, ttl string) enrollmentIssuedToken {
 	t.Helper()
 	out := runCLI(t, []string{"--config", "../../config.yaml", "enrollment", "tokens", "issue", "--ttl", ttl}, "1.2.3").stdout
 	var token enrollmentIssuedToken
-	if err := json.Unmarshal([]byte(out), &token); err != nil {
+	if err := json.Unmarshal(decodeEnvelopeItemRaw(t, out), &token); err != nil {
 		t.Fatalf("decode issue response: %v\noutput=%s", err, out)
 	}
 	return token
@@ -163,7 +163,7 @@ func issueEnrollmentToken(t *testing.T, ttl string) enrollmentIssuedToken {
 func decodeEnrollmentTokenRecord(t *testing.T, out string) enrollmentTokenRecord {
 	t.Helper()
 	var token enrollmentTokenRecord
-	if err := json.Unmarshal([]byte(out), &token); err != nil {
+	if err := json.Unmarshal(decodeEnvelopeItemRaw(t, out), &token); err != nil {
 		t.Fatalf("decode token response: %v\noutput=%s", err, out)
 	}
 	return token
@@ -172,7 +172,7 @@ func decodeEnrollmentTokenRecord(t *testing.T, out string) enrollmentTokenRecord
 func decodeJSONMap(t *testing.T, out string) map[string]any {
 	t.Helper()
 	var payload map[string]any
-	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+	if err := json.Unmarshal(decodeEnvelopeItemRaw(t, out), &payload); err != nil {
 		t.Fatalf("decode json response: %v\noutput=%s", err, out)
 	}
 	return payload
