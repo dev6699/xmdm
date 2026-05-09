@@ -1,8 +1,10 @@
 package app
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
+	"io"
+	"net/http"
 
 	"github.com/spf13/cobra"
 
@@ -45,7 +47,17 @@ func (a *app) configCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "target resolved: %s\n", joined)
+			req, err := client.NewRequest(context.Background(), http.MethodHead, "/", nil)
+			if err != nil {
+				return err
+			}
+			resp, err := client.HTTP.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "target reachable: %s (status: %d)\n", joined, resp.StatusCode)
 			return err
 		},
 	})
@@ -61,7 +73,5 @@ func (a *app) printResolved(w ioWriter, resolved config.Resolved) error {
 		"outputFormat": resolved.OutputFormat,
 		"timeout":      resolved.Timeout.String(),
 	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(payload)
+	return a.writeIndentedJSON(w, payload)
 }

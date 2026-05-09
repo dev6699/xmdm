@@ -38,6 +38,7 @@ func (a *app) rootCmd() *cobra.Command {
 	root.AddCommand(a.versionCmd())
 	root.AddCommand(a.authCmd(&opts))
 	root.AddCommand(a.configCmd(&opts))
+	root.AddCommand(a.resourceCmds(&opts)...)
 	return root
 }
 
@@ -66,7 +67,7 @@ func (a *app) printRootHelp(opts config.Options) {
 	fmt.Fprintln(a.stdout, "  xmdm [flags] <command>")
 	fmt.Fprintln(a.stdout)
 	fmt.Fprintln(a.stdout, "Commands:")
-	printIndentedTree(a.stdout, []string{
+	printIndentedTree(a.stdout, append([]string{
 		"help",
 		"version",
 		"auth",
@@ -76,7 +77,7 @@ func (a *app) printRootHelp(opts config.Options) {
 		"config",
 		"  show",
 		"  validate",
-	})
+	}, a.resourceHelpLines()...))
 	fmt.Fprintln(a.stdout)
 	fmt.Fprintln(a.stdout, "Global flags:")
 	printIndentedTree(a.stdout, []string{
