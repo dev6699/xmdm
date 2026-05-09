@@ -128,7 +128,7 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 | Item | State |
 | --- | --- |
 | M8-01 CLI Foundation And Configuration | ☑ |
-| M8-02 Authentication And Session Management | ☐ |
+| M8-02 Authentication And Session Management | ☑ |
 | M8-03 Resource Listing And Inspection | ☐ |
 | M8-04 Core Resource Management | ☐ |
 | M8-05 Content Management | ☐ |
@@ -140,6 +140,7 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 
 Note: the detailed CLI command tree and output contract live in [docs/admin-operator-story.md](docs/admin-operator-story.md).
 Note: `M8-01 CLI Foundation And Configuration` is complete as of 2026-05-09 with a dedicated `cli/` module, Cobra-based command scaffolding, config/profile resolution, a reusable HTTP client wrapper, and versioned help and config validation commands.
+Note: `M8-02 Authentication And Session Management` is complete as of 2026-05-09 with `auth login`, `auth whoami`, and `auth logout` session-cookie flows, a local session file, and server-backed login/me/logout requests.
 
 ## Blueprint Index
 
