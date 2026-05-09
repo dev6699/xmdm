@@ -37,6 +37,7 @@ func (a *app) rootCmd() *cobra.Command {
 	})
 	root.AddCommand(a.versionCmd())
 	root.AddCommand(a.authCmd(&opts))
+	root.AddCommand(a.enrollmentCmd(&opts))
 	root.AddCommand(a.configCmd(&opts))
 	root.AddCommand(a.resourceCmds(&opts)...)
 	return root
@@ -74,6 +75,15 @@ func (a *app) printRootHelp(opts config.Options) {
 		"  login",
 		"  whoami",
 		"  logout",
+		"enrollment",
+		"  tokens",
+		"    issue",
+		"    validate",
+		"    consume",
+		"    revoke",
+		"  qr",
+		"    png",
+		"    json",
 		"config",
 		"  show",
 		"  validate",
