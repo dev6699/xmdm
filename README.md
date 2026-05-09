@@ -5,7 +5,7 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-05-07
+Snapshot last updated: 2026-05-09
 
 ### M0 - Foundation
 
@@ -122,6 +122,23 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 | M7-06 DR And Rollback Docs | ☐ |
 | M7-07 Release Candidate | ☐ |
 | M7-08 Cleanup Pass | ☐ |
+
+### M8 - CLI Tool
+
+| Item | State |
+| --- | --- |
+| M8-01 CLI Foundation And Configuration | ☐ |
+| M8-02 Authentication And Session Management | ☐ |
+| M8-03 Resource Listing And Inspection | ☐ |
+| M8-04 Core Resource Management | ☐ |
+| M8-05 Content Management | ☐ |
+| M8-06 Enrollment And Bootstrap | ☐ |
+| M8-07 Device, Log, And Audit Inspection | ☐ |
+| M8-08 Command Operations | ☐ |
+| M8-09 Output Formats And Error Handling | ☐ |
+| M8-10 Packaging And Release Documentation | ☐ |
+
+Note: the detailed CLI command tree and output contract live in [docs/admin-operator-story.md](docs/admin-operator-story.md).
 
 ## Blueprint Index
 
