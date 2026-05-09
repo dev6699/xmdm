@@ -47,7 +47,7 @@ func (a *app) configCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req, err := client.NewRequest(context.Background(), http.MethodHead, "/", nil)
+			req, err := client.NewRequest(context.Background(), http.MethodGet, "/admin/login", nil)
 			if err != nil {
 				return err
 			}

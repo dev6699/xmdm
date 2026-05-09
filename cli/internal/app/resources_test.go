@@ -182,7 +182,6 @@ DELETE FROM policies WHERE id = '%[9]s';
 DELETE FROM apps WHERE id = '%[11]s';
 DELETE FROM roles WHERE id = '%[2]s';
 DELETE FROM audit_events WHERE id = '%[29]s';
-DELETE FROM tenants WHERE id = '%[1]s';
 
 INSERT INTO tenants (id, name, status, created_at, updated_at)
 VALUES ('%[1]s', 'Default tenant', 'active', now(), now())

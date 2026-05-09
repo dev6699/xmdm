@@ -68,6 +68,11 @@ func (a *app) resourceCmd(opts *config.Options, spec resourceSpec) *cobra.Comman
 	if spec.IncludeShow {
 		cmd.AddCommand(a.resourceShowCmd(opts, spec))
 	}
+	if isManagedResource(spec.Name) {
+		cmd.AddCommand(a.resourceCreateCmd(opts, spec))
+		cmd.AddCommand(a.resourceUpdateCmd(opts, spec))
+		cmd.AddCommand(a.resourceRetireCmd(opts, spec))
+	}
 	return cmd
 }
 
@@ -208,4 +213,13 @@ func (a *app) writeIndentedJSON(w ioWriter, value any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(value)
+}
+
+func isManagedResource(name string) bool {
+	switch name {
+	case "users", "roles", "groups", "policies", "devices":
+		return true
+	default:
+		return false
+	}
 }
