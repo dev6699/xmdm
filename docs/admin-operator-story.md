@@ -1,14 +1,14 @@
 # Admin Operator Story
 
-This document turns the `server/e2e` coverage into a practical operator guideline for future CLI and UI work.
+This story describes the end-to-end admin workflow for XMDM.
 
-The intent is not to define a new API contract. The intent is to describe the real admin workflow that the control plane must support end to end, and to call out the management tasks that are important but not yet covered by E2E.
+The command-level CLI reference now lives in [cli/docs](../cli/docs). Use the story here to understand the operator lifecycle, then use the CLI pages for exact flags, inputs, and outputs.
 
 ## Operator Goal
 
 An XMDM admin should be able to:
 
-1. Log in and confirm their session.
+1. Log in and confirm the session.
 2. Establish access control through users and roles.
 3. Prepare policies, groups, apps, files, and certificates.
 4. Enroll devices and verify they begin syncing.
@@ -17,646 +17,202 @@ An XMDM admin should be able to:
 7. Inspect logs, device info, and audit history.
 8. Retire or update anything that is no longer valid.
 
-That is the core control-loop for managing the application.
+## Canonical CLI Flow
+
+The operator-facing CLI is `xmdm`.
+
+Typical flow:
+
+```sh
+xmdm --config ~/.config/xmdm/config.yaml auth login --username admin --password admin
+xmdm --config ~/.config/xmdm/config.yaml config validate
+xmdm --config ~/.config/xmdm/config.yaml users list
+xmdm --config ~/.config/xmdm/config.yaml roles list
+xmdm --config ~/.config/xmdm/config.yaml groups list
+xmdm --config ~/.config/xmdm/config.yaml policies list
+xmdm --config ~/.config/xmdm/config.yaml apps list
+xmdm --config ~/.config/xmdm/config.yaml files list
+xmdm --config ~/.config/xmdm/config.yaml managed-files list
+xmdm --config ~/.config/xmdm/config.yaml certificates list
+xmdm --config ~/.config/xmdm/config.yaml devices list
+xmdm --config ~/.config/xmdm/config.yaml devices inspect <device-id> --limit 5
+xmdm --config ~/.config/xmdm/config.yaml commands list --device-id <device-id>
+xmdm --config ~/.config/xmdm/config.yaml commands send --json '{"type":"reboot","target":{"type":"device","deviceId":"<device-id>"}}'
+xmdm --config ~/.config/xmdm/config.yaml auth logout
+```
 
 ## Lifecycle Story
 
 ### 1. Enter the control plane
 
-The admin starts at the login screen and authenticates with a session cookie.
+The admin authenticates with a session cookie, confirms the current user, and logs out when done.
 
-Expected actions:
+CLI references:
+- [Auth](../cli/docs/auth.md)
+- [Configuration](../cli/docs/configuration.md)
 
-- open the login page
-- submit credentials
-- verify the current user with `/api/v1/admin/me`
-- logout when finished
+Relevant commands:
 
-Covered by:
-
-- [TestAdminE2E](../server/e2e/admin_test.go)
-
-Relevant contract:
-
-- [Admin console session routes](../contracts/admin-console.md)
+```sh
+xmdm --config ~/.config/xmdm/config.yaml auth login --username admin --password admin
+xmdm --config ~/.config/xmdm/config.yaml auth whoami
+xmdm --config ~/.config/xmdm/config.yaml auth logout
+```
 
 ### 2. Establish access control
 
-Before managing devices at scale, the admin defines who can do what.
+The admin defines users and roles before managing devices at scale.
 
-Expected actions:
+CLI reference:
+- [Management](../cli/docs/management.md)
 
-- create users
-- create roles
-- assign permissions to roles
-- update user role assignments
-- retire users or roles that should no longer be active
+Relevant commands:
 
-Covered by:
-
-- [TestAdminE2E](../server/e2e/admin_test.go)
-
-Why this matters:
-
-- future CLI and UI flows need a stable permission model before they expose any dangerous operations
-- operators should see permission failures as normal workflow outcomes, not surprising errors
+```sh
+xmdm --format json users create --json '{"email":"user@example.com","passwordHash":"hash","roleId":"uuid"}'
+xmdm --format json roles create --json '{"name":"Operators","permissions":["admin.read","devices.read"]}'
+xmdm --format json users update <user-id> --json '{"email":"alice@example.com","passwordHash":"hash","roleId":"uuid"}'
+xmdm --format json roles retire <role-id>
+```
 
 ### 3. Prepare fleet structure
 
-The admin groups devices and prepares policy objects before enrollment or content rollout.
+The admin prepares groups and policies before enrollment or rollout.
 
-Expected actions:
+CLI reference:
+- [Management](../cli/docs/management.md)
+- [Resources](../cli/docs/resources.md)
 
-- create groups for fleet segmentation
-- create policies for baseline device behavior
-- version policy changes explicitly
-- retire policies that are obsolete
+Relevant commands:
 
-Covered by:
-
-- [TestAdminE2E](../server/e2e/admin_test.go)
-- [TestPolicySync](../server/e2e/content_test.go)
-
-Key operator rule:
-
-- a policy update should be treated as a new controlled release of device behavior, not an incidental edit
+```sh
+xmdm --format json groups create --json '{"name":"Field Devices"}'
+xmdm --format json policies create --json '{"name":"Baseline","version":1,"kioskMode":false,"restrictions":null}'
+xmdm --format json groups list
+xmdm --format json policies list
+```
 
 ### 4. Prepare content and certificates
 
-The admin uploads reusable artifacts and turns them into device-deliverable resources.
+The admin uploads files, managed files, app versions, and certificates.
 
-Expected actions:
+CLI reference:
+- [Content](../cli/docs/content.md)
 
-- upload raw files
-- create managed-file records that place content on device paths
-- upload APK artifacts
-- create and publish app versions
-- upload certificates
-- retire content that should no longer be delivered
+Relevant commands:
 
-Covered by:
-
-- [TestAdminE2E](../server/e2e/admin_test.go)
-- [TestManagedAppsAndFiles](../server/e2e/content_test.go)
-- [TestManagedAppsAndFilesRemoval](../server/e2e/content_test.go)
-- [TestCertificatesApplied](../server/e2e/content_test.go)
-
-Operator guidance:
-
-- the UI/CLI should always show the logical record and the backing artifact together
-- content changes should expose checksum, artifact identity, and active/retired state
-- if artifact upload fails validation, the admin should know whether the logical record was created or not
+```sh
+xmdm --format json files create --name launcher.apk --storage-key artifacts/launcher.apk --source ./launcher.apk --mime-type application/vnd.android.package-archive
+xmdm --format json managed-files create --file-id <file-id> --path /system/app/Launcher.apk
+xmdm --format json apps versions publish <app-id> --version-name 1.0.0 --version-code 100 --artifact-id <artifact-id> --checksum <checksum>
+xmdm --format json certificates create --name MDM Root --storage-key certs/mdm-root.pem --source ./mdm-root.pem --mime-type application/x-pem-file
+```
 
 ### 5. Enroll a device
 
 Enrollment is the moment a device becomes part of the managed fleet.
 
-Expected actions:
+CLI reference:
+- [Enrollment](../cli/docs/enrollment.md)
 
-- create an enrollment token
-- optionally validate or preview the token lifecycle
-- issue a QR/bootstrap payload for device provisioning
-- enroll the device with an identity policy
-- receive the device secret
-- fetch the first signed config snapshot
-- confirm the device transitions from pending/enrolled to active
+Relevant commands:
 
-Covered by:
-
-- [TestEnrollmentE2E](../server/e2e/enrollment_test.go)
-
-Operator guidance:
-
-- enrollment should be understandable as a single journey: token, bind, secret, sync
-- duplicate enrollment should be surfaced as a clear conflict, not a silent rebind
-- the admin should be able to tell whether a device is waiting to enroll, enrolled, active, or retired
+```sh
+xmdm --format json enrollment tokens issue --ttl 2h
+xmdm --format json enrollment tokens validate <token>
+xmdm --format json enrollment qr json --package-url https://cdn.example/launcher.apk --package-checksum abc123
+xmdm --format json enrollment qr png --package-url https://cdn.example/launcher.apk --package-checksum abc123 --output enrollment.png
+```
 
 ### 6. Verify device health
 
-After enrollment, the admin needs proof that the device is actually participating.
+The admin confirms the device is active, syncing, and reporting telemetry.
 
-Expected actions:
+CLI reference:
+- [Resources](../cli/docs/resources.md)
+- [Inspection](../cli/docs/inspection.md)
 
-- confirm the device appears in inventory
-- confirm it fetched the signed config snapshot
-- confirm it uploaded telemetry
-- confirm it uploaded device info
-- confirm it uploaded logs when applicable
+Relevant commands:
 
-Covered by:
-
-- [TestEnrollmentE2E](../server/e2e/enrollment_test.go)
-- [TestDeviceInfoReporting](../server/e2e/deviceinfo_test.go)
-- [TestDeviceLogsUpload](../server/e2e/content_test.go)
-
-Operator guidance:
-
-- health should be visible as recent activity, not just row existence
-- the UI/CLI should expose last sync, last telemetry, last log upload, and current status on one device view
+```sh
+xmdm --format json devices list
+xmdm --format json devices inspect <device-id> --limit 5
+xmdm --format json device-info list
+xmdm --format json logs list
+```
 
 ### 7. Push managed behavior
 
-The admin then shapes how the device behaves in the field.
+The admin rolls out policy, content, and kiosk changes.
 
-Expected actions:
+CLI reference:
+- [Management](../cli/docs/management.md)
+- [Content](../cli/docs/content.md)
+- [Resources](../cli/docs/resources.md)
 
-- push policy updates
-- install or remove managed apps
-- deliver or remove managed files
-- install or retire certificates
-- enforce kiosk state and package rules
+Relevant commands:
 
-Covered by:
-
-- [TestManagedAppsAndFiles](../server/e2e/content_test.go)
-- [TestManagedAppsAndFilesRemoval](../server/e2e/content_test.go)
-- [TestCertificatesApplied](../server/e2e/content_test.go)
-- [TestKioskModeChrome](../server/e2e/content_test.go)
-- [TestKioskExitChromeLocal](../server/e2e/content_test.go)
-- [TestKioskExitChromeCommand](../server/e2e/content_test.go)
-- [TestKioskStayAwakeWhilePluggedIn](../server/e2e/content_test.go)
-- [TestPackageRules](../server/e2e/content_test.go)
-- [TestPolicySync](../server/e2e/content_test.go)
-
-Operator guidance:
-
-- policy changes should be reviewable before rollout
-- managed apps/files/certificates should show both logical state and device delivery state
-- kiosk controls need a clear exit path for operators, with the passcode or command path made obvious
+```sh
+xmdm --format json policies update <policy-id> --json '{"name":"Baseline","version":2,"kioskMode":false,"restrictions":null}'
+xmdm --format json managed-files create --file-id <file-id> --path /system/app/Launcher.apk
+xmdm --format json certificates retire <certificate-id>
+```
 
 ### 8. Issue commands
 
-The admin can send explicit device actions.
+The admin sends device actions and tracks acknowledgements.
 
-Expected actions:
+CLI reference:
+- [Commands](../cli/docs/commands.md)
 
-- create a command
-- target a single device
-- target a group
-- target a broadcast scope when supported
-- see delivery status
-- see acknowledgement payloads
-- see fallback behavior when MQTT is unavailable
+Relevant commands:
 
-Covered by:
-
-- [TestCommandMQTT](../server/e2e/content_test.go)
-- [TestCommandMQTTSyncConfig](../server/e2e/content_test.go)
-- [TestCommandPolling](../server/e2e/content_test.go)
-- [TestCommandBrokerOutageRecovery](../server/e2e/content_test.go)
-- [TestKioskExitChromeCommand](../server/e2e/content_test.go)
-
-Operator guidance:
-
-- command delivery is not complete when it is queued; it is complete when it is acknowledged
-- the UI/CLI should expose the transport path when useful, but not require the operator to understand MQTT vs polling to use the product
-- command expiry should be visible because it is part of the operator contract
+```sh
+xmdm --format json commands list --device-id <device-id>
+xmdm --format json commands send --json '{"type":"reboot","target":{"type":"device","deviceId":"<device-id>"}}'
+xmdm --format json commands show <command-id>
+xmdm commands ack <device-id> <command-id> --device-secret <secret> --status acked
+```
 
 ### 9. Observe and troubleshoot
 
-The admin needs operational visibility after the initial rollout.
+The admin searches logs, device info, commands, and audit history to answer support questions.
 
-Expected actions:
+CLI reference:
+- [Resources](../cli/docs/resources.md)
+- [Inspection](../cli/docs/inspection.md)
 
-- search logs by device, source, level, and time range
-- search device info by device and time range
-- inspect audit events for admin mutations
-- inspect command history and command results
-- correlate operational failures with the affected device or content object
+Relevant commands:
 
-Covered by:
-
-- [TestDeviceLogsUpload](../server/e2e/content_test.go)
-- [TestDeviceInfoReporting](../server/e2e/deviceinfo_test.go)
-- [TestAdminE2E](../server/e2e/admin_test.go)
-
-Operator guidance:
-
-- the product should surface support views, not just CRUD forms
-- audit history should be treated as a first-class operational object
-- the UI/CLI should make it easy to answer: what changed, who changed it, when, and what devices were affected
+```sh
+xmdm --format json logs list
+xmdm --format json device-info list
+xmdm --format json audit list
+xmdm --format json devices inspect <device-id> --limit 5
+```
 
 ### 10. Retire safely
 
-At the end of a lifecycle, the admin should be able to remove resources without breaking the control plane.
+At the end of a lifecycle, the admin retires resources without breaking the control plane.
 
-Expected actions:
+CLI reference:
+- [Management](../cli/docs/management.md)
 
-- retire devices
-- retire apps, files, managed files, certificates, groups, policies, roles, and users
-- confirm the device reflects removals on the next sync
-- keep historical records where audit or history requires it
+Relevant commands:
 
-Covered by:
-
-- [TestAdminE2E](../server/e2e/admin_test.go)
-- [TestManagedAppsAndFilesRemoval](../server/e2e/content_test.go)
-
-Operator guidance:
-
-- retire is preferable to hard delete for managed entities
-- the admin should be able to tell which resources are active, pending, or retired
-- retired resources should remain visible enough for audit and support workflows
-
-## Future Workflows
-
-The current E2E suite does not directly cover these, but they are important for managing the application well.
-
-### Enrollment token management
-
-Add explicit workflows for:
-
-- list active tokens
-- validate a token before use
-- consume a token during provisioning
-- revoke a token early
-- show expiry and remaining TTL
-
-Why it matters:
-
-- enrollment is one of the most security-sensitive flows in the product
-- operators need to recover from leaked or stale tokens without editing the database
-
-### Device detail view or CLI subcommand
-
-Add a single device-focused view that shows:
-
-- identity and enrollment state
-- policy assignment and last config revision
-- last telemetry
-- last logs
-- device-info history
-- command queue and acknowledgements
-- content delivery state
-
-Why it matters:
-
-- support work is usually device-centric, not object-centric
-- a fragmented set of list endpoints is too slow for day-to-day operations
-
-### Command lifecycle inspection
-
-Add workflows for:
-
-- list queued, sent, acked, expired, and failed commands
-- filter commands by target scope and type
-- inspect command payloads and terminal results
-- retry or reissue supported commands when appropriate
-
-Why it matters:
-
-- commands are the primary remote-action primitive
-- operators need a complete answer when a device did not react
-
-### Policy review and diff
-
-Add workflows for:
-
-- preview the effective device snapshot before publishing
-- compare current and proposed policy versions
-- highlight kiosk and package-rule changes
-- reject stale edits when version numbers conflict
-
-Why it matters:
-
-- policy mistakes can lock down devices or change fleet behavior unexpectedly
-
-### Search and export
-
-Add workflows for:
-
-- search logs with saved filters
-- export device-info records for support cases
-- export audit history for compliance or incident response
-
-Why it matters:
-
-- these are the fastest way to move from "something is wrong" to "here is what happened"
-
-### Operational health views
-
-Add workflows for:
-
-- MQTT health and broker connectivity
-- command queue depth and stuck deliveries
-- sync backlog and last successful sync by device
-- artifact cleanup status
-- stale enrollment token cleanup
-- job failures and recovery actions
-
-Why it matters:
-
-- the control plane should be operable without direct database inspection
-
-### Recovery and remediation
-
-Add workflows for:
-
-- rotate a device secret
-- force a fresh config sync
-- re-enroll a device after loss of trust
-- retire and replace a device cleanly
-- recover from partial content or policy rollout failures
-
-Why it matters:
-
-- real operators spend a lot of time on exceptions, not only on happy-path provisioning
-
-## CLI Tool Checklist
-
-The CLI should be a thin, deterministic shell over the same server contracts that power the future UI.
-
-### Command Tree
-
-The initial command tree should stay close to the domain objects in the server:
-
-```text
-xmdm
-  auth
-    login
-    whoami
-    logout
-  users
-    list
-    create
-    update
-    retire
-  roles
-    list
-    create
-    update
-    retire
-  groups
-    list
-    create
-    update
-    retire
-  policies
-    list
-    create
-    update
-    retire
-  apps
-    list
-    create
-    update
-    retire
-    versions
-      list
-      create
-      publish
-  files
-    list
-    upload
-    retire
-  managed-files
-    list
-    create
-    retire
-  certificates
-    list
-    upload
-    retire
-  enrollment
-    tokens
-      list
-      create
-      validate
-      consume
-      revoke
-    qr
-      json
-      png
-    enroll
-  devices
-    list
-    show
-    create
-    update
-    retire
-    sync
-    logs
-    info
-    commands
-  commands
-    list
-    send
-    show
-    ack
-  logs
-    list
-  device-info
-    list
-  audit
-    list
+```sh
+xmdm --format json devices retire <device-id>
+xmdm --format json files retire <file-id>
+xmdm --format json managed-files retire <managed-file-id>
+xmdm --format json certificates retire <certificate-id>
+xmdm --format json groups retire <group-id>
+xmdm --format json policies retire <policy-id>
+xmdm --format json roles retire <role-id>
+xmdm --format json users retire <user-id>
 ```
 
-### Deferred Command Tree Additions
+## Supporting Docs
 
-These commands are useful, but they are not part of the first main CLI path:
-
-- `policies preview`
-- `health server`
-- `health mqtt`
-- `health queue`
-- `health jobs`
-- `version`
-
-### Output Contract
-
-The CLI output contract should support both operators and automation.
-
-#### Global Rules
-
-- `stdout` carries successful command output.
-- `stderr` carries progress, warnings, and error messages.
-- `--format json` produces stable machine-readable output.
-- `--format table` or the default human mode produces concise operator-friendly output.
-- `--quiet` suppresses nonessential progress text.
-- All commands should return a nonzero exit code on failure.
-
-#### Success Envelope
-
-JSON mode should emit a stable envelope:
-
-```json
-{
-  "ok": true,
-  "command": "devices list",
-  "data": {},
-  "meta": {
-    "requestId": "uuid",
-    "timestamp": "2026-05-09T00:00:00Z",
-    "baseUrl": "https://mdm.example"
-  }
-}
-```
-
-Recommended `data` shapes:
-
-- `list` commands: `{ "items": [...], "count": 12, "cursor": null }`
-- `show` commands: `{ "item": {...} }`
-- `create`/`update`/`retire` commands: `{ "resource": {...} }`
-- `send` command requests: `{ "commands": [...], "target": {...} }`
-- `login`/`whoami`: `{ "user": {...} }`
-- `health` commands: `{ "status": "ok", "checks": [...] }`
-
-#### Error Envelope
-
-JSON mode should emit the same top-level error shape as the API contract:
-
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "device_not_found",
-    "message": "Device not found",
-    "details": {}
-  },
-  "meta": {
-    "requestId": "uuid",
-    "timestamp": "2026-05-09T00:00:00Z",
-    "baseUrl": "https://mdm.example"
-  }
-}
-```
-
-#### Exit Codes
-
-Use stable exit codes so scripts can branch without parsing text:
-
-- `0` success
-- `1` validation error or bad local input
-- `2` authentication failure
-- `3` authorization failure
-- `4` not found
-- `5` conflict
-- `6` transport or server failure
-
-#### Human Output Rules
-
-- Tables should be short and sorted by the primary object identifier.
-- Long payloads should be summarized, with `--format json` used for full fidelity.
-- Mutations should confirm the resource type, identifier, and new status.
-- Command requests should show the target, command type, and terminal state once available.
-- Health views should make the failing check obvious first.
-
-#### Command Mapping Principles
-
-- Each CLI command should map to a single server contract when possible.
-- Commands that combine multiple server actions should be explicit in the name, such as `enrollment qr json` or `apps versions publish`.
-- Read commands should remain idempotent and side-effect free.
-- Mutating commands should surface the resource identifier immediately after success.
-- Where the server already exposes list endpoints, the CLI should preserve the same filters and pagination behavior.
-
-## Deferred CLI Implementation Rules
-
-These are the rules the first CLI implementation should follow so it remains safe for operators and reliable for automation.
-
-### Configuration Precedence
-
-- Resolve settings in this order: flags, environment variables, config file, defaults.
-- Keep the config file format simple and human-editable.
-- Require an explicit base URL or profile before any networked command runs.
-
-### Secret Handling
-
-- Never print passwords, enrollment tokens, device secrets, or session cookies in normal human output.
-- Redact secrets in logs, error traces, and debug output unless the user explicitly requests raw values.
-- Treat QR/bootstrap payloads as sensitive because they can contain enrollment material.
-
-### Destructive Action Safety
-
-- Require confirmation before retire, revoke, delete, or replace operations when running interactively.
-- Allow `--yes` or `--force` to bypass confirmation for automation.
-- Show the exact object being affected before confirming the action.
-
-### Automation Mode
-
-- Support `--format json` for machine consumption.
-- Support `--quiet` or `--no-prompt` so scripts never block on interaction.
-- Keep JSON output stable across releases once the command is public.
-
-### Errors And Correlation
-
-- Preserve server error `code` and `details` in CLI failures.
-- Map server failures to stable exit codes.
-- Surface `requestId` on failure so operators can correlate CLI output with server logs and audit history.
-
-### Retry And Idempotency
-
-- Retry only read-only or explicitly idempotent commands automatically.
-- Never auto-retry a mutation unless the server contract guarantees idempotency.
-- Make retry behavior visible so operators know when a command was reissued.
-
-### Preview And Dry Run
-
-- Provide preview or dry-run mode for policy changes, command sends, and bootstrap generation where it reduces operator risk.
-- Show what would change before mutating state whenever the underlying workflow is likely to have fleet-wide impact.
-
-### Help And Completion
-
-- Keep `--help` output consistent across the tree.
-- Make command names and subcommands discoverable from top-level help.
-- Add shell completion support early if the command tree grows beyond a handful of subcommands.
-
-## Deferred CLI Additional Rules
-
-These rules close the remaining gaps for implementation and long-term maintenance.
-
-### Test Matrix
-
-- Cover command parsing, request building, and output formatting with unit tests.
-- Cover API interaction with integration tests against the server contract.
-- Cover the stable JSON schema with golden-file or snapshot tests.
-- Cover destructive commands with explicit safety tests.
-
-### Auth Modes
-
-- Support session-cookie auth for interactive use.
-- Support token-based auth for automation when the server exposes it.
-- Make the active auth mode obvious in `whoami` or profile output.
-
-### Profile Management
-
-- Support named profiles even in the single-tenant first release.
-- Let profiles hold base URL, auth mode, and default output format.
-- Make switching profiles explicit and non-destructive.
-
-### Non-Interactive Guarantees
-
-- Commands that may prompt must have a `--yes` or `--force` override.
-- Commands used by scripts must have a documented non-interactive path.
-- Fail fast instead of waiting for hidden user input when `stdin` is not a TTY.
-
-### Timeouts And Pagination
-
-- Use explicit timeout defaults for network calls and long-running operations.
-- Support limit and cursor-style pagination on every list command that the server exposes.
-- Keep the default page size small enough for terminals but large enough to be useful.
-
-### Resource Selectors
-
-- Use consistent selectors for `deviceId`, `groupId`, `policyId`, `appId`, `fileId`, and `certificateId`.
-- Allow either direct identifiers or lookup-by-name only where the server contract already supports it.
-- Print the resolved identifier when a user selects by name.
-
-### Naming Conventions
-
-- Prefer verb-first commands: `list`, `show`, `create`, `update`, `retire`, `send`, `preview`.
-- Keep noun phrases aligned with the server domain objects.
-- Avoid aliases that hide the underlying API shape.
-
-### Audit Visibility
-
-- Print the resulting audit or request correlation ID after every mutating command when available.
-- Make it easy to copy that identifier into support tickets or logs.
-- Treat audit visibility as part of the operator contract, not just an internal detail.
-
-## Implementation Guidance For CLI/UI
-
-- Keep the admin model object-centric: user, role, group, policy, app, file, certificate, device, command, audit event.
-- Make the happy path short, but keep the supporting detail visible for troubleshooting.
-- Show status and lifecycle explicitly; do not hide `pending`, `enrolled`, `active`, or `retired`.
-- Prefer actions that map cleanly to existing server contracts.
-- Treat unsupported or missing workflows as first-class TODOs rather than hidden gaps.
+- [XMDM CLI Operator Guide](../cli/README.md)
+- [Admin Console Contract](../contracts/admin-console.md)
+- [Enrollment Contract](../contracts/enrollment.md)
