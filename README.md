@@ -136,7 +136,7 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 | M8-07 Device, Log, And Audit Inspection | ☑ |
 | M8-08 Command Operations | ☑ |
 | M8-09 Output Formats And Error Handling | ☑ |
-| M8-10 Packaging And Release Documentation | ☐ |
+| M8-10 Packaging And Release Documentation | ☑ |
 
 Note: the detailed CLI command tree and output contract live in [docs/admin-operator-story.md](docs/admin-operator-story.md).
 Note: `M8-01 CLI Foundation And Configuration` is complete as of 2026-05-09 with a dedicated `cli/` module, Cobra-based command scaffolding, config/profile resolution, a reusable HTTP client wrapper, and versioned help and config validation commands.
@@ -148,6 +148,7 @@ Note: `M8-06 Enrollment And Bootstrap` is complete as of 2026-05-09 with live-se
 Note: `M8-07 Device, Log, And Audit Inspection` is complete as of 2026-05-09 with a live-server-backed `devices inspect` support view plus log, device-info, command, and audit aggregation against the seeded Postgres-backed API.
 Note: `M8-08 Command Operations` is complete as of 2026-05-09 with live-server-backed command send, list, show, and acknowledgement flows plus command lifecycle tests against the real server and Postgres-backed API.
 Note: `M8-09 Output Formats And Error Handling` is complete as of 2026-05-09 with JSON envelope output, readable table/default human output, live-server-backed command tests that decode the envelope contract, and stable CLI exit-code mapping for HTTP and transport failures.
+Note: `M8-10 Packaging And Release Documentation` is complete as of 2026-05-09 with install, upgrade, completion, and shell-integration guidance in [cli/README.md](cli/README.md) plus the checked-in example config and Cobra completion support.
 
 ## Blueprint Index
 

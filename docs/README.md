@@ -7,3 +7,4 @@ Blueprint decisions remain under `/blueprint`; this directory is for repo-level 
 Useful runbooks:
 
 - [Agent App Lifecycle](agent-app-lifecycle.md)
+- [XMDM CLI Operator Guide](../cli/README.md)
