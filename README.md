@@ -133,7 +133,7 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 | M8-04 Core Resource Management | ☑ |
 | M8-05 Content Management | ☑ |
 | M8-06 Enrollment And Bootstrap | ☑ |
-| M8-07 Device, Log, And Audit Inspection | ☐ |
+| M8-07 Device, Log, And Audit Inspection | ☑ |
 | M8-08 Command Operations | ☐ |
 | M8-09 Output Formats And Error Handling | ☐ |
 | M8-10 Packaging And Release Documentation | ☐ |
@@ -145,6 +145,7 @@ Note: `M8-03 Resource Listing And Inspection` is complete as of 2026-05-09 with 
 Note: `M8-04 Core Resource Management` is complete as of 2026-05-09 with live-server-backed `create`, `update`, and `retire` flows for users, roles, groups, policies, and devices, plus command-level tests that exercise the real API and database.
 Note: `M8-05 Content Management` is complete as of 2026-05-09 with live-server-backed file upload, managed-file creation, app version publish, and certificate upload and retirement commands, plus live CLI tests against the real server and Postgres-backed API.
 Note: `M8-06 Enrollment And Bootstrap` is complete as of 2026-05-09 with live-server-backed enrollment token issue, validate, consume, and revoke flows plus QR JSON and PNG bootstrap generation, with command-level tests against the real server and Postgres-backed API.
+Note: `M8-07 Device, Log, And Audit Inspection` is complete as of 2026-05-09 with a live-server-backed `devices inspect` support view plus log, device-info, command, and audit aggregation against the seeded Postgres-backed API.
 
 ## Blueprint Index
 

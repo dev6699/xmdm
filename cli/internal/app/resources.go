@@ -55,6 +55,9 @@ func (a *app) resourceHelpLines() []string {
 		if spec.IncludeShow {
 			lines = append(lines, "  show")
 		}
+		if spec.Name == "devices" {
+			lines = append(lines, "  inspect")
+		}
 	}
 	return lines
 }
@@ -67,6 +70,9 @@ func (a *app) resourceCmd(opts *config.Options, spec resourceSpec) *cobra.Comman
 	cmd.AddCommand(a.resourceListCmd(opts, spec))
 	if spec.IncludeShow {
 		cmd.AddCommand(a.resourceShowCmd(opts, spec))
+	}
+	if spec.Name == "devices" {
+		cmd.AddCommand(a.deviceInspectCmd(opts))
 	}
 	if isManagedResource(spec.Name) {
 		cmd.AddCommand(a.resourceCreateCmd(opts, spec))

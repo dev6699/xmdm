@@ -103,31 +103,33 @@ func runCLI(t *testing.T, args []string, version string) cliRunResult {
 }
 
 type seededResource struct {
-	userID          string
-	userEmail       string
-	roleID          string
-	roleName        string
-	groupID         string
-	groupName       string
-	policyID        string
-	policyName      string
-	appID           string
-	appName         string
-	fileID          string
-	fileName        string
-	managedFileID   string
-	managedFilePath string
-	certificateID   string
-	certificateName string
-	deviceID        string
-	deviceName      string
-	commandID       string
-	commandMarker   string
-	logID           string
-	logMessage      string
-	deviceInfoID    string
-	deviceInfoModel string
-	auditEventID    string
+	userID             string
+	userEmail          string
+	roleID             string
+	roleName           string
+	groupID            string
+	groupName          string
+	policyID           string
+	policyName         string
+	appID              string
+	appName            string
+	fileID             string
+	fileName           string
+	managedFileID      string
+	managedFilePath    string
+	certificateID      string
+	certificateName    string
+	deviceID           string
+	deviceName         string
+	deviceSecret       string
+	commandID          string
+	commandMarker      string
+	logID              string
+	logMessage         string
+	deviceInfoID       string
+	deviceInfoModel    string
+	auditEventID       string
+	deviceAuditEventID string
 }
 
 func seedLiveResources(t *testing.T) seededResource {
@@ -135,22 +137,23 @@ func seedLiveResources(t *testing.T) seededResource {
 
 	nonce := fmt.Sprintf("%d", time.Now().UnixNano())
 	const (
-		tenantID      = "00000000-0000-0000-0000-000000000000"
-		roleID        = "22222222-2222-2222-2222-222222222222"
-		userID        = "33333333-3333-3333-3333-333333333333"
-		groupID       = "44444444-4444-4444-4444-444444444444"
-		policyID      = "55555555-5555-5555-5555-555555555555"
-		appID         = "66666666-6666-6666-6666-666666666666"
-		artifactID    = "77777777-7777-7777-7777-777777777777"
-		fileID        = "88888888-8888-8888-8888-888888888888"
-		managedFileID = "99999999-9999-9999-9999-999999999999"
-		certID        = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-		certArtifact  = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-		deviceID      = "cccccccc-cccc-cccc-cccc-cccccccccccc"
-		commandID     = "dddddddd-dddd-dddd-dddd-dddddddddddd"
-		logID         = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
-		deviceInfoID  = "ffffffff-ffff-ffff-ffff-ffffffffffff"
-		auditEventID  = "12121212-1212-1212-1212-121212121212"
+		tenantID           = "00000000-0000-0000-0000-000000000000"
+		roleID             = "22222222-2222-2222-2222-222222222222"
+		userID             = "33333333-3333-3333-3333-333333333333"
+		groupID            = "44444444-4444-4444-4444-444444444444"
+		policyID           = "55555555-5555-5555-5555-555555555555"
+		appID              = "66666666-6666-6666-6666-666666666666"
+		artifactID         = "77777777-7777-7777-7777-777777777777"
+		fileID             = "88888888-8888-8888-8888-888888888888"
+		managedFileID      = "99999999-9999-9999-9999-999999999999"
+		certID             = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+		certArtifact       = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+		deviceID           = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+		commandID          = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+		logID              = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+		deviceInfoID       = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+		auditEventID       = "12121212-1212-1212-1212-121212121212"
+		deviceAuditEventID = "34343434-3434-3434-3434-343434343434"
 	)
 
 	deviceSecret := "secret-" + nonce
@@ -182,6 +185,7 @@ DELETE FROM policies WHERE id = '%[9]s';
 DELETE FROM apps WHERE id = '%[11]s';
 DELETE FROM roles WHERE id = '%[2]s';
 DELETE FROM audit_events WHERE id = '%[29]s';
+DELETE FROM audit_events WHERE id = '%[30]s';
 
 INSERT INTO tenants (id, name, status, created_at, updated_at)
 VALUES ('%[1]s', 'Default tenant', 'active', now(), now())
@@ -341,7 +345,18 @@ SET tenant_id = EXCLUDED.tenant_id,
     resource_id = EXCLUDED.resource_id,
     details = EXCLUDED.details,
     created_at = now();
-`, tenantID, roleID, roleName, userID, userEmail, nonce, groupID, groupName, policyID, policyName, appID, appName, artifactID, fileName, fileID, managedFileID, managedFilePath, certArtifact, certificateName, certID, deviceID, deviceName, hashToken(deviceSecret), commandID, logID, logMessage, deviceInfoID, deviceInfoModel, auditEventID)
+
+INSERT INTO audit_events (id, tenant_id, actor, action, resource_type, resource_id, details, created_at)
+VALUES ('%[30]s', '%[1]s', 'admin', 'update', 'devices', '%[21]s', '{"name":"%[22]s"}'::jsonb, now())
+ON CONFLICT (id) DO UPDATE
+SET tenant_id = EXCLUDED.tenant_id,
+    actor = EXCLUDED.actor,
+    action = EXCLUDED.action,
+    resource_type = EXCLUDED.resource_type,
+    resource_id = EXCLUDED.resource_id,
+    details = EXCLUDED.details,
+    created_at = now();
+`, tenantID, roleID, roleName, userID, userEmail, nonce, groupID, groupName, policyID, policyName, appID, appName, artifactID, fileName, fileID, managedFileID, managedFilePath, certArtifact, certificateName, certID, deviceID, deviceName, hashToken(deviceSecret), commandID, logID, logMessage, deviceInfoID, deviceInfoModel, auditEventID, deviceAuditEventID)
 
 	cmd := exec.Command("docker", "exec", "-i", "infra-postgres-1", "psql", "-U", "xmdm", "-d", "xmdm", "-v", "ON_ERROR_STOP=1", "-c", sql)
 	out, err := cmd.CombinedOutput()
@@ -350,31 +365,33 @@ SET tenant_id = EXCLUDED.tenant_id,
 	}
 
 	return seededResource{
-		userID:          userID,
-		userEmail:       userEmail,
-		roleID:          roleID,
-		roleName:        roleName,
-		groupID:         groupID,
-		groupName:       groupName,
-		policyID:        policyID,
-		policyName:      policyName,
-		appID:           appID,
-		appName:         appName,
-		fileID:          fileID,
-		fileName:        fileName,
-		managedFileID:   managedFileID,
-		managedFilePath: managedFilePath,
-		certificateID:   certID,
-		certificateName: certificateName,
-		deviceID:        deviceID,
-		deviceName:      deviceName,
-		commandID:       commandID,
-		commandMarker:   commandMarker,
-		logID:           logID,
-		logMessage:      logMessage,
-		deviceInfoID:    deviceInfoID,
-		deviceInfoModel: deviceInfoModel,
-		auditEventID:    auditEventID,
+		userID:             userID,
+		userEmail:          userEmail,
+		roleID:             roleID,
+		roleName:           roleName,
+		groupID:            groupID,
+		groupName:          groupName,
+		policyID:           policyID,
+		policyName:         policyName,
+		appID:              appID,
+		appName:            appName,
+		fileID:             fileID,
+		fileName:           fileName,
+		managedFileID:      managedFileID,
+		managedFilePath:    managedFilePath,
+		certificateID:      certID,
+		certificateName:    certificateName,
+		deviceID:           deviceID,
+		deviceName:         deviceName,
+		deviceSecret:       deviceSecret,
+		commandID:          commandID,
+		commandMarker:      commandMarker,
+		logID:              logID,
+		logMessage:         logMessage,
+		deviceInfoID:       deviceInfoID,
+		deviceInfoModel:    deviceInfoModel,
+		auditEventID:       auditEventID,
+		deviceAuditEventID: deviceAuditEventID,
 	}
 }
 
