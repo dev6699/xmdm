@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	loghttp "xmdm/server/internal/logs/http"
 	managedfiles "xmdm/server/internal/managedfiles"
 	managedfilehttp "xmdm/server/internal/managedfiles/http"
+	"xmdm/server/internal/observability"
 	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
 	policyhttp "xmdm/server/internal/policy/http"
@@ -79,7 +81,7 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	grouphttp.Register(apiMux, svc, deps.Groups, deps.Audit, deps.TenantID)
 	policyhttp.Register(apiMux, svc, deps.Policies, deps.Audit, deps.TenantID)
 	devicehttp.Register(apiMux, svc, deps.Devices, deps.Audit, deps.TenantID)
-	return httpx.WithRateLimits(mux, defaultRateLimitRules()...)
+	return observability.NewHandler(httpx.WithRateLimits(mux, defaultRateLimitRules()...), observability.Config{Logger: log.Default()})
 }
 
 func defaultRateLimitRules() []httpx.RateLimitRule {
