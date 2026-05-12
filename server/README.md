@@ -76,6 +76,10 @@ The server defaults to the local SeaweedFS S3 endpoint on `localhost:8333` and r
 
 Ops can inspect and purge orphan artifact records with [cmd/artifact-cleanup/README.md](cmd/artifact-cleanup/README.md).
 
+### Cleanup Pass
+
+Ops can run the hardening cleanup pass for stale enrollment tokens, stuck commands, and orphan artifact records with [cmd/cleanup-pass/README.md](cmd/cleanup-pass/README.md).
+
 ### Push Transport
 
 The server now constructs an internal MQTT publisher in [internal/push](internal/push) at startup and points it at `127.0.0.1:1883` by default.

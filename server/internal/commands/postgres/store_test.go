@@ -264,6 +264,48 @@ func TestExpiredCommandIsNotPendingOrAckable(t *testing.T) {
 	}
 }
 
+func TestExpireDueCommandsMarksSentRowsExpired(t *testing.T) {
+	pool := openCommandsTestPool(t)
+	t.Cleanup(pool.Close)
+	resetCommandsTestDB(t, pool)
+
+	store := New(pool)
+	now := time.Date(2026, 4, 25, 16, 0, 0, 0, time.UTC)
+	store.SetNow(func() time.Time { return now })
+
+	var deviceUUID string
+	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
+		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+		 RETURNING id::text`,
+		bootstrap.SeedTenantID, "device-stale", enrollment.HashToken("secret"), "active", now,
+	).Scan(&deviceUUID); err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), `INSERT INTO commands (id, tenant_id, device_id, type, payload_json, status, expires_at, created_at, updated_at)
+		 VALUES (gen_random_uuid(), $1, $2, $3, '{}'::jsonb, $4, $5, $6, $6)`,
+		bootstrap.SeedTenantID, deviceUUID, "ping", commands.StatusSent, now.Add(-time.Minute), now,
+	); err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+
+	updated, err := store.ExpireDueCommands(context.Background(), bootstrap.SeedTenantID)
+	if err != nil {
+		t.Fatalf("expire due commands: %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("expected one expired command, got %d", updated)
+	}
+
+	var status string
+	if err := pool.QueryRow(context.Background(), `SELECT status FROM commands WHERE tenant_id = $1 AND device_id = $2`,
+		bootstrap.SeedTenantID, deviceUUID).Scan(&status); err != nil {
+		t.Fatalf("load command status: %v", err)
+	}
+	if status != commands.StatusExpired {
+		t.Fatalf("expected expired status, got %s", status)
+	}
+}
+
 type fakeRowScanner struct {
 	scan func(...any) error
 }

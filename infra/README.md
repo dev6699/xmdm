@@ -14,5 +14,6 @@ Local development entry points:
 Operational helpers:
 
 - [../server/cmd/artifact-cleanup/README.md](../server/cmd/artifact-cleanup/README.md)
+- [../server/cmd/cleanup-pass/README.md](../server/cmd/cleanup-pass/README.md)
 - [mosquitto/mqtt-security.md](mosquitto/mqtt-security.md)
 - [mosquitto/mosquitto-entrypoint.sh](mosquitto/mosquitto-entrypoint.sh)

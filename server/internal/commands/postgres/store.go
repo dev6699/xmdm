@@ -159,6 +159,26 @@ func (s *Store) ListPending(ctx context.Context, tenantID, deviceID string) ([]c
 	return items, nil
 }
 
+func (s *Store) ExpireDueCommands(ctx context.Context, tenantID string) (int64, error) {
+	if tenantID == "" {
+		return 0, httpx.ErrInvalidInput
+	}
+	now := s.now()
+	res, err := s.pool.Exec(ctx,
+		`UPDATE commands
+		 SET status = $3, updated_at = $4
+		 WHERE tenant_id = $1
+		   AND status IN ($2::text, $5::text)
+		   AND expires_at IS NOT NULL
+		   AND expires_at <= $4`,
+		tenantID, commands.StatusQueued, commands.StatusExpired, now, commands.StatusSent,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected(), nil
+}
+
 func (s *Store) Acknowledge(ctx context.Context, tenantID, deviceID, commandID string, req commands.Ack) (commands.Command, error) {
 	if tenantID == "" || deviceID == "" || commandID == "" || req.Status == "" {
 		return commands.Command{}, httpx.ErrInvalidInput
@@ -217,10 +237,10 @@ func (s *Store) expireDueCommands(ctx context.Context, tenantID, deviceID string
 		 SET status = $4, updated_at = $5
 		 WHERE tenant_id = $1
 		   AND device_id = $2
-		   AND status = $3::text
+		   AND status IN ($3::text, $6::text)
 		   AND expires_at IS NOT NULL
 		   AND expires_at <= $5`,
-		tenantID, deviceID, commands.StatusQueued, commands.StatusExpired, now,
+		tenantID, deviceID, commands.StatusQueued, commands.StatusExpired, now, commands.StatusSent,
 	)
 	return err
 }
@@ -233,10 +253,10 @@ func (s *Store) expireDueCommand(ctx context.Context, tx pgx.Tx, tenantID, devic
 		 WHERE tenant_id = $1
 		   AND device_id = $2
 		   AND id = $3
-		   AND status = $6::text
+		   AND status IN ($6::text, $7::text)
 		   AND expires_at IS NOT NULL
 		   AND expires_at <= $5`,
-		tenantID, deviceID, commandID, commands.StatusExpired, now, commands.StatusQueued,
+		tenantID, deviceID, commandID, commands.StatusExpired, now, commands.StatusQueued, commands.StatusSent,
 	)
 	return err
 }

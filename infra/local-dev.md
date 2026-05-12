@@ -51,6 +51,8 @@ To verify a backup and restore drill against the local test database, run:
 
 For incident recovery and release rollback steps, see [../docs/disaster-recovery-and-rollback.md](../docs/disaster-recovery-and-rollback.md).
 
+For the final hardening cleanup pass, see [../docs/cleanup-pass.md](../docs/cleanup-pass.md).
+
 ## Notes
 
 - Keep local credentials separate from production credentials.
