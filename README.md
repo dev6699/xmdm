@@ -119,7 +119,7 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 | M7-03 Load Tests | ☑ |
 | M7-04 Backup And Restore | ☑ |
 | M7-05 Observability | ☑ |
-| M7-06 DR And Rollback Docs | ☐ |
+| M7-06 DR And Rollback Docs | ☑ |
 | M7-07 Release Candidate | ☐ |
 | M7-08 Cleanup Pass | ☐ |
 
@@ -128,6 +128,7 @@ Note: `M7-02 Security Tests` is complete as of 2026-05-12 with coverage for inva
 Note: `M7-03 Load Tests` is complete as of 2026-05-12 with concurrent HTTP load coverage for device config sync, admin command push, command polling and acknowledgements, managed-file, app, and certificate artifact downloads, telemetry upload, and a mixed workload pass in `server/internal/api/v1/load_test.go`.
 Note: `M7-04 Backup And Restore` is complete as of 2026-05-12 with the documented restore drill in `infra/backup-restore-drill.sh` and `docs/backup-restore-drill.md`, which backs up the local test database, restores it into a fresh database, and compares core table counts.
 Note: `M7-05 Observability` is complete as of 2026-05-12 with request logging, request IDs, trace headers, Prometheus-style `/metrics`, and route normalization in `server/internal/observability` plus `docs/observability.md`.
+Note: `M7-06 DR And Rollback Docs` is complete as of 2026-05-12 with incident recovery and release rollback guidance in `docs/disaster-recovery-and-rollback.md`, including restore order, object storage recovery, rollback rules, and verification checks.
 
 ### M8 - CLI Tool
 

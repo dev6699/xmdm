@@ -49,6 +49,8 @@ To verify a backup and restore drill against the local test database, run:
 ./backup-restore-drill.sh
 ```
 
+For incident recovery and release rollback steps, see [../docs/disaster-recovery-and-rollback.md](../docs/disaster-recovery-and-rollback.md).
+
 ## Notes
 
 - Keep local credentials separate from production credentials.
