@@ -43,6 +43,12 @@ eval "$(./test-db-env.sh)"
 go test ./...
 ```
 
+To verify a backup and restore drill against the local test database, run:
+
+```sh
+./backup-restore-drill.sh
+```
+
 ## Notes
 
 - Keep local credentials separate from production credentials.
