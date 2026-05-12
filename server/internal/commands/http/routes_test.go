@@ -61,6 +61,22 @@ func TestRegisterRejectsBadDeviceSecret(t *testing.T) {
 	}
 }
 
+func TestRegisterRejectsWrongDeviceID(t *testing.T) {
+	store := &fakeCommandStore{}
+	devices := &fakeDeviceStore{deviceID: "device-123", secret: "secret"}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), devices, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-999/commands", nil)
+	req.Header.Set(deviceSecretHeader, "secret")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized, got %d", rr.Code)
+	}
+}
+
 func TestRegisterAcksCommand(t *testing.T) {
 	store := &fakeCommandStore{
 		acked: commands.Command{
@@ -91,9 +107,44 @@ func TestRegisterAcksCommand(t *testing.T) {
 	}
 }
 
+func TestRegisterRejectsAckForWrongCommandID(t *testing.T) {
+	store := &fakeCommandStore{
+		ackErr: httpx.ErrNotFound,
+	}
+	devices := &fakeDeviceStore{deviceID: "device-123", secret: "secret"}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), devices, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/device-123/commands/cmd-404/ack", strings.NewReader(`{"status":"acked"}`))
+	req.Header.Set(deviceSecretHeader, "secret")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected not found, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRegisterRejectsAckWithBadSecret(t *testing.T) {
+	store := &fakeCommandStore{}
+	devices := &fakeDeviceStore{deviceID: "device-123", secret: "secret"}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), devices, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/device-123/commands/cmd-1/ack", strings.NewReader(`{"status":"acked"}`))
+	req.Header.Set(deviceSecretHeader, "wrong")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized, got %d", rr.Code)
+	}
+}
+
 type fakeCommandStore struct {
-	items []commands.Command
-	acked commands.Command
+	items  []commands.Command
+	acked  commands.Command
+	ackErr error
 }
 
 func (s *fakeCommandStore) Enqueue(context.Context, string, commands.Upsert) ([]commands.Command, error) {
@@ -109,6 +160,9 @@ func (s *fakeCommandStore) ListPending(context.Context, string, string) ([]comma
 }
 
 func (s *fakeCommandStore) Acknowledge(context.Context, string, string, string, commands.Ack) (commands.Command, error) {
+	if s.ackErr != nil {
+		return commands.Command{}, s.ackErr
+	}
 	return s.acked, nil
 }
 

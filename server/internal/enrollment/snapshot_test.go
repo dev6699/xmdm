@@ -133,3 +133,32 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 		t.Fatalf("expected certificate change to affect revision")
 	}
 }
+
+func TestVerifyConfigSnapshotRejectsMissingOrInvalidSignature(t *testing.T) {
+	snapshot := NewBootstrapConfigSnapshot(
+		"device-123",
+		"serial",
+		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
+		PolicySnapshot{KioskMode: false},
+		nil,
+		nil,
+		nil,
+	)
+
+	if err := VerifyConfigSnapshot(snapshot, "device-secret"); err == nil {
+		t.Fatalf("expected missing signature to be rejected")
+	}
+
+	signed, err := SignConfigSnapshot(snapshot, "device-secret")
+	if err != nil {
+		t.Fatalf("sign snapshot: %v", err)
+	}
+	if err := VerifyConfigSnapshot(signed, "device-secret"); err != nil {
+		t.Fatalf("verify signed snapshot: %v", err)
+	}
+
+	signed.Signature = "tampered"
+	if err := VerifyConfigSnapshot(signed, "device-secret"); err == nil {
+		t.Fatalf("expected tampered signature to be rejected")
+	}
+}

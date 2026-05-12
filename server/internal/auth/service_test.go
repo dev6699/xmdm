@@ -39,6 +39,9 @@ func TestLoginRejectsInvalidCredentials(t *testing.T) {
 	if _, err := svc.Login("admin", "wrong"); err == nil {
 		t.Fatalf("expected invalid credentials")
 	}
+	if _, err := svc.Login("root", "secret"); err == nil {
+		t.Fatalf("expected invalid credentials for bad username")
+	}
 }
 
 func TestAuthorizeChecksPermissions(t *testing.T) {

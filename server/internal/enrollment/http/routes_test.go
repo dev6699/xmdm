@@ -311,6 +311,39 @@ func TestRegisterTokenLifecycleRoutes(t *testing.T) {
 	}
 }
 
+func TestRegisterTokenLifecycleRoutesRejectReplayAndExpiry(t *testing.T) {
+	store := &fakeEnrollmentStore{
+		validateErr: enrollment.ErrTokenConsumed,
+		consumeErr:  enrollment.ErrTokenExpired,
+	}
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, store, nil, nil, nil, nil, nil, enrollment.RuntimeSnapshot{}, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens/validate", bytes.NewBufferString(`{"token":"secret-token"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusConflict {
+		t.Fatalf("expected consumed token conflict, got %d body=%s", res.Code, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/tokens/consume", bytes.NewBufferString(`{"token":"secret-token"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	res = httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusConflict {
+		t.Fatalf("expected expired token conflict, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	store := &fakeEnrollmentStore{
 		bound: enrollment.BoundDevice{
@@ -329,6 +362,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 			Name:            "device-123",
 			BootstrapExtras: map[string]any{"customer": "Acme"},
 		},
+		secret: "device-secret",
 	}
 	appStore := &fakeAppStore{
 		apps: []apps.App{
@@ -432,6 +466,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if payload["deviceSecret"] != "device-secret" {
 		t.Fatalf("unexpected device secret: %#v", payload["deviceSecret"])
 	}
+
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/config", nil)
 	req.Header.Set("X-XMDM-Device-Secret", "device-secret")
 	res = httptest.NewRecorder()
@@ -468,6 +503,11 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if err := enrollment.VerifyConfigSnapshot(config, "device-secret"); err != nil {
 		t.Fatalf("verify config snapshot: %v", err)
 	}
+	tampered := config
+	tampered.Signature = "tampered"
+	if err := enrollment.VerifyConfigSnapshot(tampered, "device-secret"); err == nil {
+		t.Fatalf("expected tampered config signature to fail verification")
+	}
 	if len(config.Certificates) != 1 {
 		t.Fatalf("expected one certificate in config, got %d", len(config.Certificates))
 	}
@@ -498,6 +538,77 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	}
 	if !fileEntry.ReplaceVariables {
 		t.Fatalf("expected replace variables to be enabled")
+	}
+}
+
+func TestRegisterEnrollmentBindRouteRejectsDuplicateDeviceConflict(t *testing.T) {
+	store := &fakeEnrollmentStore{
+		bindErr: enrollment.ErrDeviceConflict,
+	}
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, store, nil, nil, nil, nil, nil, enrollment.RuntimeSnapshot{}, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
+		"enrollmentToken":"secret-token",
+		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusConflict {
+		t.Fatalf("expected conflict for duplicate device, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestRegisterEnrollmentConfigRejectsWrongDeviceCredentials(t *testing.T) {
+	store := &fakeEnrollmentStore{
+		bound: enrollment.BoundDevice{
+			DeviceID:     "device-123",
+			DeviceSecret: "device-secret",
+			Status:       device.StatusEnrolled,
+		},
+	}
+	deviceStore := &fakeDeviceStore{
+		device: device.Device{
+			RecordBase: device.RecordBase{
+				ID:       "device-record-1",
+				TenantID: "tenant-1",
+				Status:   device.StatusEnrolled,
+			},
+			Name:            "device-123",
+			BootstrapExtras: map[string]any{"customer": "Acme"},
+		},
+		secret: "device-secret",
+	}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite}), deviceStore, store, nil, nil, nil, nil, nil, enrollment.RuntimeSnapshot{}, "tenant-1")
+
+	bindReq := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
+		"enrollmentToken":"secret-token",
+		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"}
+	}`))
+	bindReq.Header.Set("Content-Type", "application/json")
+	bindRes := httptest.NewRecorder()
+	mux.ServeHTTP(bindRes, bindReq)
+	if bindRes.Code != http.StatusOK {
+		t.Fatalf("expected bind ok, got %d", bindRes.Code)
+	}
+
+	wrongSecretReq := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/config", nil)
+	wrongSecretReq.Header.Set("X-XMDM-Device-Secret", "wrong-secret")
+	wrongSecretRes := httptest.NewRecorder()
+	mux.ServeHTTP(wrongSecretRes, wrongSecretReq)
+	if wrongSecretRes.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized for wrong secret, got %d", wrongSecretRes.Code)
+	}
+
+	wrongDeviceReq := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-999/config", nil)
+	wrongDeviceReq.Header.Set("X-XMDM-Device-Secret", "device-secret")
+	wrongDeviceRes := httptest.NewRecorder()
+	mux.ServeHTTP(wrongDeviceRes, wrongDeviceReq)
+	if wrongDeviceRes.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized for wrong device id, got %d", wrongDeviceRes.Code)
 	}
 }
 
@@ -792,6 +903,11 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 	if err := enrollment.VerifyConfigSnapshot(config, "device-secret"); err != nil {
 		t.Fatalf("verify config snapshot: %v", err)
 	}
+	tampered := config
+	tampered.Signature = "tampered"
+	if err := enrollment.VerifyConfigSnapshot(tampered, "device-secret"); err == nil {
+		t.Fatalf("expected tampered config signature to fail verification")
+	}
 	if config.Device.DeviceID != "device-123" {
 		t.Fatalf("unexpected device id: %#v", config.Device.DeviceID)
 	}
@@ -813,11 +929,14 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 }
 
 type fakeEnrollmentStore struct {
-	issued    enrollment.IssuedToken
-	validated enrollment.Token
-	consumed  enrollment.Token
-	revoked   enrollment.Token
-	bound     enrollment.BoundDevice
+	issued      enrollment.IssuedToken
+	validated   enrollment.Token
+	consumed    enrollment.Token
+	revoked     enrollment.Token
+	bound       enrollment.BoundDevice
+	validateErr error
+	consumeErr  error
+	bindErr     error
 
 	issueTenant    string
 	issueExpiresAt time.Time
@@ -851,6 +970,7 @@ type fakePolicyStore struct {
 
 type fakeDeviceStore struct {
 	device device.Device
+	secret string
 }
 
 type fakeArtifactStore struct {
@@ -866,12 +986,18 @@ func (s *fakeEnrollmentStore) IssueToken(ctx context.Context, tenantID string, e
 func (s *fakeEnrollmentStore) ValidateToken(_ context.Context, tenantID, token string) (enrollment.Token, error) {
 	s.validateTenant = tenantID
 	s.validateToken = token
+	if s.validateErr != nil {
+		return enrollment.Token{}, s.validateErr
+	}
 	return s.validated, nil
 }
 
 func (s *fakeEnrollmentStore) ConsumeToken(_ context.Context, tenantID, token string) (enrollment.Token, error) {
 	s.consumeTenant = tenantID
 	s.consumeToken = token
+	if s.consumeErr != nil {
+		return enrollment.Token{}, s.consumeErr
+	}
 	return s.consumed, nil
 }
 
@@ -879,6 +1005,9 @@ func (s *fakeEnrollmentStore) BindDevice(_ context.Context, tenantID, token, dev
 	s.bindTenant = tenantID
 	s.bindToken = token
 	s.bindDeviceID = deviceID
+	if s.bindErr != nil {
+		return enrollment.BoundDevice{}, s.bindErr
+	}
 	return s.bound, nil
 }
 
@@ -991,7 +1120,10 @@ func (s *fakeDeviceStore) RetireDevice(context.Context, string, string) (device.
 	return s.device, nil
 }
 
-func (s *fakeDeviceStore) Authenticate(context.Context, string, string, string) (device.Device, error) {
+func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, secret string) (device.Device, error) {
+	if s.secret != "" && (deviceID != s.device.Name || secret != s.secret) {
+		return device.Device{}, httpx.ErrNotFound
+	}
 	return s.device, nil
 }
 

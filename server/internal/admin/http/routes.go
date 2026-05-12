@@ -2,6 +2,9 @@ package adminhttp
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -12,6 +15,11 @@ import (
 	"xmdm/server/internal/commands"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/plugins"
+)
+
+const (
+	csrfCookieName = "xmdm_csrf"
+	csrfFieldName  = "csrfToken"
 )
 
 func Register(mux httpx.Router, svc *auth.Service, pluginManager *plugins.Manager, auditStore audit.Store, commandStore commands.Repository, tenantID string) {
@@ -39,11 +47,16 @@ func registerSessionRoutes(mux httpx.Router, svc *auth.Service) {
 	mux.HandleFunc(loginPath, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			token := issueCSRFCookie(w, r)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write([]byte(`<form method="post"><input name="username"><input name="password" type="password"><button type="submit">Login</button></form>`))
+			_, _ = w.Write([]byte(`<form method="post"><input type="hidden" name="` + csrfFieldName + `" value="` + token + `"><input name="username"><input name="password" type="password"><button type="submit">Login</button></form>`))
 		case http.MethodPost:
 			if err := r.ParseForm(); err != nil {
 				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			if hasCSRFCookie(r) && !csrfTokenMatches(r) {
+				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
 			session, err := svc.Login(r.FormValue("username"), r.FormValue("password"))
@@ -70,6 +83,10 @@ func registerSessionRoutes(mux httpx.Router, svc *auth.Service) {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		if hasCSRFCookie(r) && !csrfTokenMatches(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		if cookie, err := r.Cookie(auth.SessionCookieName); err == nil {
 			svc.Logout(cookie.Value)
 		}
@@ -94,8 +111,9 @@ func registerSessionRoutes(mux httpx.Router, svc *auth.Service) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		token := issueCSRFCookie(w, r)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"user":"` + session.Username + `"}`))
+		_, _ = w.Write([]byte(`{"user":"` + session.Username + `","csrfToken":"` + token + `"}`))
 	})
 }
 
@@ -124,6 +142,10 @@ func registerCommandRoutes(mux httpx.Router, svc *auth.Service, auditStore audit
 			writeJSON(w, map[string]any{"commands": items})
 		case http.MethodPost:
 			if !auth.HasPermission(session.Permissions, auth.PermissionAdminWrite) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			if !isJSONSubmission(r) && !csrfTokenMatches(r) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
@@ -188,6 +210,57 @@ func registerCommandRoutes(mux httpx.Router, svc *auth.Service, auditStore audit
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})
+}
+
+func hasCSRFCookie(r *http.Request) bool {
+	cookie, err := r.Cookie(csrfCookieName)
+	return err == nil && strings.TrimSpace(cookie.Value) != ""
+}
+
+func isJSONSubmission(r *http.Request) bool {
+	contentType := r.Header.Get("Content-Type")
+	return strings.HasPrefix(contentType, "application/json") || contentType == ""
+}
+
+func issueCSRFCookie(w http.ResponseWriter, r *http.Request) string {
+	if cookie, err := r.Cookie(csrfCookieName); err == nil && strings.TrimSpace(cookie.Value) != "" {
+		return cookie.Value
+	}
+	token, err := newCSRFCookieToken()
+	if err != nil {
+		return ""
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     csrfCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	return token
+}
+
+func csrfTokenMatches(r *http.Request) bool {
+	cookie, err := r.Cookie(csrfCookieName)
+	if err != nil {
+		return false
+	}
+	token := strings.TrimSpace(r.FormValue(csrfFieldName))
+	if token == "" {
+		token = strings.TrimSpace(r.Header.Get("X-XMDM-CSRF-Token"))
+	}
+	if token == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(token)) == 1
+}
+
+func newCSRFCookieToken() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func registerAuditRoutes(mux httpx.Router, svc *auth.Service, auditStore audit.Store, tenantID string) {
