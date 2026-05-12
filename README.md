@@ -116,7 +116,7 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 | --- | --- |
 | M7-01 Rate Limiting | ☑ |
 | M7-02 Security Tests | ☑ |
-| M7-03 Load Tests | ☐ |
+| M7-03 Load Tests | ☑ |
 | M7-04 Backup And Restore | ☐ |
 | M7-05 Observability | ☐ |
 | M7-06 DR And Rollback Docs | ☐ |
@@ -125,6 +125,7 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 
 Note: `M7-01 Rate Limiting` is complete as of 2026-05-12 with server-side token-bucket protection for repeated admin login, enrollment, and admin command fan-out traffic, returning `429 Too Many Requests` with `Retry-After` when a bucket is exhausted.
 Note: `M7-02 Security Tests` is complete as of 2026-05-12 with coverage for invalid admin credentials, browser-form CSRF protection on admin session routes, signed config snapshot tampering, and admin command authorization failures.
+Note: `M7-03 Load Tests` is complete as of 2026-05-12 with concurrent HTTP load coverage for device config sync, admin command push, command polling and acknowledgements, managed-file, app, and certificate artifact downloads, telemetry upload, and a mixed workload pass in `server/internal/api/v1/load_test.go`.
 
 ### M8 - CLI Tool
 
