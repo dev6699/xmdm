@@ -2,6 +2,7 @@ package v1
 
 import (
 	"net/http"
+	"time"
 
 	adminhttp "xmdm/server/internal/admin/http"
 	apps "xmdm/server/internal/apps"
@@ -61,7 +62,7 @@ type Dependencies struct {
 }
 
 // NewMux builds the versioned HTTP surface under /api/v1.
-func NewMux(svc *auth.Service, deps Dependencies) *http.ServeMux {
+func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
 	enrollmenthttp.Register(apiMux, svc, deps.Devices, deps.Enrollment, deps.Apps, deps.ManagedFiles, deps.Artifacts, deps.Certificates, deps.Policies, deps.Runtime, deps.TenantID)
@@ -78,5 +79,34 @@ func NewMux(svc *auth.Service, deps Dependencies) *http.ServeMux {
 	grouphttp.Register(apiMux, svc, deps.Groups, deps.Audit, deps.TenantID)
 	policyhttp.Register(apiMux, svc, deps.Policies, deps.Audit, deps.TenantID)
 	devicehttp.Register(apiMux, svc, deps.Devices, deps.Audit, deps.TenantID)
-	return mux
+	return httpx.WithRateLimits(mux, defaultRateLimitRules()...)
+}
+
+func defaultRateLimitRules() []httpx.RateLimitRule {
+	return []httpx.RateLimitRule{
+		{
+			Name:           "admin-login",
+			Method:         http.MethodPost,
+			Prefix:         "/api/v1/admin/login",
+			Burst:          5,
+			RefillInterval: 10 * time.Second,
+			RetryAfter:     10 * time.Second,
+		},
+		{
+			Name:           "admin-commands",
+			Method:         http.MethodPost,
+			Prefix:         "/api/v1/admin/commands",
+			Burst:          20,
+			RefillInterval: 2 * time.Second,
+			RetryAfter:     2 * time.Second,
+		},
+		{
+			Name:           "enrollment",
+			Method:         http.MethodPost,
+			Prefix:         "/api/v1/enrollment",
+			Burst:          20,
+			RefillInterval: 2 * time.Second,
+			RetryAfter:     2 * time.Second,
+		},
+	}
 }

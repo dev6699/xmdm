@@ -417,7 +417,7 @@ func newFrozenAuthService(t *testing.T) *auth.Service {
 }
 
 // buildTestServer creates an httptest.Server that serves the launcher APK alongside the API handler.
-func buildTestServer(t *testing.T, handler *http.ServeMux, launcherAPKPath string, requests *requestRecorder) *httptest.Server {
+func buildTestServer(t *testing.T, handler http.Handler, launcherAPKPath string, requests *requestRecorder) *httptest.Server {
 	t.Helper()
 	recordingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if requests != nil {

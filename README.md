@@ -5,7 +5,7 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-05-09
+Snapshot last updated: 2026-05-12
 
 ### M0 - Foundation
 
@@ -114,7 +114,7 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 
 | Item | State |
 | --- | --- |
-| M7-01 Rate Limiting | ☐ |
+| M7-01 Rate Limiting | ☑ |
 | M7-02 Security Tests | ☐ |
 | M7-03 Load Tests | ☐ |
 | M7-04 Backup And Restore | ☐ |
@@ -122,6 +122,8 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 | M7-06 DR And Rollback Docs | ☐ |
 | M7-07 Release Candidate | ☐ |
 | M7-08 Cleanup Pass | ☐ |
+
+Note: `M7-01 Rate Limiting` is complete as of 2026-05-12 with server-side token-bucket protection for repeated admin login, enrollment, and admin command fan-out traffic, returning `429 Too Many Requests` with `Retry-After` when a bucket is exhausted.
 
 ### M8 - CLI Tool
 
