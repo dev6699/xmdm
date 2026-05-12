@@ -120,7 +120,7 @@ Note: `M6-09 Policy Gaps` is complete as of 2026-05-01 with the enterprise enfor
 | M7-04 Backup And Restore | ☑ |
 | M7-05 Observability | ☑ |
 | M7-06 DR And Rollback Docs | ☑ |
-| M7-07 Release Candidate | ☐ |
+| M7-07 Release Candidate | ☑ |
 | M7-08 Cleanup Pass | ☐ |
 
 Note: `M7-01 Rate Limiting` is complete as of 2026-05-12 with server-side token-bucket protection for repeated admin login, enrollment, and admin command fan-out traffic, returning `429 Too Many Requests` with `Retry-After` when a bucket is exhausted.
@@ -129,6 +129,7 @@ Note: `M7-03 Load Tests` is complete as of 2026-05-12 with concurrent HTTP load 
 Note: `M7-04 Backup And Restore` is complete as of 2026-05-12 with the documented restore drill in `infra/backup-restore-drill.sh` and `docs/backup-restore-drill.md`, which backs up the local test database, restores it into a fresh database, and compares core table counts.
 Note: `M7-05 Observability` is complete as of 2026-05-12 with request logging, request IDs, trace headers, Prometheus-style `/metrics`, and route normalization in `server/internal/observability` plus `docs/observability.md`.
 Note: `M7-06 DR And Rollback Docs` is complete as of 2026-05-12 with incident recovery and release rollback guidance in `docs/disaster-recovery-and-rollback.md`, including restore order, object storage recovery, rollback rules, and verification checks.
+Note: `M7-07 Release Candidate` is complete as of 2026-05-12 with the staging-device release-candidate checklist in `docs/release-candidate-checklist.md` and the related e2e coverage map in `server/e2e/README.md`.
 
 ### M8 - CLI Tool
 
