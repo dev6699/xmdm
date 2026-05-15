@@ -53,14 +53,17 @@ func (s *Store) CreateManagedFile(ctx context.Context, tenantID string, req mana
 	row := tx.QueryRow(ctx,
 		`INSERT INTO managed_files (id, tenant_id, file_id, path, replace_variables, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id::text, tenant_id::text, file_id::text, path, status, updated_at, deleted_at, replace_variables`,
-		uuid.NewString(), tenantID, req.FileID, strings.TrimSpace(req.Path), req.ReplaceVariables, s.now(),
+		 ON CONFLICT (tenant_id, path) DO UPDATE
+		 SET file_id = EXCLUDED.file_id,
+		     replace_variables = EXCLUDED.replace_variables,
+		     status = $7,
+		     deleted_at = NULL,
+		     updated_at = EXCLUDED.updated_at
+		 RETURNING id::text, tenant_id::text, file_id::text, path, status, created_at, updated_at, deleted_at, replace_variables`,
+		uuid.NewString(), tenantID, req.FileID, strings.TrimSpace(req.Path), req.ReplaceVariables, s.now(), managedfiles.StatusActive,
 	)
 	rec, err := scanManagedFile(row)
 	if err != nil {
-		if isUniqueViolation(err) {
-			return managedfiles.ManagedFile{}, httpx.ErrConflict
-		}
 		return managedfiles.ManagedFile{}, err
 	}
 	rec.File = source
@@ -72,7 +75,7 @@ func (s *Store) CreateManagedFile(ctx context.Context, tenantID string, req mana
 
 func (s *Store) ListManagedFiles(ctx context.Context, tenantID string) ([]managedfiles.ManagedFile, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT m.id::text, m.tenant_id::text, m.file_id::text, m.path, m.status, m.updated_at, m.deleted_at, m.replace_variables,
+		`SELECT m.id::text, m.tenant_id::text, m.file_id::text, m.path, m.status, m.created_at, m.updated_at, m.deleted_at, m.replace_variables,
 		        f.id::text, f.tenant_id::text, f.name, f.status, f.updated_at, f.deleted_at, f.artifact_id::text, f.checksum, f.mime_type,
 		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
 		 FROM managed_files m
@@ -103,7 +106,7 @@ func (s *Store) ListManagedFiles(ctx context.Context, tenantID string) ([]manage
 
 func (s *Store) GetManagedFile(ctx context.Context, tenantID, id string) (managedfiles.ManagedFile, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT m.id::text, m.tenant_id::text, m.file_id::text, m.path, m.status, m.updated_at, m.deleted_at, m.replace_variables,
+		`SELECT m.id::text, m.tenant_id::text, m.file_id::text, m.path, m.status, m.created_at, m.updated_at, m.deleted_at, m.replace_variables,
 		        f.id::text, f.tenant_id::text, f.name, f.status, f.updated_at, f.deleted_at, f.artifact_id::text, f.checksum, f.mime_type,
 		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
 		 FROM managed_files m
@@ -127,7 +130,7 @@ func (s *Store) RetireManagedFile(ctx context.Context, tenantID, id string) (man
 		`UPDATE managed_files
 		 SET status = $3, deleted_at = $4, updated_at = $4
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, file_id::text, path, status, updated_at, deleted_at, replace_variables`,
+		 RETURNING id::text, tenant_id::text, file_id::text, path, status, created_at, updated_at, deleted_at, replace_variables`,
 		tenantID, id, managedfiles.StatusRetired, s.now(),
 	)
 	rec, err := scanManagedFile(row)
@@ -172,9 +175,13 @@ type queryer interface {
 
 func scanManagedFile(scanner rowScanner) (managedfiles.ManagedFile, error) {
 	var rec managedfiles.ManagedFile
+	var createdAt pgtype.Timestamptz
 	var deletedAt pgtype.Timestamptz
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.FileID, &rec.Path, &rec.Status, &rec.UpdatedAt, &deletedAt, &rec.ReplaceVariables); err != nil {
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.FileID, &rec.Path, &rec.Status, &createdAt, &rec.UpdatedAt, &deletedAt, &rec.ReplaceVariables); err != nil {
 		return managedfiles.ManagedFile{}, err
+	}
+	if createdAt.Valid {
+		rec.CreatedAt = createdAt.Time
 	}
 	if deletedAt.Valid {
 		rec.DeletedAt = &deletedAt.Time
@@ -184,17 +191,21 @@ func scanManagedFile(scanner rowScanner) (managedfiles.ManagedFile, error) {
 
 func scanManagedFileWithSource(scanner rowScanner) (managedfiles.ManagedFile, error) {
 	var rec managedfiles.ManagedFile
+	var createdAt pgtype.Timestamptz
 	var deletedAt pgtype.Timestamptz
 	var source files.File
 	var sourceDeletedAt pgtype.Timestamptz
 	var artifact files.Artifact
 	var artifactDeletedAt pgtype.Timestamptz
 	if err := scanner.Scan(
-		&rec.ID, &rec.TenantID, &rec.FileID, &rec.Path, &rec.Status, &rec.UpdatedAt, &deletedAt, &rec.ReplaceVariables,
+		&rec.ID, &rec.TenantID, &rec.FileID, &rec.Path, &rec.Status, &createdAt, &rec.UpdatedAt, &deletedAt, &rec.ReplaceVariables,
 		&source.ID, &source.TenantID, &source.Name, &source.Status, &source.UpdatedAt, &sourceDeletedAt, &source.ArtifactID, &source.Checksum, &source.MimeType,
 		&artifact.ID, &artifact.TenantID, &artifact.StorageKey, &artifact.Checksum, &artifact.SizeBytes, &artifact.MimeType, &artifact.Status, &artifact.UpdatedAt, &artifactDeletedAt,
 	); err != nil {
 		return managedfiles.ManagedFile{}, err
+	}
+	if createdAt.Valid {
+		rec.CreatedAt = createdAt.Time
 	}
 	if deletedAt.Valid {
 		rec.DeletedAt = &deletedAt.Time

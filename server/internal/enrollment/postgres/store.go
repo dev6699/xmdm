@@ -93,11 +93,11 @@ func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string
 	if err != nil {
 		return enrollment.BoundDevice{}, err
 	}
-	exists, err := deviceExistsByTenantAndDeviceIDForUpdate(ctx, tx, tenantID, deviceID)
+	deviceStatus, err := loadDeviceStatusByTenantAndDeviceIDForUpdate(ctx, tx, tenantID, deviceID)
 	if err != nil {
 		return enrollment.BoundDevice{}, err
 	}
-	if exists {
+	if deviceStatus != device.StatusPending {
 		return enrollment.BoundDevice{}, enrollment.ErrDeviceConflict
 	}
 	if tokenRow.Status == enrollment.TokenStatusIssued && !tokenRow.ExpiresAt.After(now) {
@@ -133,16 +133,16 @@ func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string
 	}
 
 	row := tx.QueryRow(ctx,
-		`INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, bootstrap_extras, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`UPDATE devices
+		 SET secret_hash = $3, status = $4, bootstrap_extras = $5, updated_at = $6
+		 WHERE tenant_id = $1 AND device_id = $2 AND status = $7
 		 RETURNING device_id, status`,
-		uuid.NewString(), tenantID, deviceID, enrollment.HashToken(secret), device.StatusEnrolled, bootstrapExtrasJSON, now,
+		tenantID, deviceID, enrollment.HashToken(secret), device.StatusEnrolled, bootstrapExtrasJSON, now, device.StatusPending,
 	)
 	var bound enrollment.BoundDevice
 	if err := row.Scan(&bound.DeviceID, &bound.Status); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return enrollment.BoundDevice{}, enrollment.ErrDeviceConflict
+		if errors.Is(err, pgx.ErrNoRows) {
+			return enrollment.BoundDevice{}, httpx.ErrNotFound
 		}
 		return enrollment.BoundDevice{}, err
 	}
@@ -168,6 +168,35 @@ func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string
 	}
 	bound.DeviceSecret = secret
 	return bound, nil
+}
+
+func (s *Store) ListTokens(ctx context.Context, tenantID string) ([]enrollment.Token, error) {
+	if tenantID == "" {
+		return nil, httpx.ErrInvalidInput
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, tenant_id::text, status, expires_at, consumed_at, revoked_at, created_at, updated_at
+		 FROM enrollment_tokens
+		 WHERE tenant_id = $1
+		 ORDER BY created_at DESC`,
+		tenantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]enrollment.Token, 0)
+	for rows.Next() {
+		item, err := scanToken(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *Store) RevokeToken(ctx context.Context, tenantID, id string) (enrollment.Token, error) {
@@ -298,24 +327,24 @@ func loadTokenByIDForUpdate(ctx context.Context, tx interface {
 	return scanToken(row)
 }
 
-func deviceExistsByTenantAndDeviceIDForUpdate(ctx context.Context, tx interface {
+func loadDeviceStatusByTenantAndDeviceIDForUpdate(ctx context.Context, tx interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, tenantID, deviceID string) (bool, error) {
+}, tenantID, deviceID string) (string, error) {
 	row := tx.QueryRow(ctx,
-		`SELECT 1
+		`SELECT status
 		 FROM devices
 		 WHERE tenant_id = $1 AND device_id = $2
 		 FOR UPDATE`,
 		tenantID, deviceID,
 	)
-	var exists int
-	if err := row.Scan(&exists); err != nil {
+	var status string
+	if err := row.Scan(&status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
+			return "", httpx.ErrNotFound
 		}
-		return false, err
+		return "", err
 	}
-	return true, nil
+	return status, nil
 }
 
 func updateToken(ctx context.Context, tx interface {

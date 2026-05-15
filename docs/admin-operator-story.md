@@ -2,7 +2,7 @@
 
 This story describes the end-to-end admin workflow for XMDM.
 
-The command-level CLI reference now lives in [cli/docs](../cli/docs). Use the story here to understand the operator lifecycle, then use the CLI pages for exact flags, inputs, and outputs.
+The browser dashboard lives in [Admin Dashboard](admin-dashboard.md). The command-level CLI reference lives in [cli/docs](../cli/docs). Use the story here to understand the operator lifecycle, then use the dashboard or CLI pages for exact execution paths.
 
 ## Operator Goal
 
@@ -214,5 +214,6 @@ xmdm --format json users retire <user-id>
 ## Supporting Docs
 
 - [XMDM CLI Operator Guide](../cli/README.md)
+- [Admin Dashboard](admin-dashboard.md)
 - [Admin Console Contract](../contracts/admin-console.md)
 - [Enrollment Contract](../contracts/enrollment.md)

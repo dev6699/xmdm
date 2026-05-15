@@ -43,7 +43,7 @@ func (s *Store) CreateUser(ctx context.Context, tenantID string, req identity.Us
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO users (id, tenant_id, email, password_hash, role_id, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id::text, tenant_id::text, email, role_id::text, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, email, role_id::text, status, created_at, updated_at, deleted_at`,
 		uuid.NewString(), tenantID, req.Email, req.PasswordHash, req.RoleID, now,
 	)
 	return scanUser(row)
@@ -51,7 +51,7 @@ func (s *Store) CreateUser(ctx context.Context, tenantID string, req identity.Us
 
 func (s *Store) ListUsers(ctx context.Context, tenantID string) ([]identity.User, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, tenant_id::text, email, role_id::text, status, updated_at, deleted_at
+		`SELECT id::text, tenant_id::text, email, role_id::text, status, created_at, updated_at, deleted_at
 		 FROM users
 		 WHERE tenant_id = $1
 		 ORDER BY created_at`,
@@ -77,14 +77,14 @@ func (s *Store) ListUsers(ctx context.Context, tenantID string) ([]identity.User
 }
 
 func (s *Store) UpdateUser(ctx context.Context, tenantID, id string, req identity.UserUpsert) (identity.User, error) {
-	if req.Email == "" || req.PasswordHash == "" || req.RoleID == "" {
+	if req.Email == "" || req.RoleID == "" {
 		return identity.User{}, httpx.ErrInvalidInput
 	}
 	row := s.pool.QueryRow(ctx,
 		`UPDATE users
-		 SET email = $3, password_hash = $4, role_id = $5, updated_at = $6
-		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, email, role_id::text, status, updated_at, deleted_at`,
+		 SET email = $3, password_hash = COALESCE(NULLIF($4, ''), password_hash), role_id = $5, updated_at = $6
+		 WHERE tenant_id = $1 AND id = $2 AND status = 'active'
+		 RETURNING id::text, tenant_id::text, email, role_id::text, status, created_at, updated_at, deleted_at`,
 		tenantID, id, req.Email, req.PasswordHash, req.RoleID, s.now(),
 	)
 	rec, err := scanUser(row)
@@ -102,7 +102,7 @@ func (s *Store) RetireUser(ctx context.Context, tenantID, id string) (identity.U
 		`UPDATE users
 		 SET status = 'retired', deleted_at = $3, updated_at = $3
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, email, role_id::text, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, email, role_id::text, status, created_at, updated_at, deleted_at`,
 		tenantID, id, s.now(),
 	)
 	rec, err := scanUser(row)
@@ -113,6 +113,52 @@ func (s *Store) RetireUser(ctx context.Context, tenantID, id string) (identity.U
 		return identity.User{}, err
 	}
 	return rec, nil
+}
+
+func (s *Store) AuthenticateUser(ctx context.Context, tenantID, email, password string) (identity.User, identity.Role, error) {
+	if tenantID == "" || email == "" || password == "" {
+		return identity.User{}, identity.Role{}, identity.ErrInvalidCredentials
+	}
+	row := s.pool.QueryRow(ctx,
+		`SELECT
+			u.id::text, u.tenant_id::text, u.email, u.password_hash, u.role_id::text, u.status, u.created_at, u.updated_at, u.deleted_at,
+			r.id::text, r.name, r.permissions, r.status, r.created_at, r.updated_at, r.deleted_at
+		 FROM users u
+		 JOIN roles r ON r.tenant_id = u.tenant_id AND r.id = u.role_id
+		 WHERE u.tenant_id = $1 AND u.email = $2`,
+		tenantID, email,
+	)
+
+	var user identity.User
+	var passwordHash string
+	var role identity.Role
+	var rolePermissions json.RawMessage
+	var userDeletedAt pgtype.Timestamptz
+	var roleDeletedAt pgtype.Timestamptz
+	if err := row.Scan(&user.ID, &user.TenantID, &user.Email, &passwordHash, &user.RoleID, &user.Status, &user.CreatedAt, &user.UpdatedAt, &userDeletedAt, &role.ID, &role.Name, &rolePermissions, &role.Status, &role.CreatedAt, &role.UpdatedAt, &roleDeletedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return identity.User{}, identity.Role{}, identity.ErrInvalidCredentials
+		}
+		return identity.User{}, identity.Role{}, err
+	}
+	if userDeletedAt.Valid {
+		user.DeletedAt = &userDeletedAt.Time
+	}
+	if roleDeletedAt.Valid {
+		role.DeletedAt = &roleDeletedAt.Time
+	}
+	if !identity.VerifyPassword(passwordHash, password) {
+		return identity.User{}, identity.Role{}, identity.ErrInvalidCredentials
+	}
+	if user.Status != "active" || role.Status != "active" {
+		return identity.User{}, identity.Role{}, identity.ErrInvalidCredentials
+	}
+	permissions, err := identity.PermissionsFromJSON(rolePermissions)
+	if err != nil {
+		return identity.User{}, identity.Role{}, err
+	}
+	role.Permissions = permissions
+	return user, role, nil
 }
 
 func (s *Store) CreateRole(ctx context.Context, tenantID string, req identity.RoleUpsert) (identity.Role, error) {
@@ -126,7 +172,7 @@ func (s *Store) CreateRole(ctx context.Context, tenantID string, req identity.Ro
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO roles (id, tenant_id, name, permissions, updated_at)
 		 VALUES ($1, $2, $3, $4::jsonb, $5)
-		 RETURNING id::text, tenant_id::text, name, permissions, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, name, permissions, status, created_at, updated_at, deleted_at`,
 		uuid.NewString(), tenantID, req.Name, payload, s.now(),
 	)
 	return scanRole(row)
@@ -134,7 +180,7 @@ func (s *Store) CreateRole(ctx context.Context, tenantID string, req identity.Ro
 
 func (s *Store) ListRoles(ctx context.Context, tenantID string) ([]identity.Role, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, tenant_id::text, name, permissions, status, updated_at, deleted_at
+		`SELECT id::text, tenant_id::text, name, permissions, status, created_at, updated_at, deleted_at
 		 FROM roles
 		 WHERE tenant_id = $1
 		 ORDER BY created_at`,
@@ -170,8 +216,8 @@ func (s *Store) UpdateRole(ctx context.Context, tenantID, id string, req identit
 	row := s.pool.QueryRow(ctx,
 		`UPDATE roles
 		 SET name = $3, permissions = $4::jsonb, updated_at = $5
-		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, name, permissions, status, updated_at, deleted_at`,
+		 WHERE tenant_id = $1 AND id = $2 AND status = 'active'
+		 RETURNING id::text, tenant_id::text, name, permissions, status, created_at, updated_at, deleted_at`,
 		tenantID, id, req.Name, payload, s.now(),
 	)
 	rec, err := scanRole(row)
@@ -189,7 +235,7 @@ func (s *Store) RetireRole(ctx context.Context, tenantID, id string) (identity.R
 		`UPDATE roles
 		 SET status = 'retired', deleted_at = $3, updated_at = $3
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, name, permissions, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, name, permissions, status, created_at, updated_at, deleted_at`,
 		tenantID, id, s.now(),
 	)
 	rec, err := scanRole(row)
@@ -205,7 +251,7 @@ func (s *Store) RetireRole(ctx context.Context, tenantID, id string) (identity.R
 func scanUser(scanner rowScanner) (identity.User, error) {
 	var rec identity.User
 	var deletedAt pgtype.Timestamptz
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Email, &rec.RoleID, &rec.Status, &rec.UpdatedAt, &deletedAt); err != nil {
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Email, &rec.RoleID, &rec.Status, &rec.CreatedAt, &rec.UpdatedAt, &deletedAt); err != nil {
 		return identity.User{}, err
 	}
 	if deletedAt.Valid {
@@ -218,7 +264,7 @@ func scanRole(scanner rowScanner) (identity.Role, error) {
 	var rec identity.Role
 	var deletedAt pgtype.Timestamptz
 	var permissions json.RawMessage
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &permissions, &rec.Status, &rec.UpdatedAt, &deletedAt); err != nil {
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &permissions, &rec.Status, &rec.CreatedAt, &rec.UpdatedAt, &deletedAt); err != nil {
 		return identity.Role{}, err
 	}
 	if deletedAt.Valid {

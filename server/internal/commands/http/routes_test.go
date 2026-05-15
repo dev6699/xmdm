@@ -155,6 +155,10 @@ func (s *fakeCommandStore) ListRecent(context.Context, string, int) ([]commands.
 	return append([]commands.Command(nil), s.items...), nil
 }
 
+func (s *fakeCommandStore) Get(context.Context, string, string) (commands.Command, error) {
+	return commands.Command{}, httpx.ErrNotFound
+}
+
 func (s *fakeCommandStore) ListPending(context.Context, string, string) ([]commands.Command, error) {
 	return append([]commands.Command(nil), s.items...), nil
 }
@@ -189,7 +193,7 @@ func (s *fakeDeviceStore) RetireDevice(context.Context, string, string) (device.
 
 func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, secret string) (device.Device, error) {
 	if deviceID == s.deviceID && secret == s.secret {
-		return device.Device{}, nil
+		return device.Device{DeviceID: s.deviceID, Name: s.deviceID}, nil
 	}
 	return device.Device{}, httpx.ErrNotFound
 }

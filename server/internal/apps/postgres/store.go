@@ -40,7 +40,7 @@ func (s *Store) CreateApp(ctx context.Context, tenantID string, req apps.AppUpse
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO apps (id, tenant_id, package_name, name, updated_at)
 		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id::text, tenant_id::text, package_name, name, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at`,
 		uuid.NewString(), tenantID, req.PackageName, req.Name, s.now(),
 	)
 	rec, err := scanApp(row)
@@ -55,7 +55,7 @@ func (s *Store) CreateApp(ctx context.Context, tenantID string, req apps.AppUpse
 
 func (s *Store) ListApps(ctx context.Context, tenantID string) ([]apps.App, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, tenant_id::text, package_name, name, status, updated_at, deleted_at
+		`SELECT id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at
 		 FROM apps
 		 WHERE tenant_id = $1
 		 ORDER BY created_at`,
@@ -80,6 +80,23 @@ func (s *Store) ListApps(ctx context.Context, tenantID string) ([]apps.App, erro
 	return items, nil
 }
 
+func (s *Store) GetApp(ctx context.Context, tenantID, id string) (apps.App, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at
+		 FROM apps
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, id,
+	)
+	rec, err := scanApp(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apps.App{}, httpx.ErrNotFound
+		}
+		return apps.App{}, err
+	}
+	return rec, nil
+}
+
 func (s *Store) UpdateApp(ctx context.Context, tenantID, id string, req apps.AppUpsert) (apps.App, error) {
 	if req.PackageName == "" || req.Name == "" {
 		return apps.App{}, httpx.ErrInvalidInput
@@ -88,7 +105,7 @@ func (s *Store) UpdateApp(ctx context.Context, tenantID, id string, req apps.App
 		`UPDATE apps
 		 SET package_name = $3, name = $4, updated_at = $5
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, package_name, name, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at`,
 		tenantID, id, req.PackageName, req.Name, s.now(),
 	)
 	rec, err := scanApp(row)
@@ -109,7 +126,7 @@ func (s *Store) RetireApp(ctx context.Context, tenantID, id string) (apps.App, e
 		`UPDATE apps
 		 SET status = $3, deleted_at = $4, updated_at = $4
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, package_name, name, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at`,
 		tenantID, id, apps.StatusRetired, s.now(),
 	)
 	rec, err := scanApp(row)
@@ -127,8 +144,8 @@ func (s *Store) ListVersions(ctx context.Context, tenantID, appID string) ([]app
 	if err := s.pool.QueryRow(ctx,
 		`SELECT id::text
 		 FROM apps
-		 WHERE tenant_id = $1 AND id = $2 AND status <> $3`,
-		tenantID, appID, apps.StatusRetired,
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, appID,
 	).Scan(&appExists); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.ErrNotFound
@@ -296,7 +313,7 @@ func (s *Store) CreateVersion(ctx context.Context, tenantID, appID string, req a
 func scanApp(scanner rowScanner) (apps.App, error) {
 	var rec apps.App
 	var deletedAt pgtype.Timestamptz
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.PackageName, &rec.Name, &rec.Status, &rec.UpdatedAt, &deletedAt); err != nil {
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.PackageName, &rec.Name, &rec.Status, &rec.CreatedAt, &rec.UpdatedAt, &deletedAt); err != nil {
 		return apps.App{}, err
 	}
 	if deletedAt.Valid {

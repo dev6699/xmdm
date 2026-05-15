@@ -10,6 +10,7 @@ import (
 	"xmdm/server/internal/artifacts"
 	s3store "xmdm/server/internal/artifacts/s3"
 	auditpg "xmdm/server/internal/audit/postgres"
+	"xmdm/server/internal/bootstrap"
 	certificatesspg "xmdm/server/internal/certificates/postgres"
 	commandspg "xmdm/server/internal/commands/postgres"
 	"xmdm/server/internal/config"
@@ -76,7 +77,7 @@ func NewDeps(cfg *config.Config) Dependencies {
 			CommandPollIntervalMs: cfg.Device.CommandPollInterval.Milliseconds(),
 			ConfigSyncIntervalMs:  cfg.Device.ConfigSyncInterval.Milliseconds(),
 		},
-		TenantID:      "00000000-0000-0000-0000-000000000000",
+		TenantID:      bootstrap.SeedTenantID,
 		PluginManager: plugins.Disabled(),
 	}
 }

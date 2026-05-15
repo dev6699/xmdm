@@ -1,0 +1,4713 @@
+package adminhttp
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"html/template"
+	"io"
+	"mime"
+	"net/http"
+	"net/url"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	apps "xmdm/server/internal/apps"
+	"xmdm/server/internal/artifacts"
+	"xmdm/server/internal/audit"
+	"xmdm/server/internal/auth"
+	"xmdm/server/internal/certificates"
+	"xmdm/server/internal/checksum"
+	"xmdm/server/internal/commands"
+	"xmdm/server/internal/device"
+	"xmdm/server/internal/deviceinfo"
+	"xmdm/server/internal/enrollment"
+	enrollmenthttp "xmdm/server/internal/enrollment/http"
+	"xmdm/server/internal/files"
+	"xmdm/server/internal/group"
+	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/identity"
+	"xmdm/server/internal/logs"
+	managedfiles "xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/policy"
+
+	"github.com/google/uuid"
+	qrcode "github.com/skip2/go-qrcode"
+)
+
+type DashboardDependencies struct {
+	Identity     identity.Repository
+	Apps         apps.Repository
+	Files        files.Repository
+	ManagedFiles managedfiles.Repository
+	Logs         logsRepository
+	Commands     commands.Repository
+	DeviceInfo   deviceInfoRepository
+	Certificates certificates.Repository
+	Artifacts    artifacts.Store
+	Groups       group.Repository
+	Policies     policy.Repository
+	Devices      device.Repository
+	Enrollment   enrollment.Repository
+	Runtime      enrollment.RuntimeSnapshot
+	Audit        audit.Store
+	TenantID     string
+}
+
+type logsRepository interface {
+	Search(ctx context.Context, tenantID string, filter logs.SearchFilter) ([]logs.Record, error)
+}
+
+type deviceInfoRepository interface {
+	Search(ctx context.Context, tenantID string, filter deviceinfo.SearchFilter) ([]deviceinfo.Record, error)
+}
+
+type dashboard struct {
+	svc  *auth.Service
+	deps DashboardDependencies
+	tmpl *template.Template
+}
+
+type pageData struct {
+	Title       string
+	Subtitle    string
+	User        string
+	CSRFToken   string
+	CanWrite    bool
+	Flash       string
+	Error       string
+	Callout     template.HTML
+	Sections    []sectionData
+	Forms       []formData
+	Items       any
+	SearchQuery string
+}
+
+type sectionData struct {
+	Title string
+	Count int
+	Body  template.HTML
+}
+
+type formData struct {
+	Title   string
+	Action  string
+	EncType string
+	Fields  []fieldData
+	Help    template.HTML
+	After   template.HTML
+	Submit  string
+	Danger  bool
+}
+
+type fieldData struct {
+	Name        string
+	Label       string
+	Type        string
+	Value       string
+	Values      []string
+	Placeholder string
+	Required    bool
+	Options     []optionData
+}
+
+type optionData struct {
+	Value string
+	Label string
+}
+
+const dashboardTemplate = `<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} - XMDM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════
+       TOKENS
+    ═══════════════════════════════════════════ */
+    :root, [data-theme="dark"] {
+      --bg:            #0b0e11;
+      --surface:       #111519;
+      --surface2:      #161c23;
+      --surface3:      #1c2430;
+      --border:        rgba(255,255,255,.07);
+      --border-hi:     rgba(74,222,158,.3);
+      --ink:           #e2e8f0;
+      --ink-2:         #94a3b8;
+      --ink-3:         #5a6a7e;
+      --accent:        #4ade9e;
+      --accent-solid:  #2bb87a;
+      --accent-dim:    rgba(74,222,158,.1);
+      --accent-glow:   rgba(74,222,158,.2);
+      --danger:        #f87171;
+      --danger-solid:  #dc2626;
+      --danger-dim:    rgba(248,113,113,.1);
+      --warn:          #fbbf24;
+      --flash-bg:      rgba(74,222,158,.07);
+      --flash-border:  rgba(74,222,158,.3);
+      --flash-ink:     #4ade9e;
+      --pre-bg:        #0d1117;
+      --pre-ink:       #7d9ab5;
+      --header-bg:     rgba(11,14,17,.95);
+      --nav-bg:        #0e1218;
+      --nav-width:     15rem;
+      --radius-sm:     .4rem;
+      --radius:        .6rem;
+      --radius-lg:     .9rem;
+      --shadow:        0 4px 24px rgba(0,0,0,.4);
+      --shadow-sm:     0 2px 8px rgba(0,0,0,.25);
+      color-scheme: dark;
+    }
+    [data-theme="light"] {
+      --bg:            #f1f5f9;
+      --surface:       #ffffff;
+      --surface2:      #f8fafc;
+      --surface3:      #f1f5f9;
+      --border:        rgba(0,0,0,.08);
+      --border-hi:     rgba(15,120,95,.35);
+      --ink:           #0f172a;
+      --ink-2:         #475569;
+      --ink-3:         #94a3b8;
+      --accent:        #0a7c5c;
+      --accent-solid:  #086648;
+      --accent-dim:    rgba(10,124,92,.08);
+      --accent-glow:   rgba(10,124,92,.15);
+      --danger:        #dc2626;
+      --danger-solid:  #b91c1c;
+      --danger-dim:    rgba(220,38,38,.08);
+      --warn:          #d97706;
+      --flash-bg:      #ecfdf5;
+      --flash-border:  #6ee7b7;
+      --flash-ink:     #065f46;
+      --pre-bg:        #f8fafc;
+      --pre-ink:       #475569;
+      --header-bg:     #0f2922;
+      --nav-bg:        #ffffff;
+      --shadow:        0 4px 20px rgba(0,0,0,.08);
+      --shadow-sm:     0 1px 4px rgba(0,0,0,.06);
+      color-scheme: light;
+    }
+
+    /* ═══════════════════════════════════════════
+       RESET & BASE
+    ═══════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "DM Sans", system-ui, sans-serif;
+      font-size: .9375rem;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--bg);
+      min-height: 100vh;
+      transition: background .2s, color .2s;
+    }
+    [data-theme="dark"] body {
+      background-image: radial-gradient(ellipse 70% 40% at 50% -5%, rgba(74,222,158,.055) 0%, transparent 65%);
+    }
+
+    /* ═══════════════════════════════════════════
+       HEADER
+    ═══════════════════════════════════════════ */
+    header {
+      position: sticky; top: 0; z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      height: 3.25rem;
+      padding: 0 1.5rem;
+      background: var(--header-bg);
+      border-bottom: 1px solid rgba(255,255,255,.06);
+      backdrop-filter: blur(16px);
+    }
+    .brand {
+      display: flex; align-items: center; gap: .5rem;
+      font-family: "Space Mono", monospace;
+      font-size: .8rem; font-weight: 700;
+      letter-spacing: .06em;
+      color: #4ade9e;
+      text-decoration: none;
+    }
+    .brand-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #4ade9e;
+      box-shadow: 0 0 8px #4ade9e88;
+      animation: pulse-dot 2.8s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%,100% { opacity:1; transform:scale(1); }
+      50%      { opacity:.35; transform:scale(.65); }
+    }
+    .header-right { display: flex; align-items: center; gap: .6rem; }
+    .header-user {
+      font-family: "Space Mono", monospace;
+      font-size: .72rem;
+      color: rgba(255,255,255,.86);
+      padding: .25rem .6rem;
+      background: rgba(255,255,255,.08);
+      border-radius: var(--radius-sm);
+    }
+
+    /* theme toggle */
+    .btn-icon {
+      display: flex; align-items: center; justify-content: center;
+      width: 2rem; height: 2rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(255,255,255,.12);
+      background: transparent;
+      color: rgba(255,255,255,.55);
+      cursor: pointer; font-size: .95rem; padding: 0;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    .btn-icon:hover { background: rgba(255,255,255,.1); color: #fff; border-color: rgba(255,255,255,.25); box-shadow: none; }
+    .icon-sun  { display: none; }
+    .icon-moon { display: block; }
+    [data-theme="light"] .icon-sun  { display: block; }
+    [data-theme="light"] .icon-moon { display: none; }
+
+    /* logout in header */
+    .btn-logout {
+      font-family: "DM Sans", sans-serif;
+      font-size: .8rem;
+      padding: .3rem .75rem;
+      height: 2rem;
+      color: rgba(255,255,255,.92);
+      border-color: rgba(255,255,255,.2);
+      background: transparent;
+    }
+    .btn-logout:hover { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.32); box-shadow: none; }
+    [data-theme="light"] .btn-logout {
+      color: var(--ink);
+      border-color: var(--border);
+      background: rgba(255,255,255,.82);
+    }
+    [data-theme="light"] .btn-logout:hover {
+      background: var(--surface2);
+      color: var(--ink);
+      border-color: var(--border);
+      box-shadow: none;
+    }
+    [data-theme="light"] .header-user {
+      color: var(--ink);
+      background: rgba(255,255,255,.9);
+    }
+
+    /* ═══════════════════════════════════════════
+       LAYOUT SHELL
+    ═══════════════════════════════════════════ */
+    .shell {
+      display: grid;
+      grid-template-columns: var(--nav-width) 1fr;
+      min-height: calc(100vh - 3.25rem);
+    }
+
+    /* ═══════════════════════════════════════════
+       SIDEBAR NAV
+    ═══════════════════════════════════════════ */
+    .sidebar {
+      position: sticky;
+      top: 3.25rem;
+      height: calc(100vh - 3.25rem);
+      overflow-y: auto;
+      background: var(--nav-bg);
+      border-right: 1px solid var(--border);
+      padding: 1rem .75rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+      transition: background .2s;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .nav-group-label {
+      font-family: "Space Mono", monospace;
+      font-size: .6rem;
+      font-weight: 700;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      padding: .9rem .6rem .3rem;
+      user-select: none;
+    }
+    .nav-group-label:first-child { padding-top: .2rem; }
+
+    .sidebar a {
+      display: flex; align-items: center; gap: .6rem;
+      padding: .5rem .7rem;
+      border-radius: var(--radius-sm);
+      font-size: .875rem;
+      font-weight: 400;
+      color: var(--ink-2);
+      text-decoration: none;
+      transition: background .12s, color .12s;
+      position: relative;
+    }
+    .sidebar a .nav-icon {
+      width: 1.05rem;
+      height: 1.05rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      opacity: .72;
+      color: currentColor;
+    }
+    .sidebar a .nav-icon svg {
+      width: 1rem;
+      height: 1rem;
+      display: block;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .sidebar a:hover {
+      background: var(--accent-dim);
+      color: var(--ink);
+    }
+    .sidebar a:hover .nav-icon { opacity: 1; }
+    .sidebar a.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .sidebar a.active .nav-icon { opacity: 1; }
+    .sidebar a.active::before {
+      content: '';
+      position: absolute; left: 0; top: 20%; bottom: 20%;
+      width: 3px;
+      background: var(--accent);
+      border-radius: 0 2px 2px 0;
+    }
+
+    /* ═══════════════════════════════════════════
+       MAIN CONTENT
+    ═══════════════════════════════════════════ */
+    .content {
+      min-width: 0;
+      padding: 1.75rem 2.25rem 3rem;
+    }
+
+    /* page header row */
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.75rem;
+      flex-wrap: wrap;
+    }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: -.02em;
+      color: var(--ink);
+      line-height: 1.2;
+    }
+    .page-subtitle {
+      font-size: .825rem;
+      color: var(--ink-2);
+      margin-top: .2rem;
+      font-weight: 400;
+    }
+
+    /* section headings inside panels */
+    h2 {
+      font-family: "Space Mono", monospace;
+      font-size: .72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--ink-3);
+      margin-bottom: 1.1rem;
+      padding-bottom: .65rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ═══════════════════════════════════════════
+       LOGIN PAGE — full-page centred layout
+    ═══════════════════════════════════════════ */
+    body.page-login {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    .login-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 28rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 2.5rem 2.75rem;
+      box-shadow: var(--shadow);
+    }
+    .login-logo {
+      display: flex; align-items: center; justify-content: center; gap: .5rem;
+      margin-bottom: 2rem;
+    }
+    .login-logo-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent-glow);
+      animation: pulse-dot 2.8s ease-in-out infinite;
+    }
+    .login-logo-text {
+      font-family: "Space Mono", monospace;
+      font-size: 1rem; font-weight: 700;
+      letter-spacing: .06em;
+      color: var(--accent);
+    }
+    .login-title {
+      text-align: center;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--ink);
+      margin-bottom: .4rem;
+    }
+    .login-sub {
+      text-align: center;
+      font-size: .85rem;
+      color: var(--ink-2);
+      margin-bottom: 2rem;
+    }
+    .login-card label { margin-top: 1.1rem; }
+    .login-card label:first-of-type { margin-top: 0; }
+    .login-card .btn-primary {
+      width: 100%;
+      justify-content: center;
+      margin-top: 1.5rem;
+      padding: .65rem 1rem;
+      font-size: .9rem;
+    }
+    .login-footer {
+      margin-top: 1.5rem;
+      text-align: center;
+      font-size: .75rem;
+      color: var(--ink-3);
+    }
+
+    /* ═══════════════════════════════════════════
+       PANELS & CARDS
+    ═══════════════════════════════════════════ */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: var(--shadow-sm);
+      transition: border-color .18s, background .2s;
+    }
+    .panel:hover { border-color: var(--border-hi); }
+
+    /* metric grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem 1.35rem 1.1rem;
+      box-shadow: var(--shadow-sm);
+      transition: border-color .18s, transform .18s, box-shadow .18s;
+    }
+    .metric-card:hover {
+      border-color: var(--border-hi);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(74,222,158,.06);
+    }
+    [data-theme="light"] .metric-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,.08); }
+    .metric-label {
+      font-family: "Space Mono", monospace;
+      font-size: .65rem;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--ink-3);
+      margin-bottom: .6rem;
+    }
+    .metric-value {
+      font-family: "Space Mono", monospace;
+      font-size: 2.1rem;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1;
+    }
+    .metric-note {
+      font-size: .75rem;
+      color: var(--ink-2);
+      margin-top: .5rem;
+    }
+
+    /* ═══════════════════════════════════════════
+       ALERTS
+    ═══════════════════════════════════════════ */
+    .alert {
+      display: flex; align-items: flex-start; gap: .6rem;
+      padding: .75rem 1rem;
+      border-radius: var(--radius);
+      margin-bottom: 1.25rem;
+      font-size: .875rem;
+      line-height: 1.5;
+    }
+    .alert-icon { font-size: 1rem; flex-shrink: 0; margin-top: .05rem; }
+    .alert-success {
+      background: var(--flash-bg);
+      border: 1px solid var(--flash-border);
+      color: var(--flash-ink);
+    }
+    .alert-error {
+      background: var(--danger-dim);
+      border: 1px solid rgba(248,113,113,.3);
+      color: var(--danger);
+    }
+    /* keep old class names working */
+    .flash { display:flex; align-items:flex-start; gap:.6rem; padding:.75rem 1rem; border-radius:var(--radius); margin-bottom:1.25rem; font-size:.875rem; background:var(--flash-bg); border:1px solid var(--flash-border); color:var(--flash-ink); }
+    .error { display:flex; align-items:flex-start; gap:.6rem; padding:.75rem 1rem; border-radius:var(--radius); margin-bottom:1.25rem; font-size:.875rem; background:var(--danger-dim); border:1px solid rgba(248,113,113,.3); color:var(--danger); }
+
+    /* ═══════════════════════════════════════════
+       TABLES
+    ═══════════════════════════════════════════ */
+    .table-wrap { overflow-x: auto; margin: 0 -1.5rem; padding: 0 1.5rem; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .875rem;
+      min-width: 500px;
+    }
+    thead tr { border-bottom: 1px solid var(--border); }
+    th {
+      text-align: left;
+      padding: .55rem .75rem;
+      font-family: "Space Mono", monospace;
+      font-size: .635rem;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--ink-3);
+      font-weight: 700;
+      white-space: nowrap;
+      background: var(--surface2);
+    }
+    th:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+    th:last-child  { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    td {
+      padding: .65rem .75rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+      color: var(--ink);
+      font-size: .875rem;
+    }
+    tbody tr { transition: background .1s; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    /* inline table forms: compact inputs */
+    td input, td textarea, td select {
+      padding: .3rem .55rem;
+      font-size: .8rem;
+      min-width: 7rem;
+    }
+    td textarea { min-height: 3.5rem; }
+
+    /* ═══════════════════════════════════════════
+       FORMS
+    ═══════════════════════════════════════════ */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 1.5rem;
+    }
+    .form-grid .field-full { grid-column: 1 / -1; }
+
+    label {
+      display: block;
+      font-family: "Space Mono", monospace;
+      font-size: .67rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--ink-3);
+      margin: 1rem 0 .35rem;
+    }
+    input, textarea, select {
+      width: 100%;
+      padding: .6rem .85rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--ink);
+      font-family: "DM Sans", sans-serif;
+      font-size: .9rem;
+      line-height: 1.5;
+      transition: border-color .15s, box-shadow .15s, background .2s;
+      outline: none;
+      appearance: none;
+    }
+    input::placeholder, textarea::placeholder { color: var(--ink-3); }
+    input:hover, textarea:hover, select:hover { border-color: var(--ink-3); }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent-solid);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+      background: var(--surface);
+    }
+    input[type="checkbox"] {
+      width: auto; height: 1rem; width: 1rem;
+      accent-color: var(--accent-solid);
+      appearance: auto;
+      cursor: pointer;
+      margin-right: .4rem;
+      flex: none;
+    }
+    textarea { min-height: 7rem; resize: vertical; font-family: "Space Mono", monospace; font-size: .8rem; }
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7a8a' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right .75rem center;
+      padding-right: 2.25rem;
+    }
+    select option { background: var(--surface2); }
+
+    /* ═══════════════════════════════════════════
+       BUTTONS
+    ═══════════════════════════════════════════ */
+    button, .button {
+      display: inline-flex; align-items: center; gap: .35rem;
+      padding: .5rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface2);
+      color: var(--ink-2);
+      font-family: "DM Sans", sans-serif;
+      font-size: .85rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: background .14s, color .14s, border-color .14s, box-shadow .14s;
+    }
+    button:hover, .button:hover {
+      background: var(--surface3);
+      color: var(--ink);
+      border-color: var(--ink-3);
+      box-shadow: var(--shadow-sm);
+    }
+    .btn-primary, button[type="submit"]:not(.danger):not(.btn-icon):not(.btn-logout) {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-color: var(--accent-solid);
+      font-weight: 600;
+    }
+    .btn-primary:hover, button[type="submit"]:not(.danger):not(.btn-icon):not(.btn-logout):hover {
+      background: var(--accent-solid);
+      color: #fff;
+      border-color: var(--accent-solid);
+      box-shadow: 0 0 16px var(--accent-glow);
+    }
+    .danger, button.danger {
+      background: var(--danger-dim);
+      color: var(--danger);
+      border-color: rgba(248,113,113,.35);
+    }
+    .danger:hover, button.danger:hover {
+      background: var(--danger-solid);
+      color: #fff;
+      border-color: var(--danger-solid);
+      box-shadow: 0 0 12px rgba(220,38,38,.25);
+    }
+    form.inline { display: inline; }
+    .actions { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+    p { margin-top: 1.25rem; }
+
+    /* ═══════════════════════════════════════════
+       CODE / PRE
+    ═══════════════════════════════════════════ */
+    code, pre {
+      font-family: "Space Mono", monospace;
+      font-size: .78rem;
+    }
+    code {
+      background: var(--surface3);
+      padding: .1rem .35rem;
+      border-radius: var(--radius-sm);
+      color: var(--accent);
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-x: auto;
+      background: var(--pre-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: .85rem 1rem;
+      color: var(--pre-ink);
+      line-height: 1.6;
+      transition: background .2s;
+    }
+    pre.qr-json {
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      max-width: 100%;
+    }
+
+    /* ═══════════════════════════════════════════
+       MISC HELPERS
+    ═══════════════════════════════════════════ */
+    .muted { color: var(--ink-2); }
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 1.5rem 0;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: .16rem .5rem;
+      border-radius: 999px;
+      font-family: "Space Mono", monospace;
+      font-size: .62rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .status-active {
+      color: var(--accent);
+      background: var(--accent-dim);
+      border-color: var(--border-hi);
+    }
+    .status-enabled {
+      color: var(--accent);
+      background: var(--accent-dim);
+      border-color: var(--border-hi);
+    }
+    .status-disabled {
+      color: var(--ink-2);
+      background: rgba(148,163,184,.08);
+      border-color: rgba(148,163,184,.24);
+    }
+    .status-pending {
+      color: var(--warn);
+      background: rgba(251,191,36,.08);
+      border-color: rgba(251,191,36,.28);
+    }
+    .status-enrolled {
+      color: var(--warn);
+      background: rgba(251,191,36,.08);
+      border-color: rgba(251,191,36,.28);
+    }
+    .status-issued {
+      color: var(--accent);
+      background: var(--accent-dim);
+      border-color: var(--border-hi);
+    }
+    .status-consumed {
+      color: var(--ink);
+      background: rgba(148,163,184,.08);
+      border-color: rgba(148,163,184,.24);
+    }
+    .status-expired {
+      color: var(--ink-2);
+      background: rgba(148,163,184,.06);
+      border-color: rgba(148,163,184,.2);
+    }
+    .status-retired {
+      color: var(--danger);
+      background: var(--danger-dim);
+      border-color: rgba(248,113,113,.28);
+    }
+    .field-help {
+      margin-top: .5rem;
+      color: var(--ink-2);
+      font-size: .82rem;
+      line-height: 1.5;
+    }
+    .field-help p + p,
+    .field-help ul + p,
+    .field-help p + ul,
+    .field-help ul + ul {
+      margin-top: .6rem;
+    }
+    .field-help ul {
+      margin: .55rem 0 0 1.15rem;
+      padding: 0;
+      display: grid;
+      gap: .25rem;
+    }
+    .policy-summary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: .75rem;
+    }
+    .policy-summary-item {
+      padding: .75rem .85rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      min-width: 0;
+    }
+    .policy-summary-label {
+      font-family: "Space Mono", monospace;
+      font-size: .58rem;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+    .policy-summary-value {
+      margin-top: .3rem;
+      color: var(--ink);
+      overflow-wrap: anywhere;
+    }
+    .policy-summary-wide {
+      grid-column: 1 / -1;
+    }
+    @media (max-width: 860px) {
+      .policy-summary {
+        grid-template-columns: 1fr;
+      }
+    }
+    .permission-catalog {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .35rem;
+      margin-top: .45rem;
+    }
+    .permission-catalog code {
+      color: var(--ink);
+      background: var(--surface3);
+      border: 1px solid var(--border);
+    }
+    .toggle-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem;
+      margin-top: .35rem;
+    }
+    .toggle-option {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .4rem .65rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface2);
+      color: var(--ink-2);
+      font-size: .85rem;
+      text-transform: none;
+      letter-spacing: 0;
+      cursor: pointer;
+    }
+    .toggle-option input {
+      margin: 0;
+    }
+            .checkbox-group {
+              display: grid;
+              gap: .28rem;
+              margin-top: .25rem;
+              max-height: 11rem;
+              overflow-y: auto;
+              padding-right: .25rem;
+            }
+            .checkbox-option {
+              display: inline-flex;
+              align-items: center;
+              gap: .35rem;
+              min-width: 0;
+              color: var(--ink-2);
+              font-size: .76rem;
+              line-height: 1.35;
+            }
+    .checkbox-option input {
+      margin: 0;
+      flex: 0 0 auto;
+    }
+
+    /* ═══════════════════════════════════════════
+       RESPONSIVE
+    ═══════════════════════════════════════════ */
+    @media (max-width: 800px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar {
+        position: static;
+        height: auto;
+        flex-direction: row;
+        flex-wrap: wrap;
+        padding: .5rem .75rem;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+        gap: 2px;
+      }
+      .nav-group-label { display: none; }
+      .sidebar a { font-size: .8rem; padding: .35rem .6rem; }
+      .sidebar a::before { display: none; }
+      .content { padding: 1.25rem 1rem 2rem; }
+      .form-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body{{if not .User}} class="page-login"{{end}}>
+
+  <!-- ── HEADER ───────────────────────────────────── -->
+  <header>
+    <a href="/admin" class="brand">
+      <span class="brand-dot"></span>
+      XMDM
+    </a>
+    <div class="header-right">
+      {{if .User}}<span class="header-user">{{.User}}</span>{{end}}
+      <button class="btn-icon" onclick="toggleTheme()" title="Toggle theme" type="button">
+        <span class="icon-moon">🌙</span>
+        <span class="icon-sun">☀️</span>
+      </button>
+      {{if .User}}<form method="post" action="/admin/logout" class="inline"><input type="hidden" name="csrfToken" value="{{.CSRFToken}}"><button type="submit" class="btn-logout">Sign out</button></form>{{end}}
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════════════════════
+       LOGIN PAGE — no sidebar, card centred
+  ══════════════════════════════════════════════ -->
+  {{if not .User}}
+  <div class="login-wrap">
+    {{if .Flash}}<div class="flash">✓ {{.Flash}}</div>{{end}}
+    {{if .Error}}<div class="error">⚠ {{.Error}}</div>{{end}}
+    {{range .Forms}}
+    <div class="login-card">
+      <div class="login-logo">
+        <span class="login-logo-dot"></span>
+        <span class="login-logo-text">XMDM Admin</span>
+      </div>
+      <div class="login-title">{{.Title}}</div>
+      <div class="login-sub">Sign in to manage your device fleet</div>
+      <form method="post" action="{{.Action}}">
+        <input type="hidden" name="csrfToken" value="{{$.CSRFToken}}">
+        {{range .Fields}}
+          <label for="{{.Name}}">{{.Label}}</label>
+          <input id="{{.Name}}" name="{{.Name}}" type="{{.Type}}" value="{{.Value}}" placeholder="{{.Placeholder}}" {{if .Required}}required{{end}} autocomplete="{{if eq .Type "password"}}current-password{{else}}username{{end}}">
+        {{end}}
+        <button type="submit" class="btn-primary">{{.Submit}}</button>
+      </form>
+    </div>
+    <div class="login-footer">XMDM · Mobile Device Management</div>
+    {{end}}
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       AUTHENTICATED LAYOUT — sidebar + content
+  ══════════════════════════════════════════════ -->
+  {{else}}
+  <div class="shell">
+    <nav class="sidebar" id="sidebar">
+      <a href="/admin"              data-path="/admin"><span class="nav-icon">{{navIcon "overview"}}</span> Overview</a>
+      <span class="nav-group-label">Fleet</span>
+      <a href="/admin/devices"      data-path="/admin/devices"><span class="nav-icon">{{navIcon "devices"}}</span> Devices</a>
+      <a href="/admin/policies"     data-path="/admin/policies"><span class="nav-icon">{{navIcon "policies"}}</span> Policies</a>
+      <a href="/admin/groups"       data-path="/admin/groups"><span class="nav-icon">{{navIcon "groups"}}</span> Groups</a>
+      <a href="/admin/commands"     data-path="/admin/commands"><span class="nav-icon">{{navIcon "commands"}}</span> Commands</a>
+      <span class="nav-group-label">Content</span>
+      <a href="/admin/apps"         data-path="/admin/apps"><span class="nav-icon">{{navIcon "apps"}}</span> Apps</a>
+      <a href="/admin/managed-files" data-path="/admin/managed-files"><span class="nav-icon">{{navIcon "managed-files"}}</span> Managed Files</a>
+      <a href="/admin/certificates" data-path="/admin/certificates"><span class="nav-icon">{{navIcon "certificates"}}</span> Certificates</a>
+      <span class="nav-group-label">Identity</span>
+      <a href="/admin/users"        data-path="/admin/users"><span class="nav-icon">{{navIcon "users"}}</span> Users</a>
+      <a href="/admin/roles"        data-path="/admin/roles"><span class="nav-icon">{{navIcon "roles"}}</span> Roles</a>
+      <span class="nav-group-label">Operations</span>
+      <a href="/admin/audit"        data-path="/admin/audit"><span class="nav-icon">{{navIcon "audit"}}</span> Audit</a>
+    </nav>
+
+    <main class="content">
+      <div class="page-header">
+        <div>
+          <h1>{{.Title}}</h1>
+          {{if .Subtitle}}<p class="page-subtitle">{{.Subtitle}}</p>{{end}}
+        </div>
+      </div>
+      {{if .Flash}}<div class="flash">✓ {{.Flash}}</div>{{end}}
+      {{if .Error}}<div class="error">⚠ {{.Error}}</div>{{end}}
+      {{if .Callout}}<section class="panel">{{.Callout}}</section>{{end}}
+
+      {{if .Sections}}<div class="grid">{{range .Sections}}<div class="metric-card"><div class="metric-label">{{.Title}}</div><div class="metric-value">{{.Count}}</div>{{if .Body}}<div class="metric-note">{{.Body}}</div>{{end}}</div>{{end}}</div>{{end}}
+
+      {{range .Forms}}<section class="panel"><h2>{{.Title}}</h2><form method="post" action="{{.Action}}" {{if .EncType}}enctype="{{.EncType}}"{{end}}><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}">{{range .Fields}}{{$field := .}}{{if eq $field.Type "checkbox"}}<label for="{{$field.Name}}">{{$field.Label}}</label><input id="{{$field.Name}}" name="{{$field.Name}}" type="checkbox" value="on" {{if $field.Value}}checked{{end}} aria-labelledby="{{$field.Name}}-label">{{else}}<label for="{{$field.Name}}" id="{{$field.Name}}-label">{{$field.Label}}</label>{{if eq $field.Type "textarea"}}<textarea id="{{$field.Name}}" name="{{$field.Name}}" placeholder="{{$field.Placeholder}}" {{if $field.Required}}required{{end}}>{{$field.Value}}</textarea>{{else if eq $field.Type "select"}}<select id="{{$field.Name}}" name="{{$field.Name}}" {{if $field.Required}}required{{end}}>{{if $field.Placeholder}}<option value="" disabled {{if not $field.Value}}selected{{end}}>{{$field.Placeholder}}</option>{{end}}{{range $field.Options}}<option value="{{.Value}}" {{if eq .Value $field.Value}}selected{{end}}>{{.Label}}</option>{{end}}</select>{{else if eq $field.Type "multiselect"}}<div class="checkbox-group" role="group" aria-label="{{$field.Label}}">{{range $field.Options}}<label class="checkbox-option"><input id="{{$field.Name}}-{{.Value}}" name="{{$field.Name}}" type="checkbox" value="{{.Value}}" {{if containsString $field.Values .Value}}checked{{end}}><span>{{.Label}}</span></label>{{end}}</div>{{else if eq $field.Type "radio"}}<div class="toggle-group" role="radiogroup" aria-label="{{$field.Label}}">{{range $field.Options}}<label class="toggle-option"><input id="{{$field.Name}}-{{.Value}}" name="{{$field.Name}}" type="radio" value="{{.Value}}" {{if eq .Value $field.Value}}checked{{end}}><span>{{.Label}}</span></label>{{end}}</div>{{else}}<input id="{{$field.Name}}" name="{{$field.Name}}" type="{{$field.Type}}" value="{{$field.Value}}" placeholder="{{$field.Placeholder}}" {{if $field.Required}}required{{end}}>{{end}}{{end}}{{end}}{{if .Help}}<div class="field-help">{{.Help}}</div>{{end}}<p><button type="submit" {{if .Danger}}class="danger"{{end}}>{{.Submit}}</button></p>{{if .After}}{{.After}}{{end}}</form></section>{{end}}
+
+      {{if .Items}}<section class="panel"><div class="table-wrap">{{.Items}}</div></section>{{end}}
+    </main>
+  </div>
+  {{end}}
+
+  <script>
+    /* ── theme ── */
+    (function(){
+      var t = localStorage.getItem('xmdm-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+    function toggleTheme(){
+      var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+      localStorage.setItem('xmdm-theme', t);
+    }
+
+    /* ── active nav highlight ── */
+    (function(){
+      var path = window.location.pathname;
+      var links = document.querySelectorAll('#sidebar a[data-path]');
+      /* find the longest prefix match (most specific wins) */
+      var best = null, bestLen = 0;
+      links.forEach(function(a){
+        var p = a.getAttribute('data-path');
+        if(path === p || (path.startsWith(p) && (p === '/admin' ? path === '/admin' : true))){
+          if(p.length > bestLen){ best = a; bestLen = p.length; }
+        }
+      });
+      /* exact-match fallback for /admin root */
+      if(!best){
+        links.forEach(function(a){
+          if(a.getAttribute('data-path') === '/admin' && path === '/admin'){ best = a; }
+        });
+      }
+      if(best) best.classList.add('active');
+    })();
+  </script>
+</body>
+</html>`
+
+func RegisterDashboard(mux httpx.Router, svc *auth.Service, deps DashboardDependencies) {
+	d := &dashboard{svc: svc, deps: deps, tmpl: template.Must(template.New("dashboard").Funcs(template.FuncMap{"containsString": containsString, "navIcon": navIcon}).Parse(dashboardTemplate))}
+	mux.HandleFunc("/admin", d.overview)
+	mux.HandleFunc("/admin/login", d.login)
+	mux.HandleFunc("/admin/logout", d.logout)
+	mux.HandleFunc("/admin/users", d.users)
+	mux.HandleFunc("/admin/users/{id}", d.userDetail)
+	mux.HandleFunc("/admin/users/create", d.createUser)
+	mux.HandleFunc("/admin/users/{id}/update", d.updateUser)
+	mux.HandleFunc("/admin/users/{id}/retire", d.retireUser)
+	mux.HandleFunc("/admin/roles", d.roles)
+	mux.HandleFunc("/admin/roles/{id}", d.roleDetail)
+	mux.HandleFunc("/admin/roles/create", d.createRole)
+	mux.HandleFunc("/admin/roles/{id}/update", d.updateRole)
+	mux.HandleFunc("/admin/roles/{id}/retire", d.retireRole)
+	mux.HandleFunc("/admin/groups", d.groups)
+	mux.HandleFunc("/admin/groups/{id}", d.groupDetail)
+	mux.HandleFunc("/admin/groups/create", d.createGroup)
+	mux.HandleFunc("/admin/groups/{id}/update", d.updateGroup)
+	mux.HandleFunc("/admin/groups/{id}/retire", d.retireGroup)
+	mux.HandleFunc("/admin/policies", d.policies)
+	mux.HandleFunc("/admin/policies/{id}", d.policyDetail)
+	mux.HandleFunc("/admin/policies/create", d.createPolicy)
+	mux.HandleFunc("/admin/policies/{id}/update", d.updatePolicy)
+	mux.HandleFunc("/admin/policies/{id}/retire", d.retirePolicy)
+	mux.HandleFunc("/admin/policies/{id}/apps/{appId}/toggle", d.togglePolicyApp)
+	mux.HandleFunc("/admin/policies/{id}/certificates/{certificateId}/toggle", d.togglePolicyCertificate)
+	mux.HandleFunc("/admin/policies/{id}/managed-files/{managedFileId}/toggle", d.togglePolicyManagedFile)
+	mux.HandleFunc("/admin/devices", d.devices)
+	mux.HandleFunc("/admin/devices/{id}", d.deviceDetail)
+	mux.HandleFunc("/admin/devices/create", d.createDevice)
+	mux.HandleFunc("/admin/devices/{id}/update", d.updateDevice)
+	mux.HandleFunc("/admin/devices/{id}/retire", d.retireDevice)
+	mux.HandleFunc("/admin/devices/{id}/enrollment/qr", d.deviceEnrollmentQR)
+	mux.HandleFunc("/admin/apps", d.apps)
+	mux.HandleFunc("/admin/apps/create", d.createApp)
+	mux.HandleFunc("/admin/apps/{id}", d.appDetail)
+	mux.HandleFunc("/admin/apps/{id}/download", d.downloadApp)
+	mux.HandleFunc("/admin/apps/{id}/update", d.updateApp)
+	mux.HandleFunc("/admin/apps/{id}/retire", d.retireApp)
+	mux.HandleFunc("/admin/apps/{id}/versions/create", d.createAppVersion)
+	mux.HandleFunc("/admin/managed-files", d.managedFiles)
+	mux.HandleFunc("/admin/managed-files/{id}", d.managedFileDetail)
+	mux.HandleFunc("/admin/managed-files/{id}/download", d.downloadManagedFile)
+	mux.HandleFunc("/admin/managed-files/create", d.createManagedFile)
+	mux.HandleFunc("/admin/managed-files/{id}/retire", d.retireManagedFile)
+	mux.HandleFunc("/admin/certificates", d.certificates)
+	mux.HandleFunc("/admin/certificates/{id}", d.certificateDetail)
+	mux.HandleFunc("/admin/certificates/{id}/download", d.downloadCertificate)
+	mux.HandleFunc("/admin/certificates/create", d.createCertificate)
+	mux.HandleFunc("/admin/certificates/{id}/retire", d.retireCertificate)
+	mux.HandleFunc("/admin/commands", d.commands)
+	mux.HandleFunc("/admin/commands/{id}", d.commandDetail)
+	mux.HandleFunc("/admin/commands/create", d.createCommand)
+	mux.HandleFunc("/admin/logs", d.logs)
+	mux.HandleFunc("/admin/device-info", d.deviceInfo)
+	mux.HandleFunc("/admin/audit", d.audit)
+}
+
+func (d *dashboard) login(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		token := issueCSRFCookie(w, r)
+		d.render(w, pageData{
+			Title:     "Login",
+			CSRFToken: token,
+			Forms: []formData{{
+				Title:  "Enter the control plane",
+				Action: "/admin/login",
+				Fields: []fieldData{
+					{Name: "username", Label: "Username", Type: "text", Required: true},
+					{Name: "password", Label: "Password", Type: "password", Required: true},
+				},
+				Submit: "Login",
+			}},
+		})
+	case http.MethodPost:
+		if err := r.ParseForm(); err != nil {
+			d.renderError(w, http.StatusBadRequest, "Login", "invalid form")
+			return
+		}
+		if hasCSRFCookie(r) && !csrfTokenMatches(r) {
+			d.renderError(w, http.StatusForbidden, "Login", "forbidden")
+			return
+		}
+		session, err := d.svc.Login(r.FormValue("username"), r.FormValue("password"))
+		if err == nil {
+			http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: session.ID, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: session.ExpiresAt})
+			http.Redirect(w, r, "/admin", http.StatusSeeOther)
+			return
+		}
+		if !errors.Is(err, auth.ErrInvalidCredentials) || d.deps.Identity == nil {
+			d.renderError(w, http.StatusUnauthorized, "Login", "invalid credentials")
+			return
+		}
+		user, role, userErr := d.deps.Identity.AuthenticateUser(r.Context(), d.deps.TenantID, strings.TrimSpace(r.FormValue("username")), r.FormValue("password"))
+		if userErr != nil {
+			d.renderError(w, http.StatusUnauthorized, "Login", "invalid credentials")
+			return
+		}
+		session = d.svc.IssueSession(user.Email, dashboardPermissions(role.Permissions))
+		http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: session.ID, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: session.ExpiresAt})
+		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (d *dashboard) logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if hasCSRFCookie(r) && !csrfTokenMatches(r) {
+		d.renderError(w, http.StatusForbidden, "Logout", "forbidden")
+		return
+	}
+	if cookie, err := r.Cookie(auth.SessionCookieName); err == nil {
+		d.svc.Logout(cookie.Value)
+	}
+	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+}
+
+func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Overview")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := r.Context()
+	sections := []sectionData{}
+	add := func(title string, count int, note string) {
+		sections = append(sections, sectionData{Title: title, Count: count, Body: template.HTML(template.HTMLEscapeString(note))})
+	}
+	if d.deps.Devices != nil {
+		items, err := d.deps.Devices.ListDevices(ctx, d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
+		}
+		add("Devices", len(items), "Managed fleet records")
+	}
+	if d.deps.Policies != nil {
+		items, err := d.deps.Policies.ListPolicies(ctx, d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
+		}
+		add("Policies", len(items), "Policy definitions")
+	}
+	if d.deps.Apps != nil {
+		items, err := d.deps.Apps.ListApps(ctx, d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
+		}
+		add("Apps", len(items), "Managed packages")
+	}
+	if d.deps.Commands != nil {
+		items, err := d.deps.Commands.ListRecent(ctx, d.deps.TenantID, 25)
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
+		}
+		add("Recent Commands", len(items), "Last 25 command rows")
+	}
+	if d.deps.Audit != nil {
+		items, err := d.deps.Audit.List(ctx, d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
+		}
+		add("Audit Events", len(items), "Immutable admin activity")
+	}
+	d.renderForSession(w, r, session, pageData{Title: "Overview", Sections: sections})
+}
+
+func (d *dashboard) users(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Users")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	items, err := d.deps.Identity.ListUsers(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Users", err)
+		return
+	}
+	roles, err := d.deps.Identity.ListRoles(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Users", err)
+		return
+	}
+	data := pageData{
+		Title:    "Users",
+		Subtitle: "Manage operator accounts and role bindings.",
+		Items:    usersTable(items, roleNameByID(roles), d.csrfToken(r), d.canWrite(session)),
+	}
+	if d.canWrite(session) {
+		data.Forms = []formData{{
+			Title:  "Create user",
+			Action: "/admin/users/create",
+			Fields: []fieldData{
+				{Name: "email", Label: "Email", Type: "email", Placeholder: "operator@example.com", Required: true},
+				{Name: "password", Label: "Password", Type: "password", Placeholder: "password", Required: true},
+				{Name: "roleId", Label: "Role", Type: "select", Placeholder: "Select a role", Options: allRoleOptions(roles), Required: true},
+			},
+			Submit: "Create user",
+		}}
+	}
+	d.renderForSession(w, r, session, data)
+}
+
+func (d *dashboard) userDetail(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "User Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	items, err := d.deps.Identity.ListUsers(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "User Detail", err)
+		return
+	}
+	id := r.PathValue("id")
+	var found *identity.User
+	for i := range items {
+		if items[i].ID == id {
+			found = &items[i]
+			break
+		}
+	}
+	if found == nil {
+		d.renderPageError(w, r, session, "User Detail", httpx.ErrNotFound)
+		return
+	}
+	roles, err := d.deps.Identity.ListRoles(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "User Detail", err)
+		return
+	}
+	data := pageData{
+		Title:    "User Detail",
+		Subtitle: "Edit the operator account or retire it from the active roster.",
+		Items:    template.HTML("<section class=\"panel\"><h2>Current user</h2>" + pre(found) + "</section>"),
+	}
+	if d.canWrite(session) {
+		if found.Status == "active" {
+			data.Forms = []formData{{
+				Title:  "Update user",
+				Action: "/admin/users/" + id + "/update",
+				Fields: []fieldData{
+					{Name: "email", Label: "Email", Type: "email", Value: found.Email, Placeholder: "operator@example.com", Required: true},
+					{Name: "password", Label: "Password", Type: "password", Placeholder: "leave blank to keep the current password"},
+					{Name: "roleId", Label: "Role", Type: "select", Value: found.RoleID, Placeholder: "Select a role", Options: allRoleOptions(roles), Required: true},
+				},
+				Submit: "Update user",
+			}, {
+				Title:  "Retire user",
+				Action: "/admin/users/" + id + "/retire",
+				Submit: "Retire user",
+				Danger: true,
+			}}
+		}
+	}
+	d.renderForSession(w, r, session, data)
+}
+
+func (d *dashboard) createUser(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Users") {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.redirectError(w, r, "/admin/users", "invalid form")
+		return
+	}
+	passwordHash, err := identity.HashPassword(r.FormValue("password"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/users", err.Error())
+		return
+	}
+	rec, err := d.deps.Identity.CreateUser(r.Context(), d.deps.TenantID, identity.UserUpsert{Email: strings.TrimSpace(r.FormValue("email")), PasswordHash: passwordHash, RoleID: strings.TrimSpace(r.FormValue("roleId"))})
+	if err != nil {
+		d.redirectError(w, r, "/admin/users", err.Error())
+		return
+	}
+	d.recordAudit(r, "create", "users", rec.ID, map[string]any{"email": rec.Email, "roleId": rec.RoleID})
+	d.redirectOK(w, r, "/admin/users", "user created")
+}
+
+func (d *dashboard) updateUser(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Users") {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.redirectError(w, r, "/admin/users/"+r.PathValue("id"), "invalid form")
+		return
+	}
+	passwordHash, err := identity.HashPassword(r.FormValue("password"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/users/"+r.PathValue("id"), err.Error())
+		return
+	}
+	rec, err := d.deps.Identity.UpdateUser(r.Context(), d.deps.TenantID, r.PathValue("id"), identity.UserUpsert{Email: strings.TrimSpace(r.FormValue("email")), PasswordHash: passwordHash, RoleID: strings.TrimSpace(r.FormValue("roleId"))})
+	if err != nil {
+		d.redirectError(w, r, "/admin/users/"+r.PathValue("id"), err.Error())
+		return
+	}
+	if rec.Status != "active" {
+		d.redirectError(w, r, "/admin/users/"+r.PathValue("id"), "conflict")
+		return
+	}
+	d.recordAudit(r, "update", "users", rec.ID, map[string]any{"email": rec.Email, "roleId": rec.RoleID})
+	d.redirectOK(w, r, "/admin/users/"+rec.ID, "user updated")
+}
+
+func (d *dashboard) retireUser(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Users") {
+		return
+	}
+	rec, err := d.deps.Identity.RetireUser(r.Context(), d.deps.TenantID, r.PathValue("id"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/users/"+r.PathValue("id"), err.Error())
+		return
+	}
+	d.recordAudit(r, "retire", "users", rec.ID, map[string]any{"status": rec.Status})
+	d.redirectOK(w, r, "/admin/users", "user retired")
+}
+
+func (d *dashboard) roles(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Roles")
+	if !ok {
+		return
+	}
+	items, err := d.deps.Identity.ListRoles(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Roles", err)
+		return
+	}
+	data := pageData{
+		Title:    "Roles",
+		Subtitle: "Define the permission bundles available to operators.",
+		Items:    rolesTable(items, d.csrfToken(r), d.canWrite(session)),
+	}
+	if d.canWrite(session) {
+		data.Forms = []formData{{
+			Title: "Create role", Action: "/admin/roles/create",
+			Fields: []fieldData{{Name: "name", Label: "Name", Type: "text", Placeholder: "operators", Required: true}, {Name: "permissions", Label: "Permissions JSON array", Type: "textarea", Value: `["admin.read"]`, Placeholder: `["admin.read"]`, Required: true}},
+			Help:   permissionsHelp(),
+			Submit: "Create role",
+		}}
+	}
+	d.renderForSession(w, r, session, data)
+}
+
+func (d *dashboard) roleDetail(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Role Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	items, err := d.deps.Identity.ListRoles(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Role Detail", err)
+		return
+	}
+	id := r.PathValue("id")
+	var found *identity.Role
+	for i := range items {
+		if items[i].ID == id {
+			found = &items[i]
+			break
+		}
+	}
+	if found == nil {
+		d.renderPageError(w, r, session, "Role Detail", httpx.ErrNotFound)
+		return
+	}
+	perms, _ := json.Marshal(found.Permissions)
+	data := pageData{
+		Title:    "Role Detail",
+		Subtitle: "Edit the permission bundle or retire it from active use.",
+		Items:    template.HTML("<section class=\"panel\"><h2>Current role</h2>" + pre(found) + "</section>"),
+	}
+	if d.canWrite(session) {
+		if found.Status == "active" {
+			data.Forms = []formData{{
+				Title:  "Update role",
+				Action: "/admin/roles/" + id + "/update",
+				Fields: []fieldData{
+					{Name: "name", Label: "Name", Type: "text", Value: found.Name, Placeholder: "operators", Required: true},
+					{Name: "permissions", Label: "Permissions JSON array", Type: "textarea", Value: string(perms), Placeholder: `["admin.read"]`, Required: true},
+				},
+				Help:   permissionsHelp(),
+				Submit: "Update role",
+			}, {
+				Title:  "Retire role",
+				Action: "/admin/roles/" + id + "/retire",
+				Submit: "Retire role",
+				Danger: true,
+			}}
+		}
+	}
+	d.renderForSession(w, r, session, data)
+}
+
+func (d *dashboard) createRole(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Roles") {
+		return
+	}
+	req, err := roleUpsertFromForm(r)
+	if err != nil {
+		d.redirectError(w, r, "/admin/roles", err.Error())
+		return
+	}
+	rec, err := d.deps.Identity.CreateRole(r.Context(), d.deps.TenantID, req)
+	if err != nil {
+		d.redirectError(w, r, "/admin/roles", err.Error())
+		return
+	}
+	d.recordAudit(r, "create", "roles", rec.ID, map[string]any{"name": rec.Name, "permissions": rec.Permissions})
+	d.redirectOK(w, r, "/admin/roles", "role created")
+}
+
+func (d *dashboard) updateRole(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Roles") {
+		return
+	}
+	req, err := roleUpsertFromForm(r)
+	if err != nil {
+		d.redirectError(w, r, "/admin/roles/"+r.PathValue("id"), err.Error())
+		return
+	}
+	rec, err := d.deps.Identity.UpdateRole(r.Context(), d.deps.TenantID, r.PathValue("id"), req)
+	if err != nil {
+		d.redirectError(w, r, "/admin/roles/"+r.PathValue("id"), err.Error())
+		return
+	}
+	if rec.Status != "active" {
+		d.redirectError(w, r, "/admin/roles/"+r.PathValue("id"), "conflict")
+		return
+	}
+	d.recordAudit(r, "update", "roles", rec.ID, map[string]any{"name": rec.Name, "permissions": rec.Permissions})
+	d.redirectOK(w, r, "/admin/roles/"+rec.ID, "role updated")
+}
+
+func (d *dashboard) retireRole(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Roles") {
+		return
+	}
+	rec, err := d.deps.Identity.RetireRole(r.Context(), d.deps.TenantID, r.PathValue("id"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/roles/"+r.PathValue("id"), err.Error())
+		return
+	}
+	d.recordAudit(r, "retire", "roles", rec.ID, map[string]any{"status": rec.Status})
+	d.redirectOK(w, r, "/admin/roles", "role retired")
+}
+
+func (d *dashboard) groups(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Groups")
+	if !ok {
+		return
+	}
+	items, err := d.deps.Groups.ListGroups(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Groups", err)
+		return
+	}
+	d.renderForSession(w, r, session, pageData{
+		Title:    "Groups",
+		Subtitle: "Define device cohorts and inspect the devices assigned to each cohort.",
+		Forms:    []formData{{Title: "Create group", Action: "/admin/groups/create", Fields: []fieldData{{Name: "name", Label: "Name", Type: "text", Placeholder: "Field Devices", Required: true}}, Submit: "Create group"}},
+		Items:    groupsTable(items, d.csrfToken(r), d.canWrite(session)),
+	})
+}
+
+func (d *dashboard) createGroup(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Groups") {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.redirectError(w, r, "/admin/groups", "invalid form")
+		return
+	}
+	rec, err := d.deps.Groups.CreateGroup(r.Context(), d.deps.TenantID, group.GroupUpsert{Name: strings.TrimSpace(r.FormValue("name"))})
+	if err != nil {
+		d.redirectError(w, r, "/admin/groups", err.Error())
+		return
+	}
+	d.recordAudit(r, "create", "groups", rec.ID, map[string]any{"name": rec.Name})
+	d.redirectOK(w, r, "/admin/groups", "group created")
+}
+
+func (d *dashboard) groupDetail(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Group Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	found, devices, policies, err := d.loadGroupDetail(r.Context(), r.PathValue("id"))
+	if err != nil {
+		d.renderPageError(w, r, session, "Group Detail", err)
+		return
+	}
+	data := d.groupDetailPageData(session, found, devices, policies)
+	d.renderForSession(w, r, session, data)
+}
+
+func (d *dashboard) updateGroup(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Groups") {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.redirectError(w, r, "/admin/groups/"+r.PathValue("id"), "invalid form")
+		return
+	}
+	rec, err := d.deps.Groups.UpdateGroup(r.Context(), d.deps.TenantID, r.PathValue("id"), group.GroupUpsert{Name: strings.TrimSpace(r.FormValue("name"))})
+	if err != nil {
+		d.redirectError(w, r, "/admin/groups/"+r.PathValue("id"), err.Error())
+		return
+	}
+	d.recordAudit(r, "update", "groups", rec.ID, map[string]any{"name": rec.Name})
+	d.redirectOK(w, r, "/admin/groups/"+rec.ID, "group updated")
+}
+
+func (d *dashboard) retireGroup(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Groups") {
+		return
+	}
+	rec, err := d.deps.Groups.RetireGroup(r.Context(), d.deps.TenantID, r.PathValue("id"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/groups", err.Error())
+		return
+	}
+	d.recordAudit(r, "retire", "groups", rec.ID, map[string]any{"status": rec.Status})
+	d.redirectOK(w, r, "/admin/groups", "group retired")
+}
+
+func (d *dashboard) loadGroupDetail(ctx context.Context, id string) (*group.Group, []device.Device, []policy.Policy, error) {
+	groups, err := d.deps.Groups.ListGroups(ctx, d.deps.TenantID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var found *group.Group
+	for i := range groups {
+		if groups[i].ID == id {
+			found = &groups[i]
+			break
+		}
+	}
+	if found == nil {
+		return nil, nil, nil, httpx.ErrNotFound
+	}
+	devices := []device.Device{}
+	if d.deps.Devices != nil {
+		devices, err = d.deps.Devices.ListDevices(ctx, d.deps.TenantID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		devices = groupDevicesFor(found.ID, devices)
+	}
+	policies := []policy.Policy{}
+	if d.deps.Policies != nil {
+		policies, err = d.deps.Policies.ListPolicies(ctx, d.deps.TenantID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return found, devices, policies, nil
+}
+
+func (d *dashboard) groupDetailPageData(session *auth.Session, found *group.Group, devices []device.Device, policies []policy.Policy) pageData {
+	body := "<section class=\"panel\"><h2>Current group</h2>" + pre(found) + "</section>"
+	if len(devices) > 0 {
+		body += "<section class=\"panel\"><h2>Member devices</h2>" + string(devicesTable(devices, policies, "", false)) + "</section>"
+	} else {
+		body += `<section class="panel"><h2>Member devices</h2><p class="muted">No devices are linked to this group.</p></section>`
+	}
+	data := pageData{
+		Title:    "Group Detail",
+		Subtitle: "Review the cohort, then update or retire it from this page.",
+		Items:    template.HTML(body),
+	}
+	if d.canWrite(session) && found.Status != "retired" {
+		data.Forms = []formData{{
+			Title:  "Update group",
+			Action: "/admin/groups/" + found.ID + "/update",
+			Fields: []fieldData{{Name: "name", Label: "Name", Type: "text", Value: found.Name, Placeholder: "Field Devices", Required: true}},
+			Submit: "Update group",
+		}, {
+			Title:  "Retire group",
+			Action: "/admin/groups/" + found.ID + "/retire",
+			Submit: "Retire group",
+			Danger: true,
+		}}
+	}
+	return data
+}
+
+func (d *dashboard) policies(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Policies")
+	if !ok {
+		return
+	}
+	items, err := d.deps.Policies.ListPolicies(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Policies", err)
+		return
+	}
+	d.renderForSession(w, r, session, pageData{
+		Title:    "Policies",
+		Subtitle: "Define kiosk behavior and package rules before devices enroll.",
+		Forms: []formData{{
+			Title:  "Create policy",
+			Action: "/admin/policies/create",
+			Fields: policyFields(policy.Policy{}),
+			Submit: "Create policy",
+		}},
+		Items: policiesTable(items, d.csrfToken(r), d.canWrite(session)),
+	})
+}
+
+func (d *dashboard) policyDetail(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Policy Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	found, err := d.deps.Policies.GetPolicy(r.Context(), d.deps.TenantID, id)
+	if err != nil {
+		d.renderPageError(w, r, session, "Policy Detail", err)
+		return
+	}
+	apps, appAssignments, certificatesList, certificateAssignments, managedFiles, managedFileAssignments, err := d.loadPolicyDetailPolicyContent(r.Context(), found.ID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Policy Detail", err)
+		return
+	}
+	data := d.policyDetailPageData(session, d.csrfToken(r), found, apps, appAssignments, certificatesList, certificateAssignments, managedFiles, managedFileAssignments)
+	d.renderForSession(w, r, session, data)
+}
+
+func (d *dashboard) loadPolicyDetailPolicyContent(ctx context.Context, policyID string) ([]apps.App, []policy.PolicyApp, []certificates.Certificate, []policy.PolicyCertificate, []managedfiles.ManagedFile, []policy.PolicyManagedFile, error) {
+	appsList := []apps.App{}
+	if d.deps.Apps != nil {
+		var err error
+		appsList, err = d.deps.Apps.ListApps(ctx, d.deps.TenantID)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, err
+		}
+	}
+	assignments := []policy.PolicyApp{}
+	if d.deps.Policies != nil {
+		var err error
+		assignments, err = d.deps.Policies.ListPolicyApps(ctx, d.deps.TenantID, policyID)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, err
+		}
+	}
+	certificatesList := []certificates.Certificate{}
+	if d.deps.Certificates != nil {
+		var err error
+		certificatesList, err = d.deps.Certificates.ListCertificates(ctx, d.deps.TenantID)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, err
+		}
+	}
+	certificateAssignments := []policy.PolicyCertificate{}
+	if d.deps.Policies != nil {
+		var err error
+		certificateAssignments, err = d.deps.Policies.ListPolicyCertificates(ctx, d.deps.TenantID, policyID)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, err
+		}
+	}
+	managedFilesList := []managedfiles.ManagedFile{}
+	if d.deps.ManagedFiles != nil {
+		var err error
+		managedFilesList, err = d.deps.ManagedFiles.ListManagedFiles(ctx, d.deps.TenantID)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, err
+		}
+	}
+	managedFileAssignments := []policy.PolicyManagedFile{}
+	if d.deps.Policies != nil {
+		var err error
+		managedFileAssignments, err = d.deps.Policies.ListPolicyManagedFiles(ctx, d.deps.TenantID, policyID)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, err
+		}
+	}
+	return appsList, assignments, certificatesList, certificateAssignments, managedFilesList, managedFileAssignments, nil
+}
+
+func (d *dashboard) togglePolicyApp(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Policy Detail") {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.redirectError(w, r, "/admin/policies/"+r.PathValue("id"), "invalid form")
+		return
+	}
+	policyID := r.PathValue("id")
+	appID := r.PathValue("appId")
+	items, err := d.deps.Policies.ListPolicyApps(r.Context(), d.deps.TenantID, policyID)
+	if err != nil {
+		d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+		return
+	}
+	active := false
+	for _, item := range items {
+		if item.AppID == appID && item.Status == policy.StatusActive {
+			active = true
+			break
+		}
+	}
+	message := "app enabled"
+	action := "update"
+	if active {
+		if err := d.deps.Policies.RemovePolicyApp(r.Context(), d.deps.TenantID, policyID, appID); err != nil {
+			d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+			return
+		}
+		message = "app disabled"
+	} else {
+		if _, err := d.deps.Policies.AddPolicyApp(r.Context(), d.deps.TenantID, policyID, appID); err != nil {
+			d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+			return
+		}
+	}
+	d.recordAudit(r, action, "policy_apps", policyID+":"+appID, map[string]any{"policyId": policyID, "appId": appID, "enabled": !active})
+	d.redirectOK(w, r, "/admin/policies/"+policyID, message)
+}
+
+func (d *dashboard) togglePolicyCertificate(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Policy Detail") {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.redirectError(w, r, "/admin/policies/"+r.PathValue("id"), "invalid form")
+		return
+	}
+	policyID := r.PathValue("id")
+	certificateID := r.PathValue("certificateId")
+	items, err := d.deps.Policies.ListPolicyCertificates(r.Context(), d.deps.TenantID, policyID)
+	if err != nil {
+		d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+		return
+	}
+	active := false
+	for _, item := range items {
+		if item.CertificateID == certificateID && item.Status == policy.StatusActive {
+			active = true
+			break
+		}
+	}
+	message := "certificate enabled"
+	action := "update"
+	if active {
+		if err := d.deps.Policies.RemovePolicyCertificate(r.Context(), d.deps.TenantID, policyID, certificateID); err != nil {
+			d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+			return
+		}
+		message = "certificate disabled"
+	} else {
+		if _, err := d.deps.Policies.AddPolicyCertificate(r.Context(), d.deps.TenantID, policyID, certificateID); err != nil {
+			d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+			return
+		}
+	}
+	d.recordAudit(r, action, "policy_certificates", policyID+":"+certificateID, map[string]any{"policyId": policyID, "certificateId": certificateID, "enabled": !active})
+	d.redirectOK(w, r, "/admin/policies/"+policyID, message)
+}
+
+func (d *dashboard) togglePolicyManagedFile(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Policy Detail") {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.redirectError(w, r, "/admin/policies/"+r.PathValue("id"), "invalid form")
+		return
+	}
+	policyID := r.PathValue("id")
+	managedFileID := r.PathValue("managedFileId")
+	items, err := d.deps.Policies.ListPolicyManagedFiles(r.Context(), d.deps.TenantID, policyID)
+	if err != nil {
+		d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+		return
+	}
+	active := false
+	for _, item := range items {
+		if item.ManagedFileID == managedFileID && item.Status == policy.StatusActive {
+			active = true
+			break
+		}
+	}
+	message := "managed file enabled"
+	action := "update"
+	if active {
+		if err := d.deps.Policies.RemovePolicyManagedFile(r.Context(), d.deps.TenantID, policyID, managedFileID); err != nil {
+			d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+			return
+		}
+		message = "managed file disabled"
+	} else {
+		if _, err := d.deps.Policies.AddPolicyManagedFile(r.Context(), d.deps.TenantID, policyID, managedFileID); err != nil {
+			d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+			return
+		}
+	}
+	d.recordAudit(r, action, "policy_managed_files", policyID+":"+managedFileID, map[string]any{"policyId": policyID, "managedFileId": managedFileID, "enabled": !active})
+	d.redirectOK(w, r, "/admin/policies/"+policyID, message)
+}
+
+func (d *dashboard) createPolicy(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Policies") {
+		return
+	}
+	req, err := policyUpsertFromForm(r, nil)
+	if err != nil {
+		d.redirectError(w, r, "/admin/policies", err.Error())
+		return
+	}
+	rec, err := d.deps.Policies.CreatePolicy(r.Context(), d.deps.TenantID, req)
+	if err != nil {
+		d.redirectError(w, r, "/admin/policies", err.Error())
+		return
+	}
+	d.recordAudit(r, "create", "policies", rec.ID, map[string]any{"name": rec.Name, "version": rec.Version})
+	d.redirectOK(w, r, "/admin/policies", "policy created")
+}
+
+func (d *dashboard) updatePolicy(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Policies") {
+		return
+	}
+	existing, err := d.deps.Policies.GetPolicy(r.Context(), d.deps.TenantID, r.PathValue("id"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/policies/"+r.PathValue("id"), err.Error())
+		return
+	}
+	req, err := policyUpsertFromForm(r, &existing)
+	if err != nil {
+		d.redirectError(w, r, "/admin/policies/"+r.PathValue("id"), err.Error())
+		return
+	}
+	rec, err := d.deps.Policies.UpdatePolicy(r.Context(), d.deps.TenantID, r.PathValue("id"), req)
+	if err != nil {
+		d.redirectError(w, r, "/admin/policies/"+r.PathValue("id"), err.Error())
+		return
+	}
+	d.recordAudit(r, "update", "policies", rec.ID, map[string]any{"name": rec.Name, "version": rec.Version})
+	d.redirectOK(w, r, "/admin/policies/"+rec.ID, "policy updated")
+}
+
+func (d *dashboard) retirePolicy(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Policies") {
+		return
+	}
+	rec, err := d.deps.Policies.RetirePolicy(r.Context(), d.deps.TenantID, r.PathValue("id"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/policies/"+r.PathValue("id"), err.Error())
+		return
+	}
+	d.recordAudit(r, "retire", "policies", rec.ID, map[string]any{"status": rec.Status})
+	d.redirectOK(w, r, "/admin/policies/"+rec.ID, "policy retired")
+}
+
+func (d *dashboard) devices(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Devices")
+	if !ok {
+		return
+	}
+	items, err := d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Devices", err)
+		return
+	}
+	policies := []policy.Policy{}
+	if d.deps.Policies != nil {
+		policies, err = d.deps.Policies.ListPolicies(r.Context(), d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Devices", err)
+			return
+		}
+	}
+	groups := []group.Group{}
+	if d.deps.Groups != nil {
+		groups, err = d.deps.Groups.ListGroups(r.Context(), d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Devices", err)
+			return
+		}
+	}
+	d.renderForSession(w, r, session, pageData{
+		Title: "Devices",
+		Forms: []formData{{
+			Title:  "Create device",
+			Action: "/admin/devices/create",
+			Fields: []fieldData{
+				{Name: "name", Label: "Display name", Type: "text", Placeholder: "warehouse-tablet-001", Required: true},
+				{Name: "policyId", Label: "Policy", Type: "select", Placeholder: "Select a policy", Options: allPolicyOptions(policies), Required: true},
+				{Name: "groupIds", Label: "Groups", Type: "multiselect", Placeholder: "Select one or more groups", Options: activeGroupOptions(groups)},
+			},
+			Help:   "",
+			Submit: "Create device",
+		}},
+		Items: devicesTable(items, policies, d.csrfToken(r), d.canWrite(session)),
+	})
+}
+
+func (d *dashboard) deviceDetail(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Device Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	devices, err := d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Device Detail", err)
+		return
+	}
+	var found *device.Device
+	for i := range devices {
+		if devices[i].ID == id {
+			found = &devices[i]
+			break
+		}
+	}
+	if found == nil {
+		d.renderPageError(w, r, session, "Device Detail", httpx.ErrNotFound)
+		return
+	}
+	policies := []policy.Policy{}
+	if d.deps.Policies != nil {
+		policies, err = d.deps.Policies.ListPolicies(r.Context(), d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Device Detail", err)
+			return
+		}
+	}
+	groups := []group.Group{}
+	if d.deps.Groups != nil {
+		groups, err = d.deps.Groups.ListGroups(r.Context(), d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Device Detail", err)
+			return
+		}
+	}
+	data := d.deviceDetailPageData(r, session, found, policies, groups, "")
+	d.renderForSession(w, r, session, data)
+}
+
+func (d *dashboard) deviceEnrollmentQR(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Device Detail") {
+		return
+	}
+	session, ok := sessionFromRequest(r, d.svc)
+	if !ok {
+		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+		return
+	}
+	id := r.PathValue("id")
+	found, policies, groups, err := d.loadDeviceDetail(r.Context(), id)
+	if err != nil {
+		d.renderPageError(w, r, session, "Device Detail", err)
+		return
+	}
+	if found.Status != device.StatusPending {
+		d.renderPageError(w, r, session, "Device Detail", fmt.Errorf("device must be pending"))
+		return
+	}
+	state := deviceEnrollmentQRState(firstNonEmpty(found.DeviceID, found.Name))
+	result, err := d.generateEnrollmentQR(r.Context(), state)
+	if err != nil {
+		d.renderPageError(w, r, session, "Device Detail", err)
+		return
+	}
+	d.recordAudit(r, "create", "enrollment_tokens", result.Issued.ID, map[string]any{"expiresAt": result.Issued.ExpiresAt, "deviceId": firstNonEmpty(found.DeviceID, found.Name)})
+	data := d.deviceDetailPageData(r, session, found, policies, groups, enrollmentQRCallout(result))
+	data.Flash = "QR generated"
+	d.renderForSession(w, r, session, data)
+}
+
+func (d *dashboard) loadDeviceDetail(ctx context.Context, id string) (*device.Device, []policy.Policy, []group.Group, error) {
+	devices, err := d.deps.Devices.ListDevices(ctx, d.deps.TenantID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var found *device.Device
+	for i := range devices {
+		if devices[i].ID == id {
+			found = &devices[i]
+			break
+		}
+	}
+	if found == nil {
+		return nil, nil, nil, httpx.ErrNotFound
+	}
+	policies := []policy.Policy{}
+	if d.deps.Policies != nil {
+		policies, err = d.deps.Policies.ListPolicies(ctx, d.deps.TenantID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	groups := []group.Group{}
+	if d.deps.Groups != nil {
+		groups, err = d.deps.Groups.ListGroups(ctx, d.deps.TenantID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return found, policies, groups, nil
+}
+
+func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session, found *device.Device, policies []policy.Policy, groups []group.Group, callout template.HTML) pageData {
+	body := "<section class=\"panel\"><h2>Current device</h2>" + pre(found) + "</section>"
+	policyMap := policyNameByID(policies)
+	policyID := firstPolicyID(found.PolicyID)
+	if policyID != "" {
+		if rec, ok := policyMap[policyID]; ok {
+			var b strings.Builder
+			label := rec.Name
+			if strings.TrimSpace(label) == "" {
+				label = rec.ID
+			}
+			b.WriteString(`<section class="panel"><h2>Active policy</h2><div class="policy-summary">`)
+			b.WriteString(summaryTextItem("Created", formatDashboardTime(rec.CreatedAt)))
+			b.WriteString(summaryTextItem("ID", rec.ID))
+			b.WriteString(`<div class="policy-summary-item"><div class="policy-summary-label">Name</div><div class="policy-summary-value"><a href="/admin/policies/` + escAttr(rec.ID) + `">` + esc(label) + `</a></div></div>`)
+			b.WriteString(summaryTextItem("Version", strconv.Itoa(rec.Version)))
+			b.WriteString(summaryHTMLItem("Kiosk mode", template.HTML(boolBadge(rec.KioskMode, "enabled", "disabled"))))
+			b.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(rec.Status))))
+			b.WriteString(`</div></section>`)
+			body += b.String()
+		} else {
+			body += `<section class="panel"><h2>Active policy</h2><p class="muted">` + esc(policyID) + `</p></section>`
+		}
+	} else {
+		body += `<section class="panel"><h2>Active policy</h2><p class="muted">No policy linked.</p></section>`
+	}
+	if len(found.GroupIDs) > 0 {
+		groupMap := groupNameByID(groups)
+		var b strings.Builder
+		b.WriteString(`<section class="panel"><h2>Assigned groups</h2><div class="policy-summary">`)
+		for _, groupID := range found.GroupIDs {
+			label := groupID
+			if rec, ok := groupMap[groupID]; ok && strings.TrimSpace(rec.Name) != "" {
+				label = rec.Name
+			}
+			b.WriteString(summaryTextItem("Group", label))
+		}
+		b.WriteString(`</div></section>`)
+		body += b.String()
+	} else {
+		body += `<section class="panel"><h2>Assigned groups</h2><p class="muted">No groups linked.</p></section>`
+	}
+	body += string(d.deviceConfigPreviewSection(r.Context(), found))
+	deviceKey := firstNonEmpty(found.DeviceID, found.Name)
+	deviceRowID := found.RecordID()
+	if d.deps.Logs != nil {
+		rows, _ := d.deps.Logs.Search(r.Context(), d.deps.TenantID, logs.SearchFilter{DeviceID: deviceKey, Limit: 10})
+		body += "<section class=\"panel\"><h2>Recent logs</h2>" + pre(rows) + "</section>"
+	}
+	if d.deps.DeviceInfo != nil {
+		rows, _ := d.deps.DeviceInfo.Search(r.Context(), d.deps.TenantID, deviceinfo.SearchFilter{DeviceID: deviceKey, Limit: 10})
+		body += "<section class=\"panel\"><h2>Recent device info</h2>" + pre(rows) + "</section>"
+	}
+	if d.deps.Commands != nil {
+		rows, _ := d.deps.Commands.ListPending(r.Context(), d.deps.TenantID, deviceRowID)
+		body += "<section class=\"panel\"><h2>Pending commands</h2>" + pre(rows) + "</section>"
+	}
+	data := pageData{
+		Title:    "Device Detail",
+		Subtitle: "Edit the device label or retire it from active use.",
+		Items:    template.HTML(body),
+	}
+	if d.canWrite(session) && found.Status != device.StatusRetired && found.Status != device.StatusWiped {
+		policyID := ""
+		if found.PolicyID != nil {
+			policyID = *found.PolicyID
+		}
+		options := allPolicyOptions(policies)
+		if policyID != "" {
+			foundPolicy := false
+			for _, option := range options {
+				if option.Value == policyID {
+					foundPolicy = true
+					break
+				}
+			}
+			if !foundPolicy {
+				options = append(options, optionData{Value: policyID, Label: policyID})
+			}
+		}
+		groupOptions := activeGroupOptions(groups)
+		if len(found.GroupIDs) > 0 {
+			for _, groupID := range found.GroupIDs {
+				foundGroup := false
+				for _, option := range groupOptions {
+					if option.Value == groupID {
+						foundGroup = true
+						break
+					}
+				}
+				if !foundGroup {
+					groupOptions = append(groupOptions, optionData{Value: groupID, Label: groupID})
+				}
+			}
+		}
+		data.Forms = []formData{{
+			Title:  "Update device",
+			Action: "/admin/devices/" + found.ID + "/update",
+			Fields: []fieldData{
+				{Name: "name", Label: "Display name", Type: "text", Value: found.Name, Placeholder: "warehouse-tablet-001", Required: true},
+				{Name: "policyId", Label: "Policy", Type: "select", Value: policyID, Placeholder: "Select a policy", Options: options, Required: true},
+				{Name: "groupIds", Label: "Groups", Type: "multiselect", Values: append([]string(nil), found.GroupIDs...), Placeholder: "Select one or more groups", Options: groupOptions},
+			},
+			Submit: "Update device",
+		}, {
+			Title:  "Retire device",
+			Action: "/admin/devices/" + found.ID + "/retire",
+			Submit: "Retire device",
+			Danger: true,
+		}}
+	}
+	if d.canWrite(session) && found.Status == device.StatusPending {
+		form := deviceEnrollmentQRForm(found.ID)
+		form.After = callout
+		data.Forms = append(data.Forms, form)
+	}
+	return data
+}
+
+func (d *dashboard) deviceConfigPreviewSection(ctx context.Context, found *device.Device) template.HTML {
+	if found == nil || found.PolicyID == nil || strings.TrimSpace(*found.PolicyID) == "" {
+		return ""
+	}
+	if d.deps.Policies == nil {
+		return `<section class="panel"><h2>Config preview</h2><p class="muted">Preview unavailable until policy data is configured.</p></section>`
+	}
+	deviceKey := firstNonEmpty(found.DeviceID, found.Name)
+	config, err := enrollmenthttp.BuildConfigSnapshot(ctx, d.deps.Policies, d.deps.Apps, d.deps.ManagedFiles, d.deps.Artifacts, d.deps.Certificates, d.deps.TenantID, deviceKey, found.PolicyID, found.BootstrapExtras, d.deps.Runtime)
+	if err != nil {
+		return template.HTML(`<section class="panel"><h2>Config preview</h2><p class="muted">Preview unavailable: ` + esc(err.Error()) + `</p></section>`)
+	}
+	preview := struct {
+		Version      string                           `json:"version"`
+		Runtime      enrollment.RuntimeSnapshot       `json:"runtime,omitempty"`
+		Device       enrollment.DeviceSnapshot        `json:"device"`
+		Policy       enrollment.PolicySnapshot        `json:"policy"`
+		Apps         []enrollment.AppSnapshot         `json:"apps"`
+		Files        []enrollment.ManagedFileSnapshot `json:"files"`
+		Certificates []enrollment.CertificateSnapshot `json:"certificates"`
+	}{
+		Version:      config.Version,
+		Runtime:      config.Runtime,
+		Device:       config.Device,
+		Policy:       config.Policy,
+		Apps:         config.Apps,
+		Files:        config.Files,
+		Certificates: config.Certificates,
+	}
+	var b strings.Builder
+	b.WriteString(`<section class="panel"><h2>Config preview</h2><p class="muted">Unsigned preview built from the current policy, app, file, and certificate inputs.</p><div class="policy-summary">`)
+	b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">JSON</div><div class="policy-summary-value">` + pre(preview) + `</div></div>`)
+	b.WriteString(`</div></section>`)
+	return template.HTML(b.String())
+}
+
+func (d *dashboard) createDevice(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Devices") {
+		return
+	}
+	req, err := deviceUpsertFromForm(r)
+	if err != nil {
+		d.redirectError(w, r, "/admin/devices", err.Error())
+		return
+	}
+	if strings.TrimSpace(req.PolicyID) == "" {
+		d.redirectError(w, r, "/admin/devices", "policy is required")
+		return
+	}
+	if d.deps.Groups == nil && len(req.GroupIDs) > 0 {
+		d.redirectError(w, r, "/admin/devices", "groups are unavailable")
+		return
+	}
+	if strings.TrimSpace(req.SecretHash) == "" {
+		secret, err := enrollment.NewTokenSecret()
+		if err != nil {
+			d.redirectError(w, r, "/admin/devices", err.Error())
+			return
+		}
+		req.SecretHash = enrollment.HashToken(secret)
+	}
+	rec, err := d.deps.Devices.CreateDevice(r.Context(), d.deps.TenantID, req)
+	if err != nil {
+		d.redirectError(w, r, "/admin/devices", err.Error())
+		return
+	}
+	d.recordAudit(r, "create", "devices", rec.ID, map[string]any{"name": rec.Name, "deviceId": rec.DeviceID, "policyId": firstPolicyID(rec.PolicyID), "groupIds": req.GroupIDs})
+	d.redirectOK(w, r, "/admin/devices", "device created")
+}
+
+func (d *dashboard) updateDevice(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Devices") {
+		return
+	}
+	req, err := deviceUpsertFromForm(r)
+	if err != nil {
+		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), err.Error())
+		return
+	}
+	if strings.TrimSpace(req.PolicyID) == "" {
+		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), "policy is required")
+		return
+	}
+	if strings.TrimSpace(req.SecretHash) != "" {
+		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), "device secret rotation is disabled")
+		return
+	}
+	devices, err := d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), err.Error())
+		return
+	}
+	var found *device.Device
+	for i := range devices {
+		if devices[i].ID == r.PathValue("id") {
+			found = &devices[i]
+			break
+		}
+	}
+	if found == nil {
+		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), "not found")
+		return
+	}
+	if found.Status == device.StatusRetired || found.Status == device.StatusWiped {
+		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), "conflict")
+		return
+	}
+	rec, err := d.deps.Devices.UpdateDevice(r.Context(), d.deps.TenantID, r.PathValue("id"), req)
+	if err != nil {
+		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), err.Error())
+		return
+	}
+	d.recordAudit(r, "update", "devices", rec.ID, map[string]any{"name": rec.Name, "deviceId": rec.DeviceID, "policyId": firstPolicyID(rec.PolicyID)})
+	d.redirectOK(w, r, "/admin/devices/"+rec.ID, "device updated")
+}
+
+func (d *dashboard) retireDevice(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Devices") {
+		return
+	}
+	rec, err := d.deps.Devices.RetireDevice(r.Context(), d.deps.TenantID, r.PathValue("id"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/devices", err.Error())
+		return
+	}
+	d.recordAudit(r, "retire", "devices", rec.ID, map[string]any{"status": rec.Status})
+	d.redirectOK(w, r, "/admin/devices", "device retired")
+}
+
+func (d *dashboard) apps(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Apps")
+	if !ok {
+		return
+	}
+	items, err := d.deps.Apps.ListApps(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Apps", err)
+		return
+	}
+	versions := map[string][]apps.Version{}
+	for _, item := range items {
+		rows, _ := d.deps.Apps.ListVersions(r.Context(), d.deps.TenantID, item.ID)
+		versions[item.ID] = rows
+	}
+	d.renderForSession(w, r, session, pageData{Title: "Apps", Forms: []formData{managedAppForm("/admin/apps/create")}, Items: appsTable(items, versions)})
+}
+
+func (d *dashboard) appDetail(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "App Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	found, versions, err := d.loadAppDetail(r.Context(), r.PathValue("id"))
+	if err != nil {
+		d.renderPageError(w, r, session, "App Detail", err)
+		return
+	}
+	data := d.appDetailPageData(session, found, versions)
+	d.renderForSession(w, r, session, data)
+}
+
+func (d *dashboard) loadAppDetail(ctx context.Context, id string) (*apps.App, []apps.Version, error) {
+	found, err := d.deps.Apps.GetApp(ctx, d.deps.TenantID, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	versions, err := d.deps.Apps.ListVersions(ctx, d.deps.TenantID, found.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &found, versions, nil
+}
+
+func (d *dashboard) appDetailPageData(session *auth.Session, found *apps.App, versions []apps.Version) pageData {
+	latest := appLatestPublishedVersion(versions)
+	body := "<section class=\"panel\"><h2>Current app</h2>" + appSummary(*found, latest) + "</section>"
+	if len(versions) > 0 {
+		body += "<section class=\"panel\"><h2>Versions</h2>" + appVersionsTable(versions) + "</section>"
+	}
+	data := pageData{
+		Title:    "App Detail",
+		Subtitle: "Edit the app metadata or retire it from active use.",
+		Items:    template.HTML(body),
+	}
+	if d.canWrite(session) && found.Status != apps.StatusRetired {
+		data.Forms = []formData{{
+			Title:  "Update app",
+			Action: "/admin/apps/" + found.ID + "/update",
+			Fields: []fieldData{
+				{Name: "packageName", Label: "Package name", Type: "text", Value: found.PackageName, Placeholder: "com.example.app", Required: true},
+				{Name: "name", Label: "App name", Type: "text", Value: found.Name, Placeholder: "Example App", Required: true},
+			},
+			Submit: "Update app",
+		}, {
+			Title:  "Retire app",
+			Action: "/admin/apps/" + found.ID + "/retire",
+			Submit: "Retire app",
+			Danger: true,
+		}}
+	}
+	return data
+}
+
+func (d *dashboard) downloadApp(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "App Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if d.deps.Artifacts == nil || d.deps.Apps == nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	found, versions, err := d.loadAppDetail(r.Context(), r.PathValue("id"))
+	if err != nil {
+		d.renderPageError(w, r, session, "App Detail", err)
+		return
+	}
+	latest := appLatestPublishedVersion(versions)
+	if latest == nil {
+		http.NotFound(w, r)
+		return
+	}
+	latestVersion, err := d.deps.Apps.GetVersion(r.Context(), d.deps.TenantID, found.ID, latest.ID)
+	if err != nil {
+		d.renderPageError(w, r, session, "App Detail", err)
+		return
+	}
+	if latestVersion.Artifact == nil {
+		http.NotFound(w, r)
+		return
+	}
+	body, err := d.deps.Artifacts.Get(r.Context(), latestVersion.Artifact.StorageKey)
+	if err != nil {
+		d.renderPageError(w, r, session, "App Detail", err)
+		return
+	}
+	defer body.Close()
+	content, err := io.ReadAll(body)
+	if err != nil {
+		d.renderPageError(w, r, session, "App Detail", err)
+		return
+	}
+	w.Header().Set("Content-Type", latestVersion.Artifact.MimeType)
+	w.Header().Set("Content-Length", strconv.FormatInt(int64(len(content)), 10))
+	w.Header().Set("X-XMDM-Artifact-Checksum", checksum.SHA256Base64URL(content))
+	w.Header().Set("X-XMDM-Artifact-Size", strconv.FormatInt(int64(len(content)), 10))
+	downloadName := found.PackageName
+	if downloadName == "" {
+		downloadName = found.Name
+	}
+	if downloadName == "" {
+		downloadName = found.ID
+	}
+	if latestVersion.VersionName != "" {
+		downloadName += "-" + latestVersion.VersionName
+	}
+	downloadName += ".apk"
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadName))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, bytes.NewReader(content))
+}
+
+func (d *dashboard) createApp(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Apps") {
+		return
+	}
+	req, content, err := managedAppUpsertFromMultipart(r)
+	if err != nil {
+		d.redirectError(w, r, "/admin/apps", err.Error())
+		return
+	}
+	appRec, existingVersion, reusedExisting, err := d.findManagedAppForCreate(r.Context(), req.App, req.VersionCode, req.File.Checksum)
+	if err != nil {
+		d.redirectError(w, r, "/admin/apps", err.Error())
+		return
+	}
+	if existingVersion != nil {
+		d.recordAudit(r, "create", "apps", appRec.ID, map[string]any{
+			"packageName": appRec.PackageName,
+			"name":        appRec.Name,
+			"versionId":   existingVersion.ID,
+			"versionName": existingVersion.VersionName,
+			"versionCode": existingVersion.VersionCode,
+			"artifactId":  existingVersion.ArtifactID,
+		})
+		d.redirectOK(w, r, "/admin/apps/"+appRec.ID, "managed app already up to date")
+		return
+	}
+	if len(content) > 0 {
+		if err := d.deps.Artifacts.Put(r.Context(), req.StorageKey, bytes.NewReader(content), req.MimeType, req.SizeBytes); err != nil {
+			d.redirectError(w, r, "/admin/apps", err.Error())
+			return
+		}
+	}
+	fileRec, err := d.deps.Files.CreateFile(r.Context(), d.deps.TenantID, req.File)
+	if err != nil {
+		_ = d.deps.Artifacts.Delete(r.Context(), req.StorageKey)
+		d.redirectError(w, r, "/admin/apps", err.Error())
+		return
+	}
+	artifactID := fileRec.ArtifactID
+	versionRec, err := d.deps.Apps.CreateVersion(r.Context(), d.deps.TenantID, appRec.ID, apps.VersionUpsert{
+		VersionName: req.VersionName,
+		VersionCode: req.VersionCode,
+		ArtifactID:  &artifactID,
+		Checksum:    fileRec.Checksum,
+		Publish:     req.Publish,
+	})
+	if err != nil {
+		_, _ = d.deps.Files.RetireFile(r.Context(), d.deps.TenantID, fileRec.ID)
+		_ = d.deps.Artifacts.Delete(r.Context(), req.StorageKey)
+		if !reusedExisting {
+			_, _ = d.deps.Apps.RetireApp(r.Context(), d.deps.TenantID, appRec.ID)
+		}
+		d.redirectError(w, r, "/admin/apps", err.Error())
+		return
+	}
+	d.recordAudit(r, "create", "apps", appRec.ID, map[string]any{
+		"packageName": appRec.PackageName,
+		"name":        appRec.Name,
+		"versionId":   versionRec.ID,
+		"versionName": versionRec.VersionName,
+		"versionCode": versionRec.VersionCode,
+		"artifactId":  fileRec.ArtifactID,
+		"fileName":    fileRec.Name,
+	})
+	d.redirectOK(w, r, "/admin/apps/"+appRec.ID, "managed app created")
+}
+
+func (d *dashboard) findManagedAppForCreate(ctx context.Context, appReq apps.AppUpsert, versionCode int64, checksumValue string) (apps.App, *apps.Version, bool, error) {
+	items, err := d.deps.Apps.ListApps(ctx, d.deps.TenantID)
+	if err != nil {
+		return apps.App{}, nil, false, err
+	}
+	for _, item := range items {
+		if item.PackageName != appReq.PackageName {
+			continue
+		}
+		if item.Status != apps.StatusActive {
+			return apps.App{}, nil, false, fmt.Errorf("app package already exists")
+		}
+		versions, err := d.deps.Apps.ListVersions(ctx, d.deps.TenantID, item.ID)
+		if err != nil {
+			return apps.App{}, nil, false, err
+		}
+		for _, version := range versions {
+			if version.VersionCode == versionCode {
+				if version.Checksum != checksumValue {
+					return apps.App{}, nil, false, fmt.Errorf("app version already exists with different content")
+				}
+				return item, &version, true, nil
+			}
+		}
+		return item, nil, true, nil
+	}
+	rec, err := d.deps.Apps.CreateApp(ctx, d.deps.TenantID, appReq)
+	if err != nil {
+		return apps.App{}, nil, false, err
+	}
+	return rec, nil, false, nil
+}
+
+func (d *dashboard) updateApp(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Apps") {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.redirectError(w, r, "/admin/apps/"+r.PathValue("id"), "invalid form")
+		return
+	}
+	rec, err := d.deps.Apps.UpdateApp(r.Context(), d.deps.TenantID, r.PathValue("id"), apps.AppUpsert{PackageName: strings.TrimSpace(r.FormValue("packageName")), Name: strings.TrimSpace(r.FormValue("name"))})
+	if err != nil {
+		d.redirectError(w, r, "/admin/apps/"+r.PathValue("id"), err.Error())
+		return
+	}
+	d.recordAudit(r, "update", "apps", rec.ID, map[string]any{"packageName": rec.PackageName, "name": rec.Name})
+	d.redirectOK(w, r, "/admin/apps/"+rec.ID, "app updated")
+}
+
+func (d *dashboard) retireApp(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Apps") {
+		return
+	}
+	rec, err := d.deps.Apps.RetireApp(r.Context(), d.deps.TenantID, r.PathValue("id"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/apps/"+r.PathValue("id"), err.Error())
+		return
+	}
+	d.recordAudit(r, "retire", "apps", rec.ID, map[string]any{"status": rec.Status})
+	d.redirectOK(w, r, "/admin/apps/"+rec.ID, "app retired")
+}
+
+func (d *dashboard) createAppVersion(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Apps") {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		d.redirectError(w, r, "/admin/apps", "invalid form")
+		return
+	}
+	versionCode, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("versionCode")), 10, 64)
+	if err != nil {
+		d.redirectError(w, r, "/admin/apps", "invalid version code")
+		return
+	}
+	artifactID := strings.TrimSpace(r.FormValue("artifactId"))
+	req := apps.VersionUpsert{VersionName: strings.TrimSpace(r.FormValue("versionName")), VersionCode: versionCode, Checksum: strings.TrimSpace(r.FormValue("checksum")), Publish: true}
+	if artifactID != "" {
+		req.ArtifactID = &artifactID
+	}
+	rec, err := d.deps.Apps.CreateVersion(r.Context(), d.deps.TenantID, r.PathValue("id"), req)
+	if err != nil {
+		d.redirectError(w, r, "/admin/apps/"+r.PathValue("id"), err.Error())
+		return
+	}
+	d.recordAudit(r, "create", "app_versions", rec.ID, map[string]any{"appId": rec.AppID, "versionName": rec.VersionName, "versionCode": rec.VersionCode, "status": rec.Status})
+	d.redirectOK(w, r, "/admin/apps/"+rec.AppID, "app version created")
+}
+
+func (d *dashboard) managedFiles(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Managed Files")
+	if !ok {
+		return
+	}
+	items, err := d.deps.ManagedFiles.ListManagedFiles(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Managed Files", err)
+		return
+	}
+	d.renderForSession(w, r, session, pageData{Title: "Managed Files", Forms: []formData{{Title: "Upload managed file", Action: "/admin/managed-files/create", EncType: "multipart/form-data", Fields: []fieldData{{Name: "path", Label: "Device path", Type: "text", Required: true, Placeholder: "/sdcard/xmdm/device-config.txt"}, {Name: "replaceVariables", Label: "Replace variables", Type: "checkbox", Value: "on"}, {Name: "file", Label: "File", Type: "file", Required: true}}, Submit: "Upload managed file"}}, Items: managedFilesTable(items)})
+}
+
+func (d *dashboard) managedFileDetail(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Managed File Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	found, err := d.loadManagedFileDetail(r.Context(), r.PathValue("id"))
+	if err != nil {
+		d.renderPageError(w, r, session, "Managed File Detail", err)
+		return
+	}
+	d.renderForSession(w, r, session, d.managedFileDetailPageData(session, found))
+}
+
+func (d *dashboard) loadManagedFileDetail(ctx context.Context, id string) (*managedfiles.ManagedFile, error) {
+	found, err := d.deps.ManagedFiles.GetManagedFile(ctx, d.deps.TenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	return &found, nil
+}
+
+func (d *dashboard) managedFileDetailPageData(session *auth.Session, found *managedfiles.ManagedFile) pageData {
+	var body strings.Builder
+	body.WriteString(`<section class="panel"><h2>Current managed file</h2><div class="policy-summary">`)
+	body.WriteString(summaryTextItem("Created", formatDashboardTime(found.CreatedAt)))
+	body.WriteString(summaryTextItem("Updated", formatDashboardTime(found.UpdatedAt)))
+	body.WriteString(summaryTextItem("ID", found.ID))
+	body.WriteString(summaryTextItem("Path", found.Path))
+	body.WriteString(summaryTextItem("File ID", found.FileID))
+	if found.File != nil {
+		body.WriteString(summaryTextItem("Source file", found.File.Name))
+		body.WriteString(summaryTextItem("Artifact", found.File.ArtifactID))
+		body.WriteString(summaryTextItem("Checksum", found.File.Checksum))
+		body.WriteString(summaryTextItem("MIME", found.File.MimeType))
+		body.WriteString(summaryHTMLItem("Download", template.HTML(`<a class="button btn-primary" href="/admin/managed-files/`+escAttr(found.ID)+`/download">Download file</a>`)))
+	}
+	body.WriteString(summaryHTMLItem("Template", template.HTML(boolBadge(found.ReplaceVariables, "enabled", "disabled"))))
+	body.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
+	body.WriteString(`</div></section>`)
+	data := pageData{
+		Title:    "Managed File Detail",
+		Subtitle: "Review the managed file binding or retire it from active use.",
+		Items:    template.HTML(body.String()),
+	}
+	if d.canWrite(session) && found.Status != managedfiles.StatusRetired {
+		data.Forms = []formData{{
+			Title:  "Retire managed file",
+			Action: "/admin/managed-files/" + found.ID + "/retire",
+			Submit: "Retire managed file",
+			Danger: true,
+		}}
+	}
+	return data
+}
+
+func (d *dashboard) downloadManagedFile(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Managed File Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if d.deps.Artifacts == nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	found, err := d.loadManagedFileDetail(r.Context(), r.PathValue("id"))
+	if err != nil {
+		d.renderPageError(w, r, session, "Managed File Detail", err)
+		return
+	}
+	if found.File == nil || found.File.Artifact == nil || found.Status != managedfiles.StatusActive {
+		http.NotFound(w, r)
+		return
+	}
+	body, err := d.deps.Artifacts.Get(r.Context(), found.File.Artifact.StorageKey)
+	if err != nil {
+		d.renderPageError(w, r, session, "Managed File Detail", err)
+		return
+	}
+	defer body.Close()
+	content, err := io.ReadAll(body)
+	if err != nil {
+		d.renderPageError(w, r, session, "Managed File Detail", err)
+		return
+	}
+	w.Header().Set("Content-Type", found.File.Artifact.MimeType)
+	w.Header().Set("Content-Length", strconv.FormatInt(int64(len(content)), 10))
+	w.Header().Set("X-XMDM-Artifact-Checksum", checksum.SHA256Base64URL(content))
+	w.Header().Set("X-XMDM-Artifact-Size", strconv.FormatInt(int64(len(content)), 10))
+	downloadName := found.File.Name
+	if downloadName == "" {
+		downloadName = found.Path
+	}
+	if downloadName == "" {
+		downloadName = found.ID
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadName))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, bytes.NewReader(content))
+}
+
+func (d *dashboard) createManagedFile(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Managed Files") {
+		return
+	}
+	fileReq, bindingReq, content, err := managedFileUpsertFromMultipart(r)
+	if err != nil {
+		d.redirectError(w, r, "/admin/managed-files", err.Error())
+		return
+	}
+	if len(content) > 0 {
+		if err := d.deps.Artifacts.Put(r.Context(), fileReq.StorageKey, bytes.NewReader(content), fileReq.MimeType, int64(len(content))); err != nil {
+			d.redirectError(w, r, "/admin/managed-files", err.Error())
+			return
+		}
+	}
+	fileRec, err := d.deps.Files.CreateFile(r.Context(), d.deps.TenantID, fileReq)
+	if err != nil {
+		_ = d.deps.Artifacts.Delete(r.Context(), fileReq.StorageKey)
+		d.redirectError(w, r, "/admin/managed-files", err.Error())
+		return
+	}
+	bindingReq.FileID = fileRec.ID
+	rec, err := d.deps.ManagedFiles.CreateManagedFile(r.Context(), d.deps.TenantID, bindingReq)
+	if err != nil {
+		_, _ = d.deps.Files.RetireFile(r.Context(), d.deps.TenantID, fileRec.ID)
+		_ = d.deps.Artifacts.Delete(r.Context(), fileReq.StorageKey)
+		d.redirectError(w, r, "/admin/managed-files", err.Error())
+		return
+	}
+	d.recordAudit(r, "create", "managed_files", rec.ID, map[string]any{"fileId": rec.FileID, "path": rec.Path, "sourceName": fileRec.Name, "replaceVariables": rec.ReplaceVariables})
+	d.redirectOK(w, r, "/admin/managed-files", "managed file uploaded")
+}
+
+func (d *dashboard) retireManagedFile(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Managed Files") {
+		return
+	}
+	rec, err := d.deps.ManagedFiles.RetireManagedFile(r.Context(), d.deps.TenantID, r.PathValue("id"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/managed-files", err.Error())
+		return
+	}
+	d.recordAudit(r, "retire", "managed_files", rec.ID, map[string]any{"status": rec.Status})
+	d.redirectOK(w, r, "/admin/managed-files", "managed file retired")
+}
+
+func (d *dashboard) certificates(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Certificates")
+	if !ok {
+		return
+	}
+	items, err := d.deps.Certificates.ListCertificates(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Certificates", err)
+		return
+	}
+	d.renderForSession(w, r, session, pageData{Title: "Certificates", Forms: []formData{certificateUploadForm("/admin/certificates/create")}, Items: certificatesTable(items)})
+}
+
+func (d *dashboard) certificateDetail(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Certificate Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	found, err := d.loadCertificateDetail(r.Context(), r.PathValue("id"))
+	if err != nil {
+		d.renderPageError(w, r, session, "Certificate Detail", err)
+		return
+	}
+	d.renderForSession(w, r, session, d.certificateDetailPageData(session, found))
+}
+
+func (d *dashboard) downloadCertificate(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Certificate Detail")
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if d.deps.Artifacts == nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	found, err := d.loadCertificateDetail(r.Context(), r.PathValue("id"))
+	if err != nil {
+		d.renderPageError(w, r, session, "Certificate Detail", err)
+		return
+	}
+	if found.Artifact == nil {
+		http.NotFound(w, r)
+		return
+	}
+	body, err := d.deps.Artifacts.Get(r.Context(), found.Artifact.StorageKey)
+	if err != nil {
+		d.renderPageError(w, r, session, "Certificate Detail", err)
+		return
+	}
+	defer body.Close()
+	content, err := io.ReadAll(body)
+	if err != nil {
+		d.renderPageError(w, r, session, "Certificate Detail", err)
+		return
+	}
+	w.Header().Set("Content-Type", found.Artifact.MimeType)
+	w.Header().Set("Content-Length", strconv.FormatInt(int64(len(content)), 10))
+	w.Header().Set("X-XMDM-Artifact-Checksum", checksum.SHA256Base64URL(content))
+	w.Header().Set("X-XMDM-Artifact-Size", strconv.FormatInt(int64(len(content)), 10))
+	downloadName := found.Name
+	if downloadName == "" {
+		downloadName = found.ID
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadName))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, bytes.NewReader(content))
+}
+
+func (d *dashboard) loadCertificateDetail(ctx context.Context, id string) (*certificates.Certificate, error) {
+	found, err := d.deps.Certificates.GetCertificate(ctx, d.deps.TenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	return &found, nil
+}
+
+func (d *dashboard) certificateDetailPageData(session *auth.Session, found *certificates.Certificate) pageData {
+	var body strings.Builder
+	body.WriteString(`<section class="panel"><h2>Current certificate</h2><div class="policy-summary">`)
+	body.WriteString(summaryTextItem("Created", formatDashboardTime(found.CreatedAt)))
+	body.WriteString(summaryTextItem("Updated", formatDashboardTime(found.UpdatedAt)))
+	body.WriteString(summaryTextItem("ID", found.ID))
+	body.WriteString(summaryTextItem("Name", found.Name))
+	body.WriteString(summaryTextItem("Artifact", found.ArtifactID))
+	body.WriteString(summaryTextItem("Checksum", found.Checksum))
+	if found.Artifact != nil {
+		body.WriteString(summaryHTMLItem("Download", template.HTML(`<a class="button btn-primary" href="/admin/certificates/`+escAttr(found.ID)+`/download">Download certificate</a>`)))
+	}
+	if found.Artifact != nil {
+		body.WriteString(summaryTextItem("Storage key", found.Artifact.StorageKey))
+		body.WriteString(summaryTextItem("Size", strconv.FormatInt(found.Artifact.SizeBytes, 10)))
+		body.WriteString(summaryTextItem("MIME", found.Artifact.MimeType))
+	}
+	body.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
+	body.WriteString(`</div></section>`)
+	data := pageData{
+		Title:    "Certificate Detail",
+		Subtitle: "Review the certificate artifact or retire it from active use.",
+		Items:    template.HTML(body.String()),
+	}
+	if d.canWrite(session) && found.Status != certificates.StatusRetired {
+		data.Forms = []formData{{
+			Title:  "Retire certificate",
+			Action: "/admin/certificates/" + found.ID + "/retire",
+			Submit: "Retire certificate",
+			Danger: true,
+		}}
+	}
+	return data
+}
+
+func (d *dashboard) createCertificate(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Certificates") {
+		return
+	}
+	req, content, err := certificateUpsertFromMultipart(r)
+	if err != nil {
+		d.redirectError(w, r, "/admin/certificates", err.Error())
+		return
+	}
+	if len(content) > 0 {
+		if actual := checksum.SHA256Base64URL(content); actual != req.Checksum {
+			d.redirectError(w, r, "/admin/certificates", "checksum mismatch")
+			return
+		}
+		if err := d.deps.Artifacts.Put(r.Context(), req.StorageKey, bytes.NewReader(content), req.MimeType, int64(len(content))); err != nil {
+			d.redirectError(w, r, "/admin/certificates", err.Error())
+			return
+		}
+	}
+	rec, err := d.deps.Certificates.CreateCertificate(r.Context(), d.deps.TenantID, req)
+	if err != nil {
+		_ = d.deps.Artifacts.Delete(r.Context(), req.StorageKey)
+		d.redirectError(w, r, "/admin/certificates", err.Error())
+		return
+	}
+	d.recordAudit(r, "create", "certificates", rec.ID, map[string]any{"name": rec.Name, "checksum": rec.Checksum, "artifactId": rec.ArtifactID})
+	d.redirectOK(w, r, "/admin/certificates", "certificate uploaded")
+}
+
+func (d *dashboard) retireCertificate(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Certificates") {
+		return
+	}
+	rec, err := d.deps.Certificates.RetireCertificate(r.Context(), d.deps.TenantID, r.PathValue("id"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/certificates", err.Error())
+		return
+	}
+	d.recordAudit(r, "retire", "certificates", rec.ID, map[string]any{"status": rec.Status})
+	d.redirectOK(w, r, "/admin/certificates", "certificate retired")
+}
+
+func (d *dashboard) commands(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Commands")
+	if !ok {
+		return
+	}
+	devices := []device.Device{}
+	if d.deps.Devices != nil {
+		var err error
+		devices, err = d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Commands", err)
+			return
+		}
+	}
+	deviceMap := make(map[string]device.Device, len(devices))
+	for _, item := range devices {
+		deviceMap[item.ID] = item
+	}
+	groups := []group.Group{}
+	if d.deps.Groups != nil {
+		var err error
+		groups, err = d.deps.Groups.ListGroups(r.Context(), d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Commands", err)
+			return
+		}
+	}
+	items, err := d.deps.Commands.ListRecent(r.Context(), d.deps.TenantID, queryLimit(r, 25))
+	if err != nil {
+		d.renderPageError(w, r, session, "Commands", err)
+		return
+	}
+	d.renderForSession(w, r, session, pageData{
+		Title:    "Commands",
+		Subtitle: "Send commands to individual devices or device groups. Broadcast is disabled from the dashboard.",
+		Forms:    []formData{{Title: "Send command", Action: "/admin/commands/create", Fields: commandFields(devices, groups), Submit: "Send command"}},
+		Items:    commandsTable(items, deviceMap),
+	})
+}
+
+func (d *dashboard) commandDetail(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Commands")
+	if !ok {
+		return
+	}
+	if d.deps.Commands == nil {
+		d.renderError(w, http.StatusNotFound, "Commands", "not found")
+		return
+	}
+	commandID := strings.TrimSpace(r.PathValue("id"))
+	found, err := d.deps.Commands.Get(r.Context(), d.deps.TenantID, commandID)
+	if err != nil {
+		if err == httpx.ErrNotFound {
+			d.renderError(w, http.StatusNotFound, "Commands", "not found")
+			return
+		}
+		d.renderPageError(w, r, session, "Commands", err)
+		return
+	}
+	devices := []device.Device{}
+	if d.deps.Devices != nil {
+		var err error
+		devices, err = d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Commands", err)
+			return
+		}
+	}
+	deviceMap := make(map[string]device.Device, len(devices))
+	for _, item := range devices {
+		deviceMap[item.ID] = item
+	}
+	d.renderForSession(w, r, session, pageData{
+		Title:    "Command Detail",
+		Subtitle: "Inspect the queued command row, payload, delivery state, and device acknowledgement result.",
+		Items:    commandSummary(found, deviceMap[found.DeviceID]),
+	})
+}
+
+func (d *dashboard) createCommand(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Commands") {
+		return
+	}
+	req, err := commandUpsertFromForm(r)
+	if err != nil {
+		d.redirectError(w, r, "/admin/commands", err.Error())
+		return
+	}
+	created, err := d.deps.Commands.Enqueue(r.Context(), d.deps.TenantID, req)
+	if err != nil {
+		d.redirectError(w, r, "/admin/commands", err.Error())
+		return
+	}
+	for _, rec := range created {
+		d.recordAudit(r, "create", "commands", rec.ID, map[string]any{"type": rec.Type, "status": rec.Status, "deviceId": rec.DeviceID})
+	}
+	d.redirectOK(w, r, "/admin/commands", fmt.Sprintf("%d command(s) queued", len(created)))
+}
+
+func (d *dashboard) logs(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Logs")
+	if !ok {
+		return
+	}
+	filter, err := logFilterFromQuery(r)
+	if err != nil {
+		d.renderPageError(w, r, session, "Logs", err)
+		return
+	}
+	items, err := d.deps.Logs.Search(r.Context(), d.deps.TenantID, filter)
+	if err != nil {
+		d.renderPageError(w, r, session, "Logs", err)
+		return
+	}
+	d.renderForSession(w, r, session, pageData{Title: "Logs", Items: searchAndTable("/admin/logs", []fieldData{{Name: "deviceId", Label: "Device ID", Type: "text", Value: r.URL.Query().Get("deviceId")}, {Name: "source", Label: "Source", Type: "text", Value: r.URL.Query().Get("source")}, {Name: "level", Label: "Level", Type: "text", Value: r.URL.Query().Get("level")}, {Name: "q", Label: "Query", Type: "text", Value: r.URL.Query().Get("q")}, {Name: "limit", Label: "Limit", Type: "number", Value: firstNonEmpty(r.URL.Query().Get("limit"), "25")}}, logsTable(items))})
+}
+
+func (d *dashboard) deviceInfo(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Device Info")
+	if !ok {
+		return
+	}
+	filter, err := deviceInfoFilterFromQuery(r)
+	if err != nil {
+		d.renderPageError(w, r, session, "Device Info", err)
+		return
+	}
+	items, err := d.deps.DeviceInfo.Search(r.Context(), d.deps.TenantID, filter)
+	if err != nil {
+		d.renderPageError(w, r, session, "Device Info", err)
+		return
+	}
+	d.renderForSession(w, r, session, pageData{Title: "Device Info", Items: searchAndTable("/admin/device-info", []fieldData{{Name: "deviceId", Label: "Device ID", Type: "text", Value: r.URL.Query().Get("deviceId")}, {Name: "q", Label: "Query", Type: "text", Value: r.URL.Query().Get("q")}, {Name: "limit", Label: "Limit", Type: "number", Value: firstNonEmpty(r.URL.Query().Get("limit"), "25")}}, deviceInfoTable(items))})
+}
+
+func (d *dashboard) audit(w http.ResponseWriter, r *http.Request) {
+	session, ok := d.requireRead(w, r, "Audit")
+	if !ok {
+		return
+	}
+	items, err := d.deps.Audit.List(r.Context(), d.deps.TenantID)
+	if err != nil {
+		d.renderPageError(w, r, session, "Audit", err)
+		return
+	}
+	d.renderForSession(w, r, session, pageData{Title: "Audit", Items: auditTable(items)})
+}
+
+func (d *dashboard) requireRead(w http.ResponseWriter, r *http.Request, title string) (*auth.Session, bool) {
+	session, ok := sessionFromRequest(r, d.svc)
+	if !ok {
+		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+		return nil, false
+	}
+	if !auth.HasPermission(session.Permissions, auth.PermissionAdminRead) {
+		d.renderForSession(w, r, session, pageData{Title: title, Error: "forbidden"})
+		return nil, false
+	}
+	return session, true
+}
+
+func (d *dashboard) requirePostWrite(w http.ResponseWriter, r *http.Request, title string) bool {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return false
+	}
+	session, ok := sessionFromRequest(r, d.svc)
+	if !ok {
+		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+		return false
+	}
+	if !auth.HasPermission(session.Permissions, auth.PermissionAdminWrite) {
+		d.renderForSession(w, r, session, pageData{Title: title, Error: "forbidden"})
+		return false
+	}
+	if !csrfTokenMatches(r) {
+		d.renderForSession(w, r, session, pageData{Title: title, Error: "forbidden"})
+		return false
+	}
+	return true
+}
+
+func (d *dashboard) canWrite(session *auth.Session) bool {
+	return auth.HasPermission(session.Permissions, auth.PermissionAdminWrite)
+}
+
+func (d *dashboard) csrfToken(r *http.Request) string {
+	if cookie, err := r.Cookie(csrfCookieName); err == nil {
+		return cookie.Value
+	}
+	return ""
+}
+
+func (d *dashboard) renderForSession(w http.ResponseWriter, r *http.Request, session *auth.Session, data pageData) {
+	data.User = session.Username
+	data.CSRFToken = issueCSRFCookie(w, r)
+	data.CanWrite = d.canWrite(session)
+	data.Flash = firstNonEmpty(data.Flash, r.URL.Query().Get("ok"))
+	data.Error = firstNonEmpty(data.Error, r.URL.Query().Get("error"))
+	d.render(w, data)
+}
+
+func (d *dashboard) renderForCurrentUser(w http.ResponseWriter, r *http.Request, title string, body template.HTML) {
+	session, ok := sessionFromRequest(r, d.svc)
+	if !ok {
+		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+		return
+	}
+	d.renderForSession(w, r, session, pageData{Title: title, Items: body})
+}
+
+func (d *dashboard) render(w http.ResponseWriter, data pageData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := d.tmpl.Execute(w, data); err != nil {
+		http.Error(w, "template error", http.StatusInternalServerError)
+	}
+}
+
+func (d *dashboard) renderError(w http.ResponseWriter, status int, title, msg string) {
+	w.WriteHeader(status)
+	d.render(w, pageData{Title: title, Error: msg})
+}
+
+func (d *dashboard) renderPageError(w http.ResponseWriter, r *http.Request, session *auth.Session, title string, err error) {
+	d.renderForSession(w, r, session, pageData{Title: title, Error: safeError(err)})
+}
+
+func (d *dashboard) redirectOK(w http.ResponseWriter, r *http.Request, path, msg string) {
+	http.Redirect(w, r, path+"?ok="+urlQuery(msg), http.StatusSeeOther)
+}
+
+func (d *dashboard) redirectError(w http.ResponseWriter, r *http.Request, path, msg string) {
+	http.Redirect(w, r, path+"?error="+urlQuery(safeErrorText(msg)), http.StatusSeeOther)
+}
+
+func (d *dashboard) recordAudit(r *http.Request, action, resourceType, resourceID string, details map[string]any) {
+	if d.deps.Audit == nil {
+		return
+	}
+	session, ok := sessionFromRequest(r, d.svc)
+	if !ok {
+		return
+	}
+	_, _ = d.deps.Audit.Record(r.Context(), d.deps.TenantID, session.Username, action, resourceType, resourceID, details)
+}
+
+func roleUpsertFromForm(r *http.Request) (identity.RoleUpsert, error) {
+	if err := r.ParseForm(); err != nil {
+		return identity.RoleUpsert{}, err
+	}
+	var permissions []string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(r.FormValue("permissions"))), &permissions); err != nil {
+		return identity.RoleUpsert{}, fmt.Errorf("invalid permissions json")
+	}
+	return identity.RoleUpsert{Name: strings.TrimSpace(r.FormValue("name")), Permissions: permissions}, nil
+}
+
+func policyUpsertFromForm(r *http.Request, existing *policy.Policy) (policy.PolicyUpsert, error) {
+	if err := r.ParseForm(); err != nil {
+		return policy.PolicyUpsert{}, err
+	}
+	restrictions := policyRestrictionPayload{
+		AllowPackages:                splitLines(r.FormValue("allowPackages")),
+		BlockPackages:                splitLines(r.FormValue("blockPackages")),
+		SuspendPackages:              splitLines(r.FormValue("suspendPackages")),
+		KioskKeepScreenOn:            hasFormField(r, "kioskKeepScreenOn"),
+		KioskStayAwakeWhilePluggedIn: hasFormField(r, "kioskStayAwakeWhilePluggedIn"),
+		KioskUnlockOnBoot:            hasFormField(r, "kioskUnlockOnBoot"),
+		KioskExitPasscode:            strings.TrimSpace(r.FormValue("kioskExitPasscode")),
+	}
+	raw, err := json.Marshal(restrictions)
+	if err != nil {
+		return policy.PolicyUpsert{}, fmt.Errorf("invalid restrictions")
+	}
+	req := policy.PolicyUpsert{Name: strings.TrimSpace(r.FormValue("name")), KioskMode: hasFormField(r, "kioskMode"), KioskAppPackage: strings.TrimSpace(r.FormValue("kioskAppPackage")), Restrictions: json.RawMessage(raw)}
+	if req.KioskMode && !kioskExitPasscodeConfigured(req.Restrictions) && (existing == nil || !existing.KioskMode) {
+		return policy.PolicyUpsert{}, fmt.Errorf("kiosk policies require restrictions.kioskExitPasscode")
+	}
+	return req, nil
+}
+
+func splitLines(value string) []string {
+	lines := strings.Split(value, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func kioskExitPasscodeConfigured(restrictions json.RawMessage) bool {
+	if len(restrictions) == 0 || string(restrictions) == "null" {
+		return false
+	}
+	var parsed policyRestrictionPayload
+	if err := json.Unmarshal(restrictions, &parsed); err != nil {
+		return false
+	}
+	return strings.TrimSpace(parsed.KioskExitPasscode) != ""
+}
+
+func deviceUpsertFromForm(r *http.Request) (device.DeviceUpsert, error) {
+	if err := r.ParseForm(); err != nil {
+		return device.DeviceUpsert{}, err
+	}
+	return device.DeviceUpsert{Name: strings.TrimSpace(r.FormValue("name")), SecretHash: hashPlainValue(r.FormValue("deviceSecret")), PolicyID: strings.TrimSpace(r.FormValue("policyId")), GroupIDs: splitFormValues(r.Form["groupIds"])}, nil
+}
+
+func hashPlainValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return enrollment.HashToken(value)
+}
+
+func splitFormValues(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func commandUpsertFromForm(r *http.Request) (commands.Upsert, error) {
+	if err := r.ParseForm(); err != nil {
+		return commands.Upsert{}, err
+	}
+	var payload map[string]any
+	rawPayload := strings.TrimSpace(r.FormValue("payload"))
+	if rawPayload != "" {
+		if err := json.Unmarshal([]byte(rawPayload), &payload); err != nil {
+			return commands.Upsert{}, fmt.Errorf("invalid payload json")
+		}
+	}
+	var expiresAt *time.Time
+	if raw := strings.TrimSpace(r.FormValue("expiresAt")); raw != "" {
+		parsed, err := time.ParseInLocation("2006-01-02T15:04", raw, time.Local)
+		if err != nil {
+			parsed, err = time.ParseInLocation("2006-01-02T15:04:05", raw, time.Local)
+		}
+		if err != nil {
+			parsed, err = time.Parse(time.RFC3339, raw)
+		}
+		if err != nil {
+			return commands.Upsert{}, fmt.Errorf("invalid expiry")
+		}
+		expiresAt = &parsed
+	}
+	targetType := strings.TrimSpace(r.FormValue("targetType"))
+	if targetType == "" {
+		targetType = commands.TargetDevice
+	}
+	switch targetType {
+	case commands.TargetDevice, commands.TargetGroup:
+	default:
+		return commands.Upsert{}, fmt.Errorf("broadcast commands are disabled")
+	}
+	return commands.Upsert{Type: strings.TrimSpace(r.FormValue("type")), Payload: payload, ExpiresAt: expiresAt, Target: commands.Target{Type: targetType, DeviceID: strings.TrimSpace(r.FormValue("targetDeviceId")), GroupID: strings.TrimSpace(r.FormValue("targetGroupId"))}}, nil
+}
+
+func fileUpsertFromMultipart(r *http.Request) (files.FileUpsert, []byte, error) {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		return files.FileUpsert{}, nil, err
+	}
+	content, size, err := uploadedBytes(r)
+	if err != nil {
+		return files.FileUpsert{}, nil, err
+	}
+	return files.FileUpsert{Name: strings.TrimSpace(r.FormValue("name")), StorageKey: strings.TrimSpace(r.FormValue("storageKey")), Checksum: strings.TrimSpace(r.FormValue("checksum")), SizeBytes: size, MimeType: strings.TrimSpace(r.FormValue("mimeType"))}, content, nil
+}
+
+func managedFileUpsertFromMultipart(r *http.Request) (files.FileUpsert, managedfiles.ManagedFileUpsert, []byte, error) {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		return files.FileUpsert{}, managedfiles.ManagedFileUpsert{}, nil, err
+	}
+	content, err := uploadedContent(r)
+	if err != nil {
+		return files.FileUpsert{}, managedfiles.ManagedFileUpsert{}, nil, err
+	}
+	path := strings.TrimSpace(r.FormValue("path"))
+	if path == "" {
+		return files.FileUpsert{}, managedfiles.ManagedFileUpsert{}, nil, fmt.Errorf("path is required")
+	}
+	filename := uploadedFileName(r)
+	return files.FileUpsert{
+			Name:       managedFileName(path, filename),
+			StorageKey: managedFileStorageKey(path, filename),
+			Checksum:   checksum.SHA256Base64URL(content),
+			SizeBytes:  int64(len(content)),
+			MimeType:   managedFileMimeType(filename, content),
+		},
+		managedfiles.ManagedFileUpsert{
+			Path:             path,
+			ReplaceVariables: hasFormField(r, "replaceVariables"),
+		},
+		content,
+		nil
+}
+
+func certificateUpsertFromMultipart(r *http.Request) (certificates.CertificateUpsert, []byte, error) {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		return certificates.CertificateUpsert{}, nil, err
+	}
+	content, err := uploadedContent(r)
+	if err != nil {
+		return certificates.CertificateUpsert{}, nil, err
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		return certificates.CertificateUpsert{}, nil, fmt.Errorf("name is required")
+	}
+	filename := uploadedFileName(r)
+	return certificates.CertificateUpsert{
+		Name:       name,
+		StorageKey: certificateStorageKey(name, filename),
+		Checksum:   checksum.SHA256Base64URL(content),
+		SizeBytes:  int64(len(content)),
+		MimeType:   certificateMimeType(filename, content),
+	}, content, nil
+}
+
+func uploadedBytes(r *http.Request) ([]byte, int64, error) {
+	content, err := uploadedContent(r)
+	if err != nil {
+		return nil, 0, err
+	}
+	sizeBytes, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("sizeBytes")), 10, 64)
+	if err != nil || sizeBytes != int64(len(content)) {
+		return nil, 0, fmt.Errorf("invalid size")
+	}
+	return content, sizeBytes, nil
+}
+
+func uploadedContent(r *http.Request) ([]byte, error) {
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		return nil, fmt.Errorf("file is required")
+	}
+	defer file.Close()
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+	if len(content) == 0 {
+		return nil, fmt.Errorf("file is empty")
+	}
+	return content, nil
+}
+
+func uploadedFileName(r *http.Request) string {
+	if r.MultipartForm == nil {
+		return ""
+	}
+	files := r.MultipartForm.File["file"]
+	if len(files) == 0 || files[0] == nil {
+		return ""
+	}
+	return strings.TrimSpace(files[0].Filename)
+}
+
+func certificateStorageKey(name, filename string) string {
+	base := strings.TrimSpace(filepath.Base(filename))
+	if base == "" || base == "." {
+		base = strings.TrimSpace(name)
+	}
+	if base == "" {
+		base = "certificate"
+	}
+	base = strings.NewReplacer("/", "_", "\\", "_").Replace(base)
+	return "artifacts/certificates/" + uuid.NewString() + "/" + base
+}
+
+func managedFileName(path, filename string) string {
+	base := strings.TrimSpace(filepath.Base(filename))
+	if base == "" || base == "." {
+		base = strings.TrimSpace(filepath.Base(path))
+	}
+	if base == "" || base == "." {
+		base = "managed-file"
+	}
+	base = strings.NewReplacer("/", "_", "\\", "_").Replace(base)
+	pathSuffix := checksum.SHA256Base64URL([]byte(path))
+	if len(pathSuffix) > 8 {
+		pathSuffix = pathSuffix[:8]
+	}
+	uploadSuffix := uuid.NewString()
+	if len(uploadSuffix) > 8 {
+		uploadSuffix = uploadSuffix[:8]
+	}
+	return "managed-" + base + "-" + pathSuffix + "-" + uploadSuffix
+}
+
+func managedFileStorageKey(path, filename string) string {
+	base := strings.TrimSpace(filepath.Base(filename))
+	if base == "" || base == "." {
+		base = strings.TrimSpace(filepath.Base(path))
+	}
+	if base == "" || base == "." {
+		base = "managed-file"
+	}
+	base = strings.NewReplacer("/", "_", "\\", "_").Replace(base)
+	return "artifacts/managed-files/" + uuid.NewString() + "/" + base
+}
+
+func managedFileMimeType(filename string, content []byte) string {
+	if ext := strings.ToLower(filepath.Ext(filename)); ext != "" {
+		if found := mime.TypeByExtension(ext); found != "" {
+			return found
+		}
+	}
+	if detected := http.DetectContentType(content); detected != "" {
+		return detected
+	}
+	return "application/octet-stream"
+}
+
+func certificateMimeType(filename string, content []byte) string {
+	if ext := strings.ToLower(filepath.Ext(filename)); ext != "" {
+		if ext == ".pem" {
+			return "application/x-pem-file"
+		}
+		if ext == ".cer" || ext == ".crt" || ext == ".der" {
+			return "application/x-x509-ca-cert"
+		}
+		if ext == ".p12" || ext == ".pfx" {
+			return "application/x-pkcs12"
+		}
+		if found := mime.TypeByExtension(ext); found != "" {
+			return found
+		}
+	}
+	if detected := http.DetectContentType(content); detected != "" {
+		return detected
+	}
+	return "application/octet-stream"
+}
+
+func logFilterFromQuery(r *http.Request) (logs.SearchFilter, error) {
+	return logs.SearchFilter{DeviceID: r.URL.Query().Get("deviceId"), Source: r.URL.Query().Get("source"), Level: r.URL.Query().Get("level"), Query: r.URL.Query().Get("q"), Limit: queryLimit(r, 25)}, nil
+}
+
+func deviceInfoFilterFromQuery(r *http.Request) (deviceinfo.SearchFilter, error) {
+	return deviceinfo.SearchFilter{DeviceID: r.URL.Query().Get("deviceId"), Query: r.URL.Query().Get("q"), Limit: queryLimit(r, 25)}, nil
+}
+
+func queryLimit(r *http.Request, fallback int) int {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return fallback
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		return fallback
+	}
+	return limit
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func hasFormField(r *http.Request, name string) bool {
+	_, ok := r.Form[name]
+	return ok
+}
+
+func safeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return safeErrorText(err.Error())
+}
+
+func safeErrorText(msg string) string {
+	switch msg {
+	case "invalid input", "invalid form", "invalid json", "not found", "conflict", "unauthorized", "forbidden":
+		return msg
+	default:
+		if strings.TrimSpace(msg) == "" {
+			return "operation failed"
+		}
+		return msg
+	}
+}
+
+func urlQuery(value string) string {
+	return url.QueryEscape(value)
+}
+
+func pre(value any) string {
+	data, _ := json.MarshalIndent(value, "", "  ")
+	return "<pre>" + template.HTMLEscapeString(string(data)) + "</pre>"
+}
+
+func usersTable(items []identity.User, roles map[string]identity.Role, csrf string, canWrite bool) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>ID</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>`)
+	for _, item := range items {
+		roleLabel := item.RoleID
+		roleLink := ""
+		if role, ok := roles[item.RoleID]; ok {
+			roleLabel = role.Name
+			roleLink = "/admin/roles/" + role.ID
+		}
+		roleHTML := esc(roleLabel)
+		if roleLink != "" {
+			roleHTML = "<a href=\"" + escAttr(roleLink) + "\">" + roleHTML + "</a>"
+		}
+		b.WriteString("<tr><td>" + esc(formatDashboardTime(item.CreatedAt)) + "</td><td>" + esc(item.ID) + "</td><td><a href=\"/admin/users/" + escAttr(item.ID) + "\">" + esc(item.Email) + "</a></td><td>" + roleHTML + "</td><td>" + statusBadge(item.Status) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func rolesTable(items []identity.Role, csrf string, canWrite bool) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>ID</th><th>Name</th><th>Permissions</th><th>Status</th></tr></thead><tbody>`)
+	for _, item := range items {
+		perms, _ := json.Marshal(item.Permissions)
+		b.WriteString("<tr><td>" + esc(formatDashboardTime(item.CreatedAt)) + "</td><td>" + esc(item.ID) + "</td><td><a href=\"/admin/roles/" + escAttr(item.ID) + "\">" + esc(item.Name) + "</a></td><td><code>" + esc(string(perms)) + "</code></td><td>" + statusBadge(item.Status) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func formatDashboardTime(t time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
+	return t.Local().Format("Jan 2, 2006 15:04 MST")
+}
+
+func permissionsHelp() template.HTML {
+	perms := auth.AllPermissions()
+	var b strings.Builder
+	b.WriteString(`<div class="field-help">Available permissions:<div class="permission-catalog">`)
+	for _, perm := range perms {
+		b.WriteString(`<code>` + esc(string(perm)) + `</code>`)
+	}
+	b.WriteString(`</div><div class="muted">Use a JSON array such as <code>["admin.read","admin.write"]</code>.</div></div>`)
+	return template.HTML(b.String())
+}
+
+func boolBadge(enabled bool, enabledLabel, disabledLabel string) string {
+	class := "status-pill status-disabled"
+	label := disabledLabel
+	if enabled {
+		class = "status-pill status-enabled"
+		label = enabledLabel
+	}
+	return `<span class="` + class + `">` + esc(label) + `</span>`
+}
+
+func dashboardPermissions(values []string) []auth.Permission {
+	perms := make([]auth.Permission, 0, len(values))
+	for _, value := range values {
+		perms = append(perms, auth.Permission(value))
+	}
+	return perms
+}
+
+func allRoleOptions(items []identity.Role) []optionData {
+	options := make([]optionData, 0, len(items))
+	for _, item := range items {
+		label := item.Name
+		if strings.TrimSpace(label) == "" {
+			label = item.ID
+		}
+		if item.Status != "active" {
+			label += " (" + item.Status + ")"
+		}
+		options = append(options, optionData{Value: item.ID, Label: label})
+	}
+	return options
+}
+
+func allPolicyOptions(items []policy.Policy) []optionData {
+	options := make([]optionData, 0, len(items))
+	for _, item := range items {
+		label := item.Name
+		if strings.TrimSpace(label) == "" {
+			label = item.ID
+		}
+		if item.Status != "active" {
+			label += " (" + item.Status + ")"
+		}
+		options = append(options, optionData{Value: item.ID, Label: label})
+	}
+	return options
+}
+
+func allGroupOptions(items []group.Group) []optionData {
+	options := make([]optionData, 0, len(items))
+	for _, item := range items {
+		label := item.Name
+		if strings.TrimSpace(label) == "" {
+			label = item.ID
+		}
+		if item.Status != "active" {
+			label += " (" + item.Status + ")"
+		}
+		options = append(options, optionData{Value: item.ID, Label: label})
+	}
+	return options
+}
+
+func allDeviceOptions(items []device.Device) []optionData {
+	options := make([]optionData, 0, len(items))
+	for _, item := range items {
+		label := item.Name
+		if strings.TrimSpace(label) == "" {
+			label = item.DeviceID
+		}
+		if strings.TrimSpace(item.DeviceID) != "" && strings.TrimSpace(label) != item.DeviceID {
+			label += " (" + item.DeviceID + ")"
+		}
+		if item.Status != device.StatusActive {
+			label += " (" + item.Status + ")"
+		}
+		options = append(options, optionData{Value: item.DeviceID, Label: label})
+	}
+	return options
+}
+
+func groupNameByID(items []group.Group) map[string]group.Group {
+	groups := make(map[string]group.Group, len(items))
+	for _, item := range items {
+		groups[item.ID] = item
+	}
+	return groups
+}
+
+func groupDevicesFor(groupID string, items []device.Device) []device.Device {
+	devices := make([]device.Device, 0)
+	for _, item := range items {
+		for _, assigned := range item.GroupIDs {
+			if strings.TrimSpace(assigned) == groupID {
+				devices = append(devices, item)
+				break
+			}
+		}
+	}
+	return devices
+}
+
+func policyNameByID(items []policy.Policy) map[string]policy.Policy {
+	policies := make(map[string]policy.Policy, len(items))
+	for _, item := range items {
+		policies[item.ID] = item
+	}
+	return policies
+}
+
+func containsString(items []string, value string) bool {
+	value = strings.TrimSpace(value)
+	for _, item := range items {
+		if strings.TrimSpace(item) == value {
+			return true
+		}
+	}
+	return false
+}
+
+func navIcon(name string) template.HTML {
+	var svg string
+	switch name {
+	case "overview":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2 7.5 8 2l6 5.5"/><path d="M4 7.5V14h8V7.5"/><path d="M6.5 14V9.5h3V14"/></svg>`
+	case "devices":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="4" y="1.5" width="8" height="13" rx="1.5"/><path d="M6 4.5h4"/><path d="M7.25 12.5h1.5"/></svg>`
+	case "policies":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.5 2.5h6.25l2.75 2.75V13.5a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1z"/><path d="M9.75 2.5v3h3"/><path d="M5 8h6"/><path d="M5 10.5h6"/></svg>`
+	case "groups":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="5" cy="5" r="2"/><circle cx="11.5" cy="6" r="1.75"/><path d="M2.75 13a4 4 0 0 1 4-4h1.5a4 4 0 0 1 4 4"/><path d="M9.5 13a3.25 3.25 0 0 1 3.25-3.25H14"/><path d="M1.75 10.5A2.5 2.5 0 0 1 4.25 8h.5"/></svg>`
+	case "commands":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8.5 1.75 3.5 8h3.25L6 14.25 12.5 7H9.25z"/></svg>`
+	case "apps":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>`
+	case "managed-files":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 1.75h5l3 3V14.25a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-11.5a1 1 0 0 1 1-1z"/><path d="M9 1.75v3h3"/><path d="M5.5 8h5"/><path d="M5.5 10.5h5"/></svg>`
+	case "certificates":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 2.5h8v7.25a4 4 0 0 1-4 4 4 4 0 0 1-4-4z"/><path d="M6.5 13.75 5.25 15l-.5-2.5 1.75-1"/><path d="M7.25 7.25a.75.75 0 1 1 1.5 0v1h-1.5z"/><path d="M8 8.25v1"/></svg>`
+	case "users":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="5" r="2.25"/><path d="M3.5 13a4.5 4.5 0 0 1 9 0"/></svg>`
+	case "roles":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.75 13 4v4c0 3.25-2.1 5.7-5 6.5-2.9-.8-5-3.25-5-6.5V4z"/><path d="M8 5.5v3"/><path d="M8 10.25h.01"/></svg>`
+	case "audit":
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2.75" y="2" width="10.5" height="12" rx="1.5"/><path d="M5 4.75h6"/><path d="M5 7.5h6"/><path d="M5 10.25h3.5"/></svg>`
+	default:
+		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6"/></svg>`
+	}
+	return template.HTML(svg)
+}
+
+func firstPolicyID(policyID *string) string {
+	if policyID == nil {
+		return ""
+	}
+	return strings.TrimSpace(*policyID)
+}
+
+func roleNameByID(items []identity.Role) map[string]identity.Role {
+	roles := make(map[string]identity.Role, len(items))
+	for _, item := range items {
+		roles[item.ID] = item
+	}
+	return roles
+}
+
+func statusBadge(status string) string {
+	class := "status-pill"
+	switch status {
+	case "pending":
+		class += " status-pending"
+	case "active":
+		class += " status-active"
+	case "enrolled":
+		class += " status-enrolled"
+	case "issued":
+		class += " status-issued"
+	case "consumed":
+		class += " status-consumed"
+	case "expired":
+		class += " status-expired"
+	case "revoked":
+		class += " status-retired"
+	case "retired":
+		class += " status-retired"
+	}
+	return `<span class="` + class + `">` + esc(status) + `</span>`
+}
+
+func groupsTable(items []group.Group, csrf string, canWrite bool) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>ID</th><th>Name</th><th>Status</th></tr></thead><tbody>`)
+	for _, item := range items {
+		label := item.Name
+		if strings.TrimSpace(label) == "" {
+			label = item.ID
+		}
+		b.WriteString("<tr><td>" + esc(formatDashboardTime(item.CreatedAt)) + "</td><td>" + esc(item.ID) + "</td><td><a href=\"/admin/groups/" + escAttr(item.ID) + "\">" + esc(label) + "</a></td><td>" + statusBadge(item.Status) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func policiesTable(items []policy.Policy, csrf string, canWrite bool) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>ID</th><th>Name</th><th>Kiosk</th><th>Status</th></tr></thead><tbody>`)
+	for _, item := range items {
+		b.WriteString("<tr><td>" + esc(formatDashboardTime(item.CreatedAt)) + "</td><td>" + esc(item.ID) + "</td><td><a href=\"/admin/policies/" + escAttr(item.ID) + "\">" + esc(item.Name) + "</a></td><td>" + boolBadge(item.KioskMode, "enabled", "disabled") + "</td><td>" + statusBadge(item.Status) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func devicesTable(items []device.Device, policies []policy.Policy, csrf string, canWrite bool) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>ID</th><th>Name</th><th>Policy</th><th>Status</th></tr></thead><tbody>`)
+	policyMap := policyNameByID(policies)
+	for _, item := range items {
+		policyID := ""
+		if item.PolicyID != nil {
+			policyID = *item.PolicyID
+		}
+		policyLabel := policyID
+		if rec, ok := policyMap[policyID]; ok {
+			policyLabel = rec.Name
+			if rec.Status != "active" {
+				policyLabel += " (" + rec.Status + ")"
+			}
+		}
+		b.WriteString("<tr><td>" + esc(formatDashboardTime(item.CreatedAt)) + "</td><td>" + esc(item.ID) + "</td><td><a href=\"/admin/devices/" + escAttr(item.ID) + "\">" + esc(item.Name) + "</a></td><td>")
+		if policyID != "" {
+			if rec, ok := policyMap[policyID]; ok {
+				b.WriteString(`<a href="/admin/policies/` + escAttr(rec.ID) + `">` + esc(policyLabel) + `</a>`)
+			} else {
+				b.WriteString(esc(policyLabel))
+			}
+		} else {
+			b.WriteString("—")
+		}
+		b.WriteString("</td><td>" + statusBadge(item.Status) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func appsTable(items []apps.App, versions map[string][]apps.Version) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>ID</th><th>Name</th><th>Package</th><th>Latest published</th><th>Status</th></tr></thead><tbody>`)
+	for _, item := range items {
+		latest := appLatestPublishedVersion(versions[item.ID])
+		b.WriteString("<tr><td>" + esc(formatDashboardTime(item.CreatedAt)) + "</td><td>" + esc(item.ID) + "</td><td><a href=\"/admin/apps/" + escAttr(item.ID) + "\">" + esc(item.Name) + "</a></td><td>" + esc(item.PackageName) + "</td><td>" + esc(appVersionLabel(latest)) + "</td><td>" + statusBadge(item.Status) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func appLatestPublishedVersion(items []apps.Version) *apps.Version {
+	var latest *apps.Version
+	for i := range items {
+		if items[i].Status != apps.VersionStatusPublished {
+			continue
+		}
+		if latest == nil {
+			latest = &items[i]
+			continue
+		}
+		if items[i].PublishedAt != nil && latest.PublishedAt != nil {
+			if items[i].PublishedAt.After(*latest.PublishedAt) {
+				latest = &items[i]
+			}
+			continue
+		}
+		if items[i].PublishedAt != nil && latest.PublishedAt == nil {
+			latest = &items[i]
+			continue
+		}
+		if items[i].PublishedAt == nil && latest.PublishedAt == nil && items[i].CreatedAt.After(latest.CreatedAt) {
+			latest = &items[i]
+		}
+	}
+	return latest
+}
+
+func appVersionLabel(item *apps.Version) string {
+	if item == nil {
+		return "—"
+	}
+	return item.VersionName + " (#" + strconv.FormatInt(item.VersionCode, 10) + ")"
+}
+
+func appSummary(found apps.App, latest *apps.Version) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<div class="policy-summary">`)
+	b.WriteString(summaryTextItem("Created", formatDashboardTime(found.CreatedAt)))
+	b.WriteString(summaryTextItem("Updated", formatDashboardTime(found.UpdatedAt)))
+	b.WriteString(summaryTextItem("ID", found.ID))
+	b.WriteString(summaryTextItem("Name", found.Name))
+	b.WriteString(summaryTextItem("Package", found.PackageName))
+	if latest != nil && (latest.ArtifactID != nil || latest.Artifact != nil) {
+		b.WriteString(summaryHTMLItem("Download", template.HTML(`<a class="button btn-primary" href="/admin/apps/`+escAttr(found.ID)+`/download">Download latest APK</a>`)))
+	}
+	b.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func appVersionsTable(items []apps.Version) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>ID</th><th>Name</th><th>Code</th><th>Status</th><th>Published</th><th>Artifact</th></tr></thead><tbody>`)
+	for _, item := range items {
+		published := "—"
+		if item.PublishedAt != nil {
+			published = formatDashboardTime(*item.PublishedAt)
+		}
+		artifact := item.Checksum
+		if item.ArtifactID != nil && strings.TrimSpace(*item.ArtifactID) != "" {
+			artifact = *item.ArtifactID
+		}
+		b.WriteString("<tr><td>" + esc(formatDashboardTime(item.CreatedAt)) + "</td><td>" + esc(item.ID) + "</td><td>" + esc(item.VersionName) + "</td><td>" + esc(strconv.FormatInt(item.VersionCode, 10)) + "</td><td>" + statusBadge(item.Status) + "</td><td>" + esc(published) + "</td><td><code>" + esc(artifact) + "</code></td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func managedFilesTable(items []managedfiles.ManagedFile) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>ID</th><th>Path</th><th>File</th><th>Template</th><th>Status</th></tr></thead><tbody>`)
+	for _, item := range items {
+		path := item.Path
+		if strings.TrimSpace(path) == "" {
+			path = item.ID
+		}
+		fileLabel := item.FileID
+		if item.File != nil && strings.TrimSpace(item.File.Name) != "" {
+			fileLabel = item.File.Name
+		}
+		b.WriteString("<tr><td>" + esc(formatDashboardTime(item.CreatedAt)) + "</td><td>" + esc(item.ID) + "</td><td><a href=\"/admin/managed-files/" + escAttr(item.ID) + "\">" + esc(path) + "</a></td><td>" + esc(fileLabel) + "</td><td>" + boolBadge(item.ReplaceVariables, "enabled", "disabled") + "</td><td>" + statusBadge(item.Status) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func certificatesTable(items []certificates.Certificate) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>ID</th><th>Name</th><th>Artifact</th><th>Status</th></tr></thead><tbody>`)
+	for _, item := range items {
+		artifact := item.ArtifactID
+		if item.Artifact != nil && strings.TrimSpace(item.Artifact.StorageKey) != "" {
+			artifact = item.Artifact.StorageKey
+		}
+		b.WriteString("<tr><td>" + esc(formatDashboardTime(item.CreatedAt)) + "</td><td>" + esc(item.ID) + "</td><td><a href=\"/admin/certificates/" + escAttr(item.ID) + "\">" + esc(item.Name) + "</a></td><td>" + esc(artifact) + "</td><td>" + statusBadge(item.Status) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func commandsTable(items []commands.Command, devices map[string]device.Device) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>ID</th><th>Type</th><th>Device</th><th>Status</th><th>Expires</th></tr></thead><tbody>`)
+	for _, item := range items {
+		deviceLabel := item.DeviceID
+		if rec, ok := devices[item.DeviceID]; ok {
+			deviceLabel = rec.Name
+			if strings.TrimSpace(deviceLabel) == "" {
+				deviceLabel = rec.DeviceID
+			}
+			deviceLabel = `<a href="/admin/devices/` + escAttr(rec.ID) + `">` + esc(deviceLabel) + `</a>`
+		} else {
+			deviceLabel = esc(deviceLabel)
+		}
+		commandLink := `<a href="/admin/commands/` + escAttr(item.ID) + `">` + esc(item.ID) + `</a>`
+		expires := "—"
+		if item.ExpiresAt != nil {
+			expires = formatDashboardTime(*item.ExpiresAt)
+		}
+		b.WriteString("<tr><td>" + esc(formatDashboardTime(item.CreatedAt)) + "</td><td>" + commandLink + "</td><td>" + esc(item.Type) + "</td><td>" + deviceLabel + "</td><td>" + statusBadge(item.Status) + "</td><td>" + esc(expires) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func commandFields(devices []device.Device, groups []group.Group) []fieldData {
+	return []fieldData{
+		{Name: "type", Label: "Command", Type: "select", Value: "ping", Required: true, Options: commandTypeOptions()},
+		{Name: "targetType", Label: "Target type", Type: "select", Value: commands.TargetDevice, Required: true, Options: []optionData{{Value: commands.TargetDevice, Label: "Device"}, {Value: commands.TargetGroup, Label: "Group"}}},
+		{Name: "targetDeviceId", Label: "Device", Type: "select", Placeholder: "Select device", Options: commandDeviceOptions(devices)},
+		{Name: "targetGroupId", Label: "Group", Type: "select", Placeholder: "Select group", Options: commandGroupOptions(groups)},
+		{Name: "payload", Label: "Payload JSON", Type: "textarea", Value: "{}"},
+		{Name: "expiresAt", Label: "Expires at", Type: "datetime-local"},
+	}
+}
+
+func commandTypeOptions() []optionData {
+	return []optionData{
+		{Value: "ping", Label: "ping"},
+		{Value: "reboot", Label: "reboot"},
+		{Value: "sync_config", Label: "sync_config"},
+		{Value: "exit_kiosk", Label: "exit_kiosk"},
+	}
+}
+
+func commandDeviceOptions(items []device.Device) []optionData {
+	options := make([]optionData, 0, len(items))
+	for _, item := range items {
+		if item.Status != device.StatusActive && item.Status != device.StatusEnrolled {
+			continue
+		}
+		label := item.Name
+		if strings.TrimSpace(label) == "" {
+			label = item.DeviceID
+		}
+		options = append(options, optionData{Value: item.DeviceID, Label: label})
+	}
+	return options
+}
+
+func commandGroupOptions(items []group.Group) []optionData {
+	options := make([]optionData, 0, len(items))
+	for _, item := range items {
+		if item.Status != "active" {
+			continue
+		}
+		label := item.Name
+		if strings.TrimSpace(label) == "" {
+			label = item.ID
+		}
+		options = append(options, optionData{Value: item.ID, Label: label})
+	}
+	return options
+}
+
+func activeGroupOptions(items []group.Group) []optionData {
+	options := make([]optionData, 0, len(items))
+	for _, item := range items {
+		if item.Status != "active" {
+			continue
+		}
+		label := item.Name
+		if strings.TrimSpace(label) == "" {
+			label = item.ID
+		}
+		options = append(options, optionData{Value: item.ID, Label: label})
+	}
+	return options
+}
+
+func commandSummary(found commands.Command, deviceRec device.Device) template.HTML {
+	deviceLabel := found.DeviceID
+	if strings.TrimSpace(deviceRec.ID) != "" {
+		deviceLabel = deviceRec.Name
+		if strings.TrimSpace(deviceLabel) == "" {
+			deviceLabel = deviceRec.DeviceID
+		}
+		deviceLabel = `<a href="/admin/devices/` + escAttr(deviceRec.ID) + `">` + esc(deviceLabel) + `</a>`
+	} else {
+		deviceLabel = esc(deviceLabel)
+	}
+	expires := "—"
+	if found.ExpiresAt != nil {
+		expires = formatDashboardTime(*found.ExpiresAt)
+	}
+	acked := "—"
+	if found.AckedAt != nil {
+		acked = formatDashboardTime(*found.AckedAt)
+	}
+	var b strings.Builder
+	b.WriteString(`<h2>Current command</h2><div class="policy-summary">`)
+	b.WriteString(summaryTextItem("Created", formatDashboardTime(found.CreatedAt)))
+	b.WriteString(summaryTextItem("Updated", formatDashboardTime(found.UpdatedAt)))
+	b.WriteString(summaryTextItem("ID", found.ID))
+	b.WriteString(summaryTextItem("Type", found.Type))
+	b.WriteString(summaryHTMLItem("Device", template.HTML(deviceLabel)))
+	b.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
+	b.WriteString(summaryTextItem("Expires", expires))
+	b.WriteString(summaryTextItem("Acked", acked))
+	b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">Payload</div><div class="policy-summary-value">` + pre(found.Payload) + `</div></div>`)
+	if len(found.Result) > 0 {
+		b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">Result</div><div class="policy-summary-value">` + pre(found.Result) + `</div></div>`)
+	} else {
+		b.WriteString(summaryTextItem("Result", "—"))
+	}
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func logsTable(items []logs.Record) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Observed</th><th>Device</th><th>Level</th><th>Source</th><th>Message</th></tr></thead><tbody>`)
+	for _, item := range items {
+		b.WriteString("<tr><td>" + esc(item.ObservedAt.Format(time.RFC3339)) + "</td><td>" + esc(item.DeviceID) + "</td><td>" + esc(item.Level) + "</td><td>" + esc(item.Source) + "</td><td>" + esc(item.Message) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func deviceInfoTable(items []deviceinfo.Record) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Observed</th><th>Device</th><th>Payload</th></tr></thead><tbody>`)
+	for _, item := range items {
+		b.WriteString("<tr><td>" + esc(item.ObservedAt.Format(time.RFC3339)) + "</td><td>" + esc(item.DeviceID) + "</td><td>" + pre(item.Payload) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func auditTable(items []audit.Event) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr><th>Created</th><th>Actor</th><th>Action</th><th>Resource</th><th>Details</th></tr></thead><tbody>`)
+	for _, item := range items {
+		b.WriteString("<tr><td>" + esc(item.CreatedAt.Format(time.RFC3339)) + "</td><td>" + esc(item.Actor) + "</td><td>" + esc(item.Action) + "</td><td>" + esc(item.ResourceType+"/"+item.ResourceID) + "</td><td>" + pre(item.Details) + "</td></tr>")
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func searchAndTable(action string, fields []fieldData, table template.HTML) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<form method="get" action="` + escAttr(action) + `" class="panel">`)
+	for _, field := range fields {
+		b.WriteString(`<label for="` + escAttr(field.Name) + `">` + esc(field.Label) + `</label><input id="` + escAttr(field.Name) + `" name="` + escAttr(field.Name) + `" type="` + escAttr(field.Type) + `" value="` + escAttr(field.Value) + `">`)
+	}
+	b.WriteString(`<p><button type="submit">Search</button></p></form>`)
+	b.WriteString(string(table))
+	return template.HTML(b.String())
+}
+
+func policyFields(item policy.Policy) []fieldData {
+	restrictions := policyRestrictionFormData(item.Restrictions)
+	kioskModeValue := ""
+	if item.KioskMode {
+		kioskModeValue = "on"
+	}
+	return []fieldData{
+		{Name: "name", Label: "Name", Type: "text", Value: item.Name, Placeholder: "default-policy", Required: true},
+		{Name: "kioskAppPackage", Label: "Kiosk app package", Type: "text", Value: item.KioskAppPackage, Placeholder: "com.android.chrome"},
+		{Name: "kioskMode", Label: "Enable kiosk mode", Type: "checkbox", Value: kioskModeValue},
+		{Name: "kioskExitPasscode", Label: "Kiosk exit passcode", Type: "text", Value: restrictions.KioskExitPasscode, Placeholder: "1234"},
+		{Name: "allowPackages", Label: "Allow packages", Type: "textarea", Value: restrictions.AllowPackages, Placeholder: "One package per line\ncom.android.chrome\ncom.android.settings"},
+		{Name: "blockPackages", Label: "Block packages", Type: "textarea", Value: restrictions.BlockPackages, Placeholder: "One package per line\ncom.android.camera\ncom.android.phone"},
+		{Name: "suspendPackages", Label: "Suspend packages", Type: "textarea", Value: restrictions.SuspendPackages, Placeholder: "One package per line\ncom.android.music\ncom.example.social"},
+		{Name: "kioskKeepScreenOn", Label: "Keep screen on", Type: "checkbox", Value: boolValue(restrictions.KioskKeepScreenOn)},
+		{Name: "kioskStayAwakeWhilePluggedIn", Label: "Stay awake while plugged in", Type: "checkbox", Value: boolValue(restrictions.KioskStayAwakeWhilePluggedIn)},
+		{Name: "kioskUnlockOnBoot", Label: "Unlock on boot", Type: "checkbox", Value: boolValue(restrictions.KioskUnlockOnBoot)},
+	}
+}
+
+func (d *dashboard) policyDetailPageData(session *auth.Session, csrf string, found policy.Policy, items []apps.App, assignments []policy.PolicyApp, certificatesList []certificates.Certificate, certificateAssignments []policy.PolicyCertificate, managedFiles []managedfiles.ManagedFile, managedFileAssignments []policy.PolicyManagedFile) pageData {
+	managedApps := policyManagedAppsSummary(found.ID, items, assignments, csrf, d.canWrite(session) && found.Status != "retired")
+	managedCertificates := policyManagedCertificatesSummary(found.ID, certificatesList, certificateAssignments, csrf, d.canWrite(session) && found.Status != "retired")
+	managedFileBindings := policyManagedFilesSummary(found.ID, managedFiles, managedFileAssignments, csrf, d.canWrite(session) && found.Status != "retired")
+	data := pageData{
+		Title:    "Policy Detail",
+		Subtitle: "Edit the policy definition, enable managed apps, managed files, and certificates, or retire it from active use.",
+		Items:    template.HTML(string(policySummary(found)) + string(managedApps) + string(managedFileBindings) + string(managedCertificates)),
+	}
+	if d.canWrite(session) && found.Status != "retired" {
+		data.Forms = []formData{{
+			Title:  "Update policy",
+			Action: "/admin/policies/" + found.ID + "/update",
+			Fields: policyFields(found),
+			Submit: "Update policy",
+		}, {
+			Title:  "Retire policy",
+			Action: "/admin/policies/" + found.ID + "/retire",
+			Submit: "Retire policy",
+			Danger: true,
+		}}
+	}
+	return data
+}
+
+func policyManagedAppsSummary(policyID string, items []apps.App, assignments []policy.PolicyApp, csrf string, canWrite bool) template.HTML {
+	activeCount := 0
+	for _, app := range items {
+		if app.Status == apps.StatusActive {
+			activeCount++
+		}
+	}
+	if activeCount == 0 {
+		return template.HTML(`<section class="panel"><h2>Managed apps</h2><p class="muted">No managed apps are available yet.</p></section>`)
+	}
+	assignmentMap := appAssignmentStatusByID(assignments)
+	var b strings.Builder
+	b.WriteString(`<section class="panel"><h2>Managed apps</h2><table><thead><tr><th>Name</th><th>Package</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
+	for _, app := range items {
+		if app.Status != apps.StatusActive {
+			continue
+		}
+		enabled := assignmentMap[app.ID]
+		label := app.Name
+		if strings.TrimSpace(label) == "" {
+			label = app.PackageName
+		}
+		b.WriteString(`<tr><td><a href="/admin/apps/` + escAttr(app.ID) + `">` + esc(label) + `</a></td><td>` + esc(app.PackageName) + `</td><td>` + statusBadge(app.Status) + `</td><td>` + boolBadge(enabled, "enabled", "disabled") + `</td><td>`)
+		if canWrite {
+			b.WriteString(policyAppToggleForm("/admin/policies/"+policyID+"/apps/"+app.ID+"/toggle", csrf, enabled))
+		}
+		b.WriteString(`</td></tr>`)
+	}
+	b.WriteString(`</tbody></table></section>`)
+	return template.HTML(b.String())
+}
+
+func policyManagedCertificatesSummary(policyID string, items []certificates.Certificate, assignments []policy.PolicyCertificate, csrf string, canWrite bool) template.HTML {
+	activeCount := 0
+	for _, cert := range items {
+		if cert.Status == certificates.StatusActive {
+			activeCount++
+		}
+	}
+	if activeCount == 0 {
+		return template.HTML(`<section class="panel"><h2>Managed certificates</h2><p class="muted">No managed certificates are available yet.</p></section>`)
+	}
+	assignmentMap := certificateAssignmentStatusByID(assignments)
+	var b strings.Builder
+	b.WriteString(`<section class="panel"><h2>Managed certificates</h2><table><thead><tr><th>Name</th><th>Artifact</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
+	for _, cert := range items {
+		if cert.Status != certificates.StatusActive {
+			continue
+		}
+		enabled := assignmentMap[cert.ID]
+		label := cert.Name
+		if strings.TrimSpace(label) == "" {
+			label = cert.ID
+		}
+		artifact := cert.ArtifactID
+		if cert.Artifact != nil && strings.TrimSpace(cert.Artifact.StorageKey) != "" {
+			artifact = cert.Artifact.StorageKey
+		}
+		b.WriteString(`<tr><td><a href="/admin/certificates/` + escAttr(cert.ID) + `">` + esc(label) + `</a></td><td>` + esc(artifact) + `</td><td>` + statusBadge(cert.Status) + `</td><td>` + boolBadge(enabled, "enabled", "disabled") + `</td><td>`)
+		if canWrite {
+			b.WriteString(policyCertificateToggleForm("/admin/policies/"+policyID+"/certificates/"+cert.ID+"/toggle", csrf, enabled))
+		}
+		b.WriteString(`</td></tr>`)
+	}
+	b.WriteString(`</tbody></table></section>`)
+	return template.HTML(b.String())
+}
+
+func policyManagedFilesSummary(policyID string, items []managedfiles.ManagedFile, assignments []policy.PolicyManagedFile, csrf string, canWrite bool) template.HTML {
+	activeCount := 0
+	for _, item := range items {
+		if item.Status == managedfiles.StatusActive {
+			activeCount++
+		}
+	}
+	if activeCount == 0 {
+		return template.HTML(`<section class="panel"><h2>Managed files</h2><p class="muted">No managed files are available yet.</p></section>`)
+	}
+	assignmentMap := managedFileAssignmentStatusByID(assignments)
+	var b strings.Builder
+	b.WriteString(`<section class="panel"><h2>Managed files</h2><table><thead><tr><th>Path</th><th>File</th><th>Template</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
+	for _, item := range items {
+		if item.Status != managedfiles.StatusActive {
+			continue
+		}
+		enabled := assignmentMap[item.ID]
+		path := item.Path
+		if strings.TrimSpace(path) == "" {
+			path = item.ID
+		}
+		fileLabel := item.FileID
+		if item.File != nil && strings.TrimSpace(item.File.Name) != "" {
+			fileLabel = item.File.Name
+		}
+		b.WriteString(`<tr><td><a href="/admin/managed-files/` + escAttr(item.ID) + `">` + esc(path) + `</a></td><td>` + esc(fileLabel) + `</td><td>` + boolBadge(item.ReplaceVariables, "enabled", "disabled") + `</td><td>` + statusBadge(item.Status) + `</td><td>` + boolBadge(enabled, "enabled", "disabled") + `</td><td>`)
+		if canWrite {
+			b.WriteString(policyManagedFileToggleForm("/admin/policies/"+policyID+"/managed-files/"+item.ID+"/toggle", csrf, enabled))
+		}
+		b.WriteString(`</td></tr>`)
+	}
+	b.WriteString(`</tbody></table></section>`)
+	return template.HTML(b.String())
+}
+
+func policySummary(found policy.Policy) template.HTML {
+	kioskAppPackage := found.KioskAppPackage
+	if strings.TrimSpace(kioskAppPackage) == "" {
+		kioskAppPackage = "—"
+	}
+	var b strings.Builder
+	b.WriteString(`<h2>Current policy</h2><div class="policy-summary">`)
+	b.WriteString(summaryTextItem("Created", formatDashboardTime(found.CreatedAt)))
+	b.WriteString(summaryTextItem("Updated", formatDashboardTime(found.UpdatedAt)))
+	b.WriteString(summaryTextItem("ID", found.ID))
+	b.WriteString(summaryTextItem("Name", found.Name))
+	b.WriteString(summaryTextItem("Version", strconv.Itoa(found.Version)))
+	b.WriteString(summaryHTMLItem("Kiosk mode", template.HTML(boolBadge(found.KioskMode, "enabled", "disabled"))))
+	b.WriteString(summaryTextItem("Kiosk app package", kioskAppPackage))
+	b.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
+	b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">Stored restrictions JSON</div><div class="policy-summary-value">` + pre(found.Restrictions) + `</div></div>`)
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func summaryTextItem(label, value string) string {
+	return `<div class="policy-summary-item"><div class="policy-summary-label">` + esc(label) + `</div><div class="policy-summary-value">` + esc(value) + `</div></div>`
+}
+
+func summaryHTMLItem(label string, value template.HTML) string {
+	return `<div class="policy-summary-item"><div class="policy-summary-label">` + esc(label) + `</div><div class="policy-summary-value">` + string(value) + `</div></div>`
+}
+
+func appNameByID(items []apps.App) map[string]apps.App {
+	out := make(map[string]apps.App, len(items))
+	for _, item := range items {
+		out[item.ID] = item
+	}
+	return out
+}
+
+func appAssignmentStatusByID(assignments []policy.PolicyApp) map[string]bool {
+	out := make(map[string]bool, len(assignments))
+	for _, assignment := range assignments {
+		out[assignment.AppID] = assignment.Status == policy.StatusActive
+	}
+	return out
+}
+
+func certificateAssignmentStatusByID(assignments []policy.PolicyCertificate) map[string]bool {
+	out := make(map[string]bool, len(assignments))
+	for _, assignment := range assignments {
+		out[assignment.CertificateID] = assignment.Status == policy.StatusActive
+	}
+	return out
+}
+
+func managedFileAssignmentStatusByID(assignments []policy.PolicyManagedFile) map[string]bool {
+	out := make(map[string]bool, len(assignments))
+	for _, assignment := range assignments {
+		out[assignment.ManagedFileID] = assignment.Status == policy.StatusActive
+	}
+	return out
+}
+
+func activeAppOptions(items []apps.App) []optionData {
+	options := make([]optionData, 0, len(items))
+	for _, item := range items {
+		if item.Status != apps.StatusActive {
+			continue
+		}
+		label := item.Name
+		if strings.TrimSpace(label) == "" {
+			label = item.PackageName
+		}
+		options = append(options, optionData{Value: item.ID, Label: label})
+	}
+	return options
+}
+
+func deleteOptionByValue(options *[]optionData, value string) {
+	filtered := make([]optionData, 0, len(*options))
+	for _, option := range *options {
+		if option.Value == value {
+			continue
+		}
+		filtered = append(filtered, option)
+	}
+	*options = filtered
+}
+
+func policyRestrictionFormData(raw json.RawMessage) policyRestrictionFormState {
+	var parsed policyRestrictionPayload
+	if len(raw) > 0 && string(raw) != "null" {
+		_ = json.Unmarshal(raw, &parsed)
+	}
+	return policyRestrictionFormState{
+		AllowPackages:                strings.Join(parsed.AllowPackages, "\n"),
+		BlockPackages:                strings.Join(parsed.BlockPackages, "\n"),
+		SuspendPackages:              strings.Join(parsed.SuspendPackages, "\n"),
+		KioskKeepScreenOn:            parsed.KioskKeepScreenOn,
+		KioskStayAwakeWhilePluggedIn: parsed.KioskStayAwakeWhilePluggedIn,
+		KioskUnlockOnBoot:            parsed.KioskUnlockOnBoot,
+		KioskExitPasscode:            strings.TrimSpace(parsed.KioskExitPasscode),
+	}
+}
+
+type policyRestrictionFormState struct {
+	AllowPackages                string
+	BlockPackages                string
+	SuspendPackages              string
+	KioskKeepScreenOn            bool
+	KioskStayAwakeWhilePluggedIn bool
+	KioskUnlockOnBoot            bool
+	KioskExitPasscode            string
+}
+
+type policyRestrictionPayload struct {
+	AllowPackages                []string `json:"allowPackages,omitempty"`
+	BlockPackages                []string `json:"blockPackages,omitempty"`
+	SuspendPackages              []string `json:"suspendPackages,omitempty"`
+	KioskKeepScreenOn            bool     `json:"kioskKeepScreenOn,omitempty"`
+	KioskStayAwakeWhilePluggedIn bool     `json:"kioskStayAwakeWhilePluggedIn,omitempty"`
+	KioskUnlockOnBoot            bool     `json:"kioskUnlockOnBoot,omitempty"`
+	KioskExitPasscode            string   `json:"kioskExitPasscode,omitempty"`
+}
+
+func boolValue(v bool) string {
+	if v {
+		return "on"
+	}
+	return ""
+}
+
+func uploadForm(title, action string) formData {
+	return formData{Title: title, Action: action, EncType: "multipart/form-data", Fields: []fieldData{{Name: "name", Label: "Name", Type: "text", Required: true}, {Name: "storageKey", Label: "Storage key", Type: "text", Required: true}, {Name: "checksum", Label: "SHA-256 base64url checksum", Type: "text", Required: true}, {Name: "sizeBytes", Label: "Size bytes", Type: "number", Required: true}, {Name: "mimeType", Label: "MIME type", Type: "text", Required: true}, {Name: "file", Label: "File", Type: "file", Required: true}}, Submit: title}
+}
+
+func certificateUploadForm(action string) formData {
+	return formData{
+		Title:   "Upload certificate",
+		Action:  action,
+		EncType: "multipart/form-data",
+		Fields: []fieldData{
+			{Name: "name", Label: "Name", Type: "text", Placeholder: "Root CA", Required: true},
+			{Name: "file", Label: "File", Type: "file", Required: true},
+		},
+		Help:   "",
+		Submit: "Upload certificate",
+	}
+}
+
+type managedAppCreateRequest struct {
+	App         apps.AppUpsert
+	VersionName string
+	VersionCode int64
+	Publish     bool
+	File        files.FileUpsert
+	StorageKey  string
+	MimeType    string
+	SizeBytes   int64
+}
+
+func managedAppForm(action string) formData {
+	return formData{
+		Title:   "Create managed app",
+		Action:  action,
+		EncType: "multipart/form-data",
+		Fields: []fieldData{
+			{Name: "packageName", Label: "Package name", Type: "text", Placeholder: "com.example.app", Required: true},
+			{Name: "name", Label: "App name", Type: "text", Placeholder: "Example App", Required: true},
+			{Name: "versionCode", Label: "Version code", Type: "number", Placeholder: "100", Required: true},
+			{Name: "file", Label: "APK file", Type: "file", Required: true},
+		},
+		Help:   template.HTML(`Upload the APK once. The dashboard derives the artifact storage key, checksum, and file record on the server, then creates the app and publishes its first version in one step.`),
+		Submit: "Create managed app",
+	}
+}
+
+func managedAppUpsertFromMultipart(r *http.Request) (managedAppCreateRequest, []byte, error) {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		return managedAppCreateRequest{}, nil, err
+	}
+	versionCode, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("versionCode")), 10, 64)
+	if err != nil {
+		return managedAppCreateRequest{}, nil, fmt.Errorf("invalid version code")
+	}
+	app := apps.AppUpsert{PackageName: strings.TrimSpace(r.FormValue("packageName")), Name: strings.TrimSpace(r.FormValue("name"))}
+	if app.PackageName == "" || app.Name == "" {
+		return managedAppCreateRequest{}, nil, fmt.Errorf("invalid form")
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		return managedAppCreateRequest{}, nil, fmt.Errorf("file is required")
+	}
+	defer file.Close()
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return managedAppCreateRequest{}, nil, err
+	}
+	if len(content) == 0 {
+		return managedAppCreateRequest{}, nil, fmt.Errorf("file is empty")
+	}
+	checksumValue := checksum.SHA256Base64URL(content)
+	versionName := strings.TrimSpace(r.FormValue("versionName"))
+	if versionName == "" {
+		versionName = fmt.Sprintf("v%d", versionCode)
+	}
+	fileName := sanitizeArtifactName(fmt.Sprintf("%s-%d.apk", app.PackageName, versionCode))
+	storageKey := "artifacts/apps/" + uuid.NewString() + "/" + fileName
+	return managedAppCreateRequest{
+		App:         app,
+		VersionName: versionName,
+		VersionCode: versionCode,
+		Publish:     true,
+		File: files.FileUpsert{
+			Name:       fileName,
+			StorageKey: storageKey,
+			Checksum:   checksumValue,
+			SizeBytes:  int64(len(content)),
+			MimeType:   "application/vnd.android.package-archive",
+		},
+		StorageKey: storageKey,
+		MimeType:   "application/vnd.android.package-archive",
+		SizeBytes:  int64(len(content)),
+	}, content, nil
+}
+
+func sanitizeArtifactName(value string) string {
+	value = filepath.Base(strings.TrimSpace(value))
+	value = strings.NewReplacer("\\", "_", "/", "_", " ", "_").Replace(value)
+	if value == "." || value == "" {
+		return "artifact.apk"
+	}
+	return value
+}
+
+type enrollmentQRFormState struct {
+	ServerURL       string
+	TTL             string
+	ComponentName   string
+	PackageURL      string
+	PackageChecksum string
+	DeviceID        string
+}
+
+type enrollmentQRResult struct {
+	Issued      enrollment.IssuedToken
+	PayloadJSON string
+	PNGDataURL  string
+}
+
+const (
+	deviceEnrollmentServerURL       = "https://mdm.example.com"
+	deviceEnrollmentTTL             = "2h"
+	deviceEnrollmentComponentName   = "com.xmdm.launcher/.AdminReceiver"
+	deviceEnrollmentPackageURL      = "https://mdm.example.com/agent.apk"
+	deviceEnrollmentPackageChecksum = "abc123"
+)
+
+func deviceEnrollmentQRState(deviceID string) enrollmentQRFormState {
+	return enrollmentQRFormState{
+		ServerURL:       deviceEnrollmentServerURL,
+		TTL:             deviceEnrollmentTTL,
+		ComponentName:   deviceEnrollmentComponentName,
+		PackageURL:      deviceEnrollmentPackageURL,
+		PackageChecksum: deviceEnrollmentPackageChecksum,
+		DeviceID:        deviceID,
+	}
+}
+
+func deviceEnrollmentQRForm(deviceID string) formData {
+	return formData{
+		Title:  "Generate enrollment QR",
+		Action: "/admin/devices/" + deviceID + "/enrollment/qr",
+		Help:   "",
+		Submit: "Generate QR",
+	}
+}
+
+func (d *dashboard) generateEnrollmentQR(ctx context.Context, state enrollmentQRFormState) (enrollmentQRResult, error) {
+	ttl, err := time.ParseDuration(strings.TrimSpace(state.TTL))
+	if err != nil || ttl <= 0 {
+		return enrollmentQRResult{}, fmt.Errorf("invalid ttl")
+	}
+	issued, err := d.deps.Enrollment.IssueToken(ctx, d.deps.TenantID, time.Now().UTC().Add(ttl))
+	if err != nil {
+		return enrollmentQRResult{}, err
+	}
+	payload, err := buildEnrollmentQRPayload(state, issued.Secret)
+	if err != nil {
+		return enrollmentQRResult{}, err
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return enrollmentQRResult{}, err
+	}
+	png, err := qrcode.Encode(string(raw), qrcode.Medium, 512)
+	if err != nil {
+		return enrollmentQRResult{}, err
+	}
+	result := enrollmentQRResult{
+		Issued:      issued,
+		PayloadJSON: string(raw),
+		PNGDataURL:  "data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
+	}
+	return result, nil
+}
+
+func buildEnrollmentQRPayload(state enrollmentQRFormState, token string) (map[string]any, error) {
+	serverURL := strings.TrimSpace(state.ServerURL)
+	packageURL := strings.TrimSpace(state.PackageURL)
+	packageChecksum := strings.TrimSpace(state.PackageChecksum)
+	deviceID := strings.TrimSpace(state.DeviceID)
+	if serverURL == "" || packageURL == "" || packageChecksum == "" || deviceID == "" {
+		return nil, fmt.Errorf("server url, package url, package checksum, and device id are required")
+	}
+	parsed, err := url.Parse(serverURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("invalid server url")
+	}
+	extras := map[string]any{
+		"com.xmdm.BASE_URL":         parsed.String(),
+		"com.xmdm.ENROLLMENT_TOKEN": token,
+		"com.xmdm.DEVICE_ID":        deviceID,
+		"com.xmdm.DEVICE_ID_USE":    "serial",
+	}
+	return map[string]any{
+		"android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME":            firstNonEmpty(strings.TrimSpace(state.ComponentName), "com.xmdm.launcher/.AdminReceiver"),
+		"android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": packageURL,
+		"android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM":          packageChecksum,
+		"android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED":          true,
+		"android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE":                    extras,
+	}, nil
+}
+
+func enrollmentQRCallout(result enrollmentQRResult) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<div style="display:grid;gap:1rem">`)
+	b.WriteString(`<section><h3>QR JSON</h3>`)
+	b.WriteString(`<pre class="qr-json">` + template.HTMLEscapeString(result.PayloadJSON) + `</pre>`)
+	b.WriteString(`</section>`)
+	b.WriteString(`<section><h3>QR preview</h3><img alt="Enrollment QR preview" style="max-width:320px;width:100%;height:auto;border:1px solid var(--border);border-radius:.5rem;background:#fff;padding:.5rem" src="` + escAttr(result.PNGDataURL) + `"></section>`)
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func retireForm(action, csrf, label string) string {
+	return `<form class="inline" method="post" action="` + escAttr(action) + `"><input type="hidden" name="csrfToken" value="` + escAttr(csrf) + `"><button class="danger" type="submit">` + esc(label) + `</button></form>`
+}
+
+func policyAppToggleForm(action, csrf string, enabled bool) string {
+	label := "Enable"
+	buttonClass := ""
+	if enabled {
+		label = "Disable"
+		buttonClass = ` class="danger"`
+	}
+	return `<form class="inline" method="post" action="` + escAttr(action) + `"><input type="hidden" name="csrfToken" value="` + escAttr(csrf) + `"><button type="submit"` + buttonClass + `>` + esc(label) + `</button></form>`
+}
+
+func policyCertificateToggleForm(action, csrf string, enabled bool) string {
+	return policyAppToggleForm(action, csrf, enabled)
+}
+
+func policyManagedFileToggleForm(action, csrf string, enabled bool) string {
+	return policyAppToggleForm(action, csrf, enabled)
+}
+
+func esc(v string) string {
+	return template.HTMLEscapeString(v)
+}
+
+func escAttr(v string) string {
+	return template.HTMLEscapeString(v)
+}

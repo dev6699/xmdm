@@ -53,16 +53,20 @@ func (s *Service) Login(username, password string) (Session, error) {
 	if subtle.ConstantTimeCompare([]byte(password), []byte(s.password)) != 1 {
 		return Session{}, ErrInvalidCredentials
 	}
+	return s.IssueSession(username, s.permissions), nil
+}
+
+func (s *Service) IssueSession(username string, permissions []Permission) Session {
 	session := Session{
 		ID:          newSessionID(),
 		Username:    username,
-		Permissions: append([]Permission(nil), s.permissions...),
+		Permissions: append([]Permission(nil), permissions...),
 		ExpiresAt:   s.now().Add(s.sessionTTL),
 	}
 	s.mu.Lock()
 	s.sessions[session.ID] = session
 	s.mu.Unlock()
-	return session, nil
+	return session
 }
 
 func (s *Service) Authenticate(sessionID string) (*Session, bool) {

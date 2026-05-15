@@ -52,7 +52,7 @@ func (s *Store) CreateCertificate(ctx context.Context, tenantID string, req cert
 	row := tx.QueryRow(ctx,
 		`INSERT INTO certificates (id, tenant_id, name, artifact_id, checksum, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id::text, tenant_id::text, name, status, updated_at, deleted_at, artifact_id::text, checksum`,
+		 RETURNING id::text, tenant_id::text, name, status, created_at, updated_at, deleted_at, artifact_id::text, checksum`,
 		uuid.NewString(), tenantID, req.Name, artifact.ID, req.Checksum, s.now(),
 	)
 	rec, err := scanCertificate(row)
@@ -71,7 +71,7 @@ func (s *Store) CreateCertificate(ctx context.Context, tenantID string, req cert
 
 func (s *Store) ListCertificates(ctx context.Context, tenantID string) ([]certificates.Certificate, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT c.id::text, c.tenant_id::text, c.name, c.status, c.updated_at, c.deleted_at, c.artifact_id::text, c.checksum,
+		`SELECT c.id::text, c.tenant_id::text, c.name, c.status, c.created_at, c.updated_at, c.deleted_at, c.artifact_id::text, c.checksum,
 		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
 		 FROM certificates c
 		 JOIN artifacts a ON a.tenant_id = c.tenant_id AND a.id = c.artifact_id
@@ -100,7 +100,7 @@ func (s *Store) ListCertificates(ctx context.Context, tenantID string) ([]certif
 
 func (s *Store) ListActiveCertificates(ctx context.Context, tenantID string) ([]certificates.Certificate, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT c.id::text, c.tenant_id::text, c.name, c.status, c.updated_at, c.deleted_at, c.artifact_id::text, c.checksum,
+		`SELECT c.id::text, c.tenant_id::text, c.name, c.status, c.created_at, c.updated_at, c.deleted_at, c.artifact_id::text, c.checksum,
 		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
 		 FROM certificates c
 		 JOIN artifacts a ON a.tenant_id = c.tenant_id AND a.id = c.artifact_id
@@ -129,7 +129,7 @@ func (s *Store) ListActiveCertificates(ctx context.Context, tenantID string) ([]
 
 func (s *Store) GetCertificate(ctx context.Context, tenantID, id string) (certificates.Certificate, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT c.id::text, c.tenant_id::text, c.name, c.status, c.updated_at, c.deleted_at, c.artifact_id::text, c.checksum,
+		`SELECT c.id::text, c.tenant_id::text, c.name, c.status, c.created_at, c.updated_at, c.deleted_at, c.artifact_id::text, c.checksum,
 		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
 		 FROM certificates c
 		 JOIN artifacts a ON a.tenant_id = c.tenant_id AND a.id = c.artifact_id
@@ -151,7 +151,7 @@ func (s *Store) RetireCertificate(ctx context.Context, tenantID, id string) (cer
 		`UPDATE certificates
 		 SET status = $3, deleted_at = $4, updated_at = $4
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, name, status, updated_at, deleted_at, artifact_id::text, checksum`,
+		 RETURNING id::text, tenant_id::text, name, status, created_at, updated_at, deleted_at, artifact_id::text, checksum`,
 		tenantID, id, certificates.StatusRetired, s.now(),
 	)
 	rec, err := scanCertificate(row)
@@ -218,9 +218,13 @@ func (s *Store) loadArtifactByID(ctx context.Context, tenantID, artifactID strin
 
 func scanCertificate(scanner rowScanner) (certificates.Certificate, error) {
 	var rec certificates.Certificate
+	var createdAt pgtype.Timestamptz
 	var deletedAt pgtype.Timestamptz
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &rec.Status, &rec.UpdatedAt, &deletedAt, &rec.ArtifactID, &rec.Checksum); err != nil {
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &rec.Status, &createdAt, &rec.UpdatedAt, &deletedAt, &rec.ArtifactID, &rec.Checksum); err != nil {
 		return certificates.Certificate{}, err
+	}
+	if createdAt.Valid {
+		rec.CreatedAt = createdAt.Time
 	}
 	if deletedAt.Valid {
 		rec.DeletedAt = &deletedAt.Time
@@ -230,14 +234,18 @@ func scanCertificate(scanner rowScanner) (certificates.Certificate, error) {
 
 func scanCertificateWithArtifact(scanner rowScanner) (certificates.Certificate, error) {
 	var rec certificates.Certificate
+	var createdAt pgtype.Timestamptz
 	var deletedAt pgtype.Timestamptz
 	var artifact files.Artifact
 	var artifactDeletedAt pgtype.Timestamptz
 	if err := scanner.Scan(
-		&rec.ID, &rec.TenantID, &rec.Name, &rec.Status, &rec.UpdatedAt, &deletedAt, &rec.ArtifactID, &rec.Checksum,
+		&rec.ID, &rec.TenantID, &rec.Name, &rec.Status, &createdAt, &rec.UpdatedAt, &deletedAt, &rec.ArtifactID, &rec.Checksum,
 		&artifact.ID, &artifact.TenantID, &artifact.StorageKey, &artifact.Checksum, &artifact.SizeBytes, &artifact.MimeType, &artifact.Status, &artifact.UpdatedAt, &artifactDeletedAt,
 	); err != nil {
 		return certificates.Certificate{}, err
+	}
+	if createdAt.Valid {
+		rec.CreatedAt = createdAt.Time
 	}
 	if deletedAt.Valid {
 		rec.DeletedAt = &deletedAt.Time

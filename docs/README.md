@@ -12,4 +12,5 @@ Useful runbooks:
 - [Backup And Restore Drill](backup-restore-drill.md)
 - [Cleanup Pass](cleanup-pass.md)
 - [Observability](observability.md)
+- [Admin Dashboard](admin-dashboard.md)
 - [XMDM CLI Operator Guide](../cli/README.md)

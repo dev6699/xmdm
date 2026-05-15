@@ -9,6 +9,22 @@ Path prefix:
 - The same contract can be mounted under `/admin/...` by the console wrapper
 - Both surfaces preserve the same semantics and payload shapes
 
+Browser dashboard:
+
+- `/admin` is the server-rendered dashboard overview.
+- `/admin/login` and `/admin/logout` are the browser session routes.
+- `/admin/users`, `/admin/roles`, `/admin/groups`, `/admin/policies`, `/admin/devices`, `/admin/apps`, `/admin/files`, `/admin/managed-files`, `/admin/certificates`, `/admin/enrollment`, `/admin/commands`, `/admin/logs`, `/admin/device-info`, and `/admin/audit` are browser pages backed by the same repositories and validation rules as the `/api/v1` resources.
+- `/admin/enrollment/qr` issues a fresh enrollment token and renders the QR payload inline as either JSON or a PNG preview.
+- `/admin/apps` creates a managed app in one multipart flow: package name, app name, version code, and APK upload. The dashboard derives the artifact storage key, checksum, and version name on the server, creates the logical file record, then creates the app's initial version as published.
+- `/admin/apps/{id}` shows the app detail page with current metadata, published versions, and update/retire actions.
+- `/admin/apps` renders the app catalog in a scan-first list with `Created`, `ID`, `Name`, `Package`, `Latest published`, and `Status` columns. Open the app name to manage it.
+- `/admin/policies/{id}` shows the policy detail page with scan-first managed-app, managed-file, and certificate tables. Every active resource is listed with its policy state and an enable/disable toggle; the device snapshot only includes enabled resources for the linked policy.
+- `/admin/managed-files` uploads a managed file artifact and creates the managed-file binding in one multipart flow: device path plus file upload, with the logical file record and artifact metadata derived on the server. Re-uploading the same device path replaces the existing binding with the new file content.
+- `/admin/managed-files/{id}` shows the managed-file detail page with the current binding, a download action for the uploaded file, and retire controls when the record is still active.
+- If the package name already exists on an active app, the dashboard publishes a new version for that app instead of creating a duplicate app row.
+- Browser mutations are submitted with `application/x-www-form-urlencoded` or `multipart/form-data`, require a session cookie, and require the `xmdm_csrf` cookie to match the `csrfToken` form field.
+- JSON API clients should continue using `/api/v1/...`; the `/admin/...` routes return `text/html`.
+
 ## Session Routes
 
 ### `GET /api/v1/admin/login`
@@ -52,7 +68,7 @@ Path prefix:
 
 - Permission: `admin.write`
 - Success response: `200 text/html`
-- Body: simple command creation form with target type, device ID, group ID, and payload fields
+- Body: simple command creation form with target type, device ID, group ID, and payload fields; the browser form only exposes device and group targets
 
 ### `POST /api/v1/admin/commands`
 
@@ -63,7 +79,7 @@ Path prefix:
 - Fields:
   - `type` `string`
   - `payload` `object` or JSON string
-  - `target.type` `device`, `group`, or `broadcast`
+  - `target.type` `device`, `group`, or `broadcast` for the API; the browser form only submits `device` or `group`
   - `target.deviceId` required when `target.type=device`
   - `target.groupId` required when `target.type=group`
 - Success response: `200 application/json`
@@ -746,6 +762,7 @@ Response body:
     "id": "uuid",
     "tenantId": "uuid",
     "status": "active",
+    "createdAt": "2026-04-23T00:00:00Z",
     "updatedAt": "2026-04-23T00:00:00Z",
     "deletedAt": null,
     "name": "Group name"
@@ -771,6 +788,7 @@ Response body:
   "id": "uuid",
   "tenantId": "uuid",
   "status": "active",
+  "createdAt": "2026-04-23T00:00:00Z",
   "updatedAt": "2026-04-23T00:00:00Z",
   "deletedAt": null,
   "name": "Group name"
@@ -795,6 +813,7 @@ Response body:
   "id": "uuid",
   "tenantId": "uuid",
   "status": "active",
+  "createdAt": "2026-04-23T00:00:00Z",
   "updatedAt": "2026-04-23T00:00:00Z",
   "deletedAt": null,
   "name": "Group name"
@@ -834,7 +853,6 @@ Response body:
     "updatedAt": "2026-04-23T00:00:00Z",
     "deletedAt": null,
     "name": "Policy name",
-    "version": 1,
     "kioskMode": false,
     "restrictions": {}
   }
@@ -849,7 +867,6 @@ Response body:
 ```json
 {
   "name": "Policy name",
-  "version": 1,
   "kioskMode": false,
   "restrictions": {}
 }
@@ -865,10 +882,9 @@ Response body:
   "updatedAt": "2026-04-23T00:00:00Z",
   "deletedAt": null,
   "name": "Policy name",
-  "version": 1,
-  "kioskMode": false,
-  "restrictions": {}
-}
+    "kioskMode": false,
+    "restrictions": {}
+  }
 ```
 
 ### `PATCH /api/v1/policies/{id}`
@@ -879,7 +895,6 @@ Response body:
 ```json
 {
   "name": "Policy name",
-  "version": 1,
   "kioskMode": false,
   "restrictions": {}
 }

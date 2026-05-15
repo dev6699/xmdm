@@ -10,6 +10,7 @@ import (
 
 	"xmdm/server/internal/commands"
 	device "xmdm/server/internal/device"
+	"xmdm/server/internal/group"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/push"
 
@@ -121,6 +122,19 @@ func (s *Store) ListRecent(ctx context.Context, tenantID string, limit int) ([]c
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) Get(ctx context.Context, tenantID, commandID string) (commands.Command, error) {
+	if tenantID == "" || commandID == "" {
+		return commands.Command{}, httpx.ErrInvalidInput
+	}
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at
+		 FROM commands
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, commandID,
+	)
+	return scanCommand(row)
 }
 
 func (s *Store) ListPending(ctx context.Context, tenantID, deviceID string) ([]commands.Command, error) {
@@ -330,10 +344,11 @@ func (s *Store) resolveTargets(ctx context.Context, tenantID string, target comm
 		return s.listTargetDeviceIDs(ctx,
 			`SELECT d.id
 			 FROM device_groups dg
+			 JOIN groups g ON g.tenant_id = dg.tenant_id AND g.id = dg.group_id AND g.status = $5
 			 JOIN devices d ON d.tenant_id = dg.tenant_id AND d.id = dg.device_id
 			 WHERE dg.tenant_id = $1 AND dg.group_id = $2 AND d.status <> $3 AND d.status <> $4
 			 ORDER BY d.created_at, d.id`,
-			tenantID, target.GroupID, device.StatusRetired, device.StatusWiped,
+			tenantID, target.GroupID, device.StatusRetired, device.StatusWiped, group.StatusActive,
 		)
 	case commands.TargetBroadcast:
 		return s.listTargetDeviceIDs(ctx,

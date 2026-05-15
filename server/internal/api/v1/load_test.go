@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -239,15 +240,18 @@ func newLoadFixture(tb testing.TB) *loadFixture {
 
 	devices := &loadDeviceStore{
 		expectedSecret: loadDeviceSecret,
-		device: device.Device{
-			RecordBase: device.RecordBase{
-				ID:       "device-record-load",
-				TenantID: loadTenantID,
-				Status:   device.StatusEnrolled,
-			},
-			Name:            loadDeviceID,
-			BootstrapExtras: map[string]any{"deviceIdUse": "serial"},
+	}
+	policyID := "policy-load"
+	devices.device = device.Device{
+		RecordBase: device.RecordBase{
+			ID:       "device-record-load",
+			TenantID: loadTenantID,
+			Status:   device.StatusEnrolled,
 		},
+		DeviceID:        loadDeviceID,
+		Name:            loadDeviceID,
+		PolicyID:        &policyID,
+		BootstrapExtras: map[string]any{"deviceIdUse": "serial"},
 	}
 	appsStore := &loadAppStore{
 		apps: []apps.App{
@@ -352,6 +356,9 @@ func newLoadFixture(tb testing.TB) *loadFixture {
 				Restrictions: []byte(`{"allowPackages":["com.example.loadapp"]}`),
 			},
 		},
+		policyApps: []policy.PolicyApp{
+			{PolicyID: "policy-load", AppID: loadAppID},
+		},
 	}
 
 	svc := auth.NewServiceWithPermissions(loadAdminUsername, loadAdminPassword, time.Hour, []auth.Permission{auth.PermissionAdminRead, auth.PermissionAdminWrite, auth.PermissionDevicesWrite})
@@ -373,7 +380,13 @@ func newLoadFixture(tb testing.TB) *loadFixture {
 	managedfilehttp.Register(apiMux, svc, managedFilesStore, devices, artifactStore, loadTenantID)
 	telemetryhttp.Register(apiMux, telemetryStore, loadTenantID)
 
-	server := httptest.NewServer(mux)
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		tb.Fatalf("listen load test server: %v", err)
+	}
+	server := httptest.NewUnstartedServer(mux)
+	server.Listener = listener
+	server.Start()
 	tb.Cleanup(server.Close)
 
 	return &loadFixture{
@@ -552,7 +565,11 @@ func (s *loadDeviceStore) Authenticate(_ context.Context, _ string, deviceID, se
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.authCount++
-	if deviceID != s.device.Name || secret != s.expectedSecret {
+	expectedID := s.device.DeviceID
+	if expectedID == "" {
+		expectedID = s.device.Name
+	}
+	if deviceID != expectedID || secret != s.expectedSecret {
 		return device.Device{}, httpx.ErrNotFound
 	}
 	return s.device, nil
@@ -574,6 +591,17 @@ func (s *loadAppStore) ListApps(context.Context, string) ([]apps.App, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]apps.App(nil), s.apps...), nil
+}
+
+func (s *loadAppStore) GetApp(_ context.Context, _ string, id string) (apps.App, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.apps {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return apps.App{}, httpx.ErrNotFound
 }
 
 func (s *loadAppStore) CreateApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
@@ -704,6 +732,10 @@ func (s *loadCommandStore) ListRecent(context.Context, string, int) ([]commands.
 	return nil, nil
 }
 
+func (s *loadCommandStore) Get(context.Context, string, string) (commands.Command, error) {
+	return commands.Command{}, httpx.ErrNotFound
+}
+
 func (s *loadCommandStore) ListPending(context.Context, string, string) ([]commands.Command, error) {
 	return nil, nil
 }
@@ -784,14 +816,26 @@ func (s *loadTelemetryStore) uploads() int {
 }
 
 type loadPolicyStore struct {
-	mu       sync.Mutex
-	policies []policy.Policy
+	mu         sync.Mutex
+	policies   []policy.Policy
+	policyApps []policy.PolicyApp
 }
 
 func (s *loadPolicyStore) ListPolicies(context.Context, string) ([]policy.Policy, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]policy.Policy(nil), s.policies...), nil
+}
+
+func (s *loadPolicyStore) GetPolicy(_ context.Context, _ string, id string) (policy.Policy, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.policies {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return policy.Policy{}, httpx.ErrNotFound
 }
 
 func (s *loadPolicyStore) CreatePolicy(context.Context, string, policy.PolicyUpsert) (policy.Policy, error) {
@@ -804,4 +848,46 @@ func (s *loadPolicyStore) UpdatePolicy(context.Context, string, string, policy.P
 
 func (s *loadPolicyStore) RetirePolicy(context.Context, string, string) (policy.Policy, error) {
 	return policy.Policy{}, nil
+}
+
+func (s *loadPolicyStore) ListPolicyApps(context.Context, string, string) ([]policy.PolicyApp, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]policy.PolicyApp(nil), s.policyApps...), nil
+}
+
+func (s *loadPolicyStore) AddPolicyApp(context.Context, string, string, string) (policy.PolicyApp, error) {
+	return policy.PolicyApp{}, nil
+}
+
+func (s *loadPolicyStore) RemovePolicyApp(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *loadPolicyStore) ListPolicyCertificates(context.Context, string, string) ([]policy.PolicyCertificate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return nil, nil
+}
+
+func (s *loadPolicyStore) AddPolicyCertificate(context.Context, string, string, string) (policy.PolicyCertificate, error) {
+	return policy.PolicyCertificate{}, nil
+}
+
+func (s *loadPolicyStore) RemovePolicyCertificate(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *loadPolicyStore) ListPolicyManagedFiles(context.Context, string, string) ([]policy.PolicyManagedFile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return nil, nil
+}
+
+func (s *loadPolicyStore) AddPolicyManagedFile(context.Context, string, string, string) (policy.PolicyManagedFile, error) {
+	return policy.PolicyManagedFile{}, nil
+}
+
+func (s *loadPolicyStore) RemovePolicyManagedFile(context.Context, string, string, string) error {
+	return nil
 }

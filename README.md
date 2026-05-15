@@ -5,7 +5,7 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-05-12
+Snapshot last updated: 2026-05-15
 
 ### M0 - Foundation
 
@@ -75,7 +75,7 @@ Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeed
 | M4-07 Content E2E | ☑ |
 | M4-08 Artifact Cleanup | ☑ |
 
-Note: `M4-01 App Management` is complete with app CRUD plus immutable version upload and publish support, `M4-02 File Storage` is complete with multipart file upload plus artifact metadata persistence, `M4-03 Certificates` is complete with certificate upload/distribution and signed config inclusion for active certificates, `M4-04 Checksum Verification` is complete with server-side content digest validation for file, certificate, and referenced app artifacts plus an Android-side artifact checksum verifier, `M4-05 App Install Flow` is complete with server-side app artifact streaming, signed snapshot app entries, Android install/uninstall coordination for managed packages, live download progress UI, and a documented reprovision runbook, `M4-06 File Download Flow` is complete with device-authenticated file artifact downloads, a separate managed-file creation flow, server-rendered file content, and persisted managed-file state on the launcher, `M4-07 Content E2E` is complete with adb-backed physical-device verification of managed app install plus server-rendered managed file delivery, and `M4-08 Artifact Cleanup` is complete with orphan artifact detection plus a dedicated cleanup command that retires and purges unreferenced artifact rows and blobs.
+Note: `M4-01 App Management` is complete with app CRUD plus immutable version upload and publish support, scan-first app list/detail pages, latest published version visibility in the list, and server-assigned version metadata; `M4-02 File Storage` is complete with multipart file upload plus artifact metadata persistence, `M4-03 Certificates` is complete with certificate upload/distribution and signed config inclusion for active certificates, `M4-04 Checksum Verification` is complete with server-side content digest validation for file, certificate, and referenced app artifacts plus an Android-side artifact checksum verifier, `M4-05 App Install Flow` is complete with server-side app artifact streaming, signed snapshot app entries, Android install/uninstall coordination for managed packages, live download progress UI, and a documented reprovision runbook, `M4-06 File Download Flow` is complete with device-authenticated file artifact downloads, a separate managed-file creation flow, server-rendered file content, and persisted managed-file state on the launcher, `M4-07 Content E2E` is complete with adb-backed physical-device verification of managed app install plus server-rendered managed file delivery, and `M4-08 Artifact Cleanup` is complete with orphan artifact detection plus a dedicated cleanup command that retires and purges unreferenced artifact rows and blobs.
 
 ### M5 - Push And Commands
 
@@ -159,6 +159,23 @@ Note: `M8-08 Command Operations` is complete as of 2026-05-09 with live-server-b
 Note: `M8-09 Output Formats And Error Handling` is complete as of 2026-05-09 with JSON envelope output, readable table/default human output, live-server-backed command tests that decode the envelope contract, and stable CLI exit-code mapping for HTTP and transport failures.
 Note: `M8-10 Packaging And Release Documentation` is complete as of 2026-05-09 with install, upgrade, completion, and shell-integration guidance in [cli/README.md](cli/README.md) plus the checked-in example config and Cobra completion support.
 
+### M9 - Admin Dashboard
+
+| Item | State |
+| --- | --- |
+| M9-01 Dashboard Blueprint And Contract | ☑ |
+| M9-02 Console Foundation | ☑ |
+| M9-03 Overview Dashboard | ☑ |
+| M9-04 Core Resource Views | ☑ |
+| M9-05 Core Resource Mutations | ☑ |
+| M9-06 Content Dashboard | ☑ |
+| M9-07 Enrollment Dashboard | ☑ |
+| M9-08 Commands Dashboard | ☑ |
+| M9-09 Inspection Dashboard | ☑ |
+| M9-10 Dashboard E2E And Docs | ☑ |
+
+Note: `M9-01` through `M9-10` are implemented as of 2026-05-15 with server-rendered `/admin` pages for dashboard overview, session auth, users, roles, groups, scan-first policy list/detail pages with generated restriction inputs, policy-managed app, managed-file, and certificate toggles, identity-style device list and detail pages, device-level enrollment QR generation, scan-first app list/detail pages, scan-first managed-files and certificates pages with detail views, commands list/detail pages, audit visibility, and a root-level `playwright/` workspace that covers the real-server login, identity, device, device-detail QR, group-detail, content, command, and audit flows with inline QR JSON and PNG preview output below the generate button. Device enrollment now uses an immutable device ID separate from the operator-facing display name, managed files now upload in one dashboard step from the managed-files page, and groups now have a scan-first list with a detail page that shows member devices.
+
 ## Blueprint Index
 
 1. [blueprint/00-product-principles.md](blueprint/00-product-principles.md)
@@ -181,3 +198,4 @@ The repository is organized into a small set of top-level homes that mirror the 
 - `contracts/` for API contracts, payload definitions, and generated interface artifacts
 - `infra/` for deployment, local environment, and operational automation
 - `docs/` for repo-specific documentation, runbooks, and release-support material
+- `playwright/` for browser automation and dashboard end-to-end coverage

@@ -26,6 +26,7 @@ func TestRegisterCertificateArtifactRoute(t *testing.T) {
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
+			DeviceID:        "device-123",
 			Name:            "device-123",
 			BootstrapExtras: map[string]any{},
 		},
@@ -97,7 +98,11 @@ func (s *fakeDeviceStore) RetireDevice(context.Context, string, string) (device.
 }
 
 func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, secret string) (device.Device, error) {
-	if deviceID != s.device.Name || secret != "device-secret" {
+	expectedID := s.device.DeviceID
+	if expectedID == "" {
+		expectedID = s.device.Name
+	}
+	if deviceID != expectedID || secret != "device-secret" {
 		return device.Device{}, httpx.ErrNotFound
 	}
 	return s.device, nil

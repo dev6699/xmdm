@@ -148,7 +148,7 @@ func TestRegisterEnrollmentBindRouteReturnsIdentityOnly(t *testing.T) {
 				Name:         "old",
 				Version:      1,
 				KioskMode:    false,
-				Restrictions: json.RawMessage(`{"blockPackages":["com.example.old"]}`),
+				Restrictions: json.RawMessage(`{"blockPackages":["com.example.old"],"kioskExitPasscode":"1234"}`),
 			},
 			{
 				RecordBase: policy.RecordBase{
@@ -161,6 +161,15 @@ func TestRegisterEnrollmentBindRouteReturnsIdentityOnly(t *testing.T) {
 				KioskMode:    true,
 				Restrictions: json.RawMessage(`{"blockPackages":["com.example.bad"],"allowPackages":["com.example.good"]}`),
 			},
+		},
+		policyApps: []policy.PolicyApp{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-old", AppID: "app-1"},
+		},
+		policyCertificates: []policy.PolicyCertificate{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-new", CertificateID: "cert-1"},
+		},
+		policyManagedFiles: []policy.PolicyManagedFile{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-old", ManagedFileID: "managed-file-1"},
 		},
 	}
 
@@ -194,6 +203,74 @@ func TestRegisterEnrollmentBindRouteReturnsIdentityOnly(t *testing.T) {
 	}
 	if _, ok := payload["config"]; ok {
 		t.Fatalf("enrollment response should not include config: %#v", payload["config"])
+	}
+}
+
+func TestRegisterEnrollmentConfigRequiresPolicyLink(t *testing.T) {
+	store := &fakeEnrollmentStore{
+		bound: enrollment.BoundDevice{
+			DeviceID:     "device-123",
+			DeviceSecret: "device-secret",
+			Status:       device.StatusEnrolled,
+		},
+	}
+	deviceStore := &fakeDeviceStore{
+		device: device.Device{
+			RecordBase: device.RecordBase{
+				ID:       "device-record-1",
+				TenantID: "tenant-1",
+				Status:   device.StatusEnrolled,
+			},
+			DeviceID: "device-123",
+			Name:     "device-123",
+			// Leave PolicyID unset to verify the config path no longer falls back to the latest policy.
+			BootstrapExtras: map[string]any{"customer": "Acme"},
+		},
+		secret: "device-secret",
+	}
+	policyStore := &fakePolicyStore{
+		policies: []policy.Policy{
+			{
+				RecordBase: policy.RecordBase{
+					ID:       "policy-old",
+					TenantID: "tenant-1",
+					Status:   "active",
+				},
+				Name:    "old",
+				Version: 1,
+			},
+			{
+				RecordBase: policy.RecordBase{
+					ID:       "policy-new",
+					TenantID: "tenant-1",
+					Status:   "active",
+				},
+				Name:    "new",
+				Version: 2,
+			},
+		},
+		policyApps: []policy.PolicyApp{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-1", AppID: "app-1"},
+		},
+		policyCertificates: []policy.PolicyCertificate{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-1", CertificateID: "cert-1"},
+		},
+		policyManagedFiles: []policy.PolicyManagedFile{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-1", ManagedFileID: "managed-file-1"},
+		},
+	}
+
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, store, nil, nil, nil, nil, policyStore, enrollment.RuntimeSnapshot{}, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/config", nil)
+	req.Header.Set("X-XMDM-Device-Secret", "device-secret")
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("expected missing linked policy to fail with not found, got %d body=%s", res.Code, res.Body.String())
 	}
 }
 
@@ -359,7 +436,9 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
+			DeviceID:        "device-123",
 			Name:            "device-123",
+			PolicyID:        strPtr("policy-old"),
 			BootstrapExtras: map[string]any{"customer": "Acme"},
 		},
 		secret: "device-secret",
@@ -387,6 +466,16 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 					VersionCode: 100,
 					ArtifactID:  strPtr("artifact-1"),
 					Checksum:    "sha256-app-abc",
+				},
+				{
+					ID:          "version-2",
+					TenantID:    "tenant-1",
+					AppID:       "app-1",
+					Status:      apps.VersionStatusPublished,
+					VersionName: "1.1.0",
+					VersionCode: 110,
+					ArtifactID:  strPtr("artifact-2"),
+					Checksum:    "sha256-app-def",
 				},
 			},
 		},
@@ -427,6 +516,41 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 			},
 		},
 	}
+	policyStore := &fakePolicyStore{
+		policies: []policy.Policy{
+			{
+				RecordBase: policy.RecordBase{
+					ID:       "policy-old",
+					TenantID: "tenant-1",
+					Status:   "active",
+				},
+				Name:         "old",
+				Version:      1,
+				KioskMode:    false,
+				Restrictions: json.RawMessage(`{"blockPackages":["com.example.old"],"kioskExitPasscode":"1234"}`),
+			},
+			{
+				RecordBase: policy.RecordBase{
+					ID:       "policy-new",
+					TenantID: "tenant-1",
+					Status:   "active",
+				},
+				Name:         "new",
+				Version:      2,
+				KioskMode:    true,
+				Restrictions: json.RawMessage(`{"blockPackages":["com.example.bad"],"allowPackages":["com.example.good"]}`),
+			},
+		},
+		policyApps: []policy.PolicyApp{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-old", AppID: "app-1"},
+		},
+		policyCertificates: []policy.PolicyCertificate{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-new", CertificateID: "cert-1"},
+		},
+		policyManagedFiles: []policy.PolicyManagedFile{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-old", ManagedFileID: "managed-file-1"},
+		},
+	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
 	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER CUSTOMER")}
@@ -443,7 +567,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 				Checksum:   "sha256-cert-abc",
 			},
 		},
-	}, nil, enrollment.RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000}, "tenant-1")
+	}, policyStore, enrollment.RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
@@ -517,6 +641,12 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if config.Runtime.MqttAddress != "127.0.0.1:1883" || config.Runtime.CommandPollIntervalMs != 1000 || config.Runtime.ConfigSyncIntervalMs != 1000 {
 		t.Fatalf("unexpected runtime config: %#v", config.Runtime)
 	}
+	if config.Policy.Name != "old" || config.Policy.Version != 1 || config.Policy.KioskMode {
+		t.Fatalf("expected linked policy snapshot, got %#v", config.Policy)
+	}
+	if config.Policy.Restrictions.KioskExitPasscodeHash != enrollment.HashToken("1234") {
+		t.Fatalf("expected linked policy passcode to be hashed for the device snapshot, got %#v", config.Policy.Restrictions.KioskExitPasscodeHash)
+	}
 	if len(config.Apps) != 1 {
 		t.Fatalf("expected one app in config, got %d", len(config.Apps))
 	}
@@ -526,7 +656,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if got := config.Files[0].Checksum; got != checksum.SHA256Base64URL([]byte("managed-file-on-device device-123 Acme")) {
 		t.Fatalf("unexpected rendered file checksum: %#v", got)
 	}
-	if config.Apps[0].DownloadPath != "/api/v1/devices/device-123/apps/app-1/versions/version-1/artifact" {
+	if config.Apps[0].DownloadPath != "/api/v1/devices/device-123/apps/app-1/versions/version-2/artifact" {
 		t.Fatalf("unexpected download path: %#v", config.Apps[0].DownloadPath)
 	}
 	fileEntry := config.Files[0]
@@ -576,6 +706,7 @@ func TestRegisterEnrollmentConfigRejectsWrongDeviceCredentials(t *testing.T) {
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
+			DeviceID:        "device-123",
 			Name:            "device-123",
 			BootstrapExtras: map[string]any{"customer": "Acme"},
 		},
@@ -627,7 +758,9 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
+			DeviceID:        "device-123",
 			Name:            "device-123",
+			PolicyID:        strPtr("policy-1"),
 			BootstrapExtras: map[string]any{"customer": "Acme"},
 		},
 	}
@@ -704,10 +837,26 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 			},
 		},
 	}
+	policyStore := &fakePolicyStore{
+		policies: []policy.Policy{
+			{
+				RecordBase: policy.RecordBase{
+					ID:       "policy-1",
+					TenantID: "tenant-1",
+					Status:   "active",
+				},
+				Name:    "policy-one",
+				Version: 1,
+			},
+		},
+		policyManagedFiles: []policy.PolicyManagedFile{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-1", ManagedFileID: "managed-file-1"},
+		},
+	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
 	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER CUSTOMER")}
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, store, appStore, fileStore, artifactStore, nil, nil, enrollment.RuntimeSnapshot{}, "tenant-1")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, store, appStore, fileStore, artifactStore, nil, policyStore, enrollment.RuntimeSnapshot{}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
@@ -738,15 +887,6 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &typedConfig); err != nil {
 		t.Fatalf("decode config snapshot: %v", err)
 	}
-	if len(typedConfig.Apps) != 1 {
-		t.Fatalf("expected one app in config, got %d", len(typedConfig.Apps))
-	}
-	if typedConfig.Apps[0].VersionID != "version-2" {
-		t.Fatalf("expected latest version, got %#v", typedConfig.Apps[0].VersionID)
-	}
-	if typedConfig.Apps[0].DownloadPath != "/api/v1/devices/device-123/apps/app-1/versions/version-2/artifact" {
-		t.Fatalf("unexpected download path: %#v", typedConfig.Apps[0].DownloadPath)
-	}
 	if len(typedConfig.Files) != 1 {
 		t.Fatalf("expected one file in config, got %d", len(typedConfig.Files))
 	}
@@ -763,7 +903,9 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
+			DeviceID:        "device-123",
 			Name:            "device-123",
+			PolicyID:        strPtr("policy-1"),
 			BootstrapExtras: map[string]any{"CUSTOMER": "Acme"},
 		},
 	}
@@ -848,6 +990,28 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 				}`),
 			},
 		},
+		policyApps: []policy.PolicyApp{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-1", AppID: "app-1"},
+		},
+		policyCertificates: []policy.PolicyCertificate{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-1", CertificateID: "cert-1"},
+		},
+		policyManagedFiles: []policy.PolicyManagedFile{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-1", ManagedFileID: "managed-file-1"},
+		},
+	}
+	directApps, err := listPublishedPolicyApps(context.Background(), policyStore, appStore, "device-123", "tenant-1", strPtr("policy-1"))
+	if err != nil {
+		t.Fatalf("direct list policy apps: %v", err)
+	}
+	if len(directApps) != 1 {
+		t.Fatalf("expected one assigned app, got %d", len(directApps))
+	}
+	if directApps[0].VersionID != "version-1" {
+		t.Fatalf("unexpected version, got %#v", directApps[0].VersionID)
+	}
+	if directApps[0].DownloadPath != "/api/v1/devices/device-123/apps/app-1/versions/version-1/artifact" {
+		t.Fatalf("unexpected download path: %#v", directApps[0].DownloadPath)
 	}
 
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
@@ -928,10 +1092,67 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 	}
 }
 
+func TestListPublishedPolicyAppsFiltersByPolicyAssignment(t *testing.T) {
+	policyStore := &fakePolicyStore{
+		policies: []policy.Policy{
+			{
+				RecordBase: policy.RecordBase{
+					ID:       "policy-1",
+					TenantID: "tenant-1",
+					Status:   "active",
+				},
+				Name:    "policy-one",
+				Version: 1,
+			},
+		},
+		policyApps: []policy.PolicyApp{
+			{RecordBase: policy.RecordBase{Status: policy.StatusActive}, PolicyID: "policy-1", AppID: "app-1"},
+		},
+	}
+	appStore := &fakeAppStore{
+		apps: []apps.App{
+			{
+				RecordBase: apps.RecordBase{
+					ID:       "app-1",
+					TenantID: "tenant-1",
+					Status:   apps.StatusActive,
+				},
+				PackageName: "com.example.app",
+				Name:        "Example App",
+			},
+		},
+		versions: map[string][]apps.Version{
+			"app-1": {
+				{
+					ID:          "version-1",
+					TenantID:    "tenant-1",
+					AppID:       "app-1",
+					Status:      apps.VersionStatusPublished,
+					VersionName: "1.0.0",
+					VersionCode: 100,
+					ArtifactID:  strPtr("artifact-1"),
+					Checksum:    "sha256-app-abc",
+				},
+			},
+		},
+	}
+	items, err := listPublishedPolicyApps(context.Background(), policyStore, appStore, "device-123", "tenant-1", strPtr("policy-1"))
+	if err != nil {
+		t.Fatalf("list policy apps: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one assigned app, got %d", len(items))
+	}
+	if items[0].DownloadPath != "/api/v1/devices/device-123/apps/app-1/versions/version-1/artifact" {
+		t.Fatalf("unexpected app download path: %#v", items[0].DownloadPath)
+	}
+}
+
 type fakeEnrollmentStore struct {
 	issued      enrollment.IssuedToken
 	validated   enrollment.Token
 	consumed    enrollment.Token
+	tokens      []enrollment.Token
 	revoked     enrollment.Token
 	bound       enrollment.BoundDevice
 	validateErr error
@@ -965,7 +1186,10 @@ type fakeAppStore struct {
 }
 
 type fakePolicyStore struct {
-	policies []policy.Policy
+	policies           []policy.Policy
+	policyApps         []policy.PolicyApp
+	policyCertificates []policy.PolicyCertificate
+	policyManagedFiles []policy.PolicyManagedFile
 }
 
 type fakeDeviceStore struct {
@@ -1009,6 +1233,10 @@ func (s *fakeEnrollmentStore) BindDevice(_ context.Context, tenantID, token, dev
 		return enrollment.BoundDevice{}, s.bindErr
 	}
 	return s.bound, nil
+}
+
+func (s *fakeEnrollmentStore) ListTokens(context.Context, string) ([]enrollment.Token, error) {
+	return append([]enrollment.Token(nil), s.tokens...), nil
 }
 
 func (s *fakeEnrollmentStore) RevokeToken(_ context.Context, tenantID, id string) (enrollment.Token, error) {
@@ -1064,6 +1292,10 @@ func (s *fakeAppStore) ListApps(context.Context, string) ([]apps.App, error) {
 	return append([]apps.App(nil), s.apps...), nil
 }
 
+func (s *fakeAppStore) GetApp(context.Context, string, string) (apps.App, error) {
+	return apps.App{}, httpx.ErrNotFound
+}
+
 func (s *fakeAppStore) CreateApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
 	return apps.App{}, nil
 }
@@ -1092,6 +1324,15 @@ func (s *fakePolicyStore) ListPolicies(context.Context, string) ([]policy.Policy
 	return append([]policy.Policy(nil), s.policies...), nil
 }
 
+func (s *fakePolicyStore) GetPolicy(_ context.Context, _ string, id string) (policy.Policy, error) {
+	for _, item := range s.policies {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return policy.Policy{}, httpx.ErrNotFound
+}
+
 func (s *fakePolicyStore) CreatePolicy(context.Context, string, policy.PolicyUpsert) (policy.Policy, error) {
 	return policy.Policy{}, nil
 }
@@ -1102,6 +1343,78 @@ func (s *fakePolicyStore) UpdatePolicy(context.Context, string, string, policy.P
 
 func (s *fakePolicyStore) RetirePolicy(context.Context, string, string) (policy.Policy, error) {
 	return policy.Policy{}, nil
+}
+
+func (s *fakePolicyStore) ListPolicyApps(context.Context, string, string) ([]policy.PolicyApp, error) {
+	return append([]policy.PolicyApp(nil), s.policyApps...), nil
+}
+
+func (s *fakePolicyStore) AddPolicyApp(context.Context, string, string, string) (policy.PolicyApp, error) {
+	return policy.PolicyApp{}, nil
+}
+
+func (s *fakePolicyStore) RemovePolicyApp(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *fakePolicyStore) ListPolicyCertificates(context.Context, string, string) ([]policy.PolicyCertificate, error) {
+	return append([]policy.PolicyCertificate(nil), s.policyCertificates...), nil
+}
+
+func (s *fakePolicyStore) AddPolicyCertificate(_ context.Context, tenantID string, policyID string, certificateID string) (policy.PolicyCertificate, error) {
+	for i := range s.policyCertificates {
+		if s.policyCertificates[i].TenantID == tenantID && s.policyCertificates[i].PolicyID == policyID && s.policyCertificates[i].CertificateID == certificateID {
+			s.policyCertificates[i].Status = policy.StatusActive
+			return s.policyCertificates[i], nil
+		}
+	}
+	item := policy.PolicyCertificate{
+		RecordBase:    policy.RecordBase{TenantID: tenantID, Status: policy.StatusActive},
+		PolicyID:      policyID,
+		CertificateID: certificateID,
+	}
+	s.policyCertificates = append(s.policyCertificates, item)
+	return item, nil
+}
+
+func (s *fakePolicyStore) RemovePolicyCertificate(_ context.Context, tenantID string, policyID string, certificateID string) error {
+	for i := range s.policyCertificates {
+		if s.policyCertificates[i].TenantID == tenantID && s.policyCertificates[i].PolicyID == policyID && s.policyCertificates[i].CertificateID == certificateID {
+			s.policyCertificates[i].Status = "disabled"
+			return nil
+		}
+	}
+	return httpx.ErrNotFound
+}
+
+func (s *fakePolicyStore) ListPolicyManagedFiles(context.Context, string, string) ([]policy.PolicyManagedFile, error) {
+	return append([]policy.PolicyManagedFile(nil), s.policyManagedFiles...), nil
+}
+
+func (s *fakePolicyStore) AddPolicyManagedFile(_ context.Context, tenantID string, policyID string, managedFileID string) (policy.PolicyManagedFile, error) {
+	for i := range s.policyManagedFiles {
+		if s.policyManagedFiles[i].TenantID == tenantID && s.policyManagedFiles[i].PolicyID == policyID && s.policyManagedFiles[i].ManagedFileID == managedFileID {
+			s.policyManagedFiles[i].Status = policy.StatusActive
+			return s.policyManagedFiles[i], nil
+		}
+	}
+	item := policy.PolicyManagedFile{
+		RecordBase:    policy.RecordBase{TenantID: tenantID, Status: policy.StatusActive},
+		PolicyID:      policyID,
+		ManagedFileID: managedFileID,
+	}
+	s.policyManagedFiles = append(s.policyManagedFiles, item)
+	return item, nil
+}
+
+func (s *fakePolicyStore) RemovePolicyManagedFile(_ context.Context, tenantID string, policyID string, managedFileID string) error {
+	for i := range s.policyManagedFiles {
+		if s.policyManagedFiles[i].TenantID == tenantID && s.policyManagedFiles[i].PolicyID == policyID && s.policyManagedFiles[i].ManagedFileID == managedFileID {
+			s.policyManagedFiles[i].Status = "disabled"
+			return nil
+		}
+	}
+	return httpx.ErrNotFound
 }
 
 func (s *fakeDeviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
@@ -1121,7 +1434,7 @@ func (s *fakeDeviceStore) RetireDevice(context.Context, string, string) (device.
 }
 
 func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, secret string) (device.Device, error) {
-	if s.secret != "" && (deviceID != s.device.Name || secret != s.secret) {
+	if s.secret != "" && (deviceID != s.device.DeviceID || secret != s.secret) {
 		return device.Device{}, httpx.ErrNotFound
 	}
 	return s.device, nil

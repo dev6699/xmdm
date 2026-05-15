@@ -12,6 +12,7 @@ import (
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
+	"xmdm/server/internal/httpx"
 )
 
 func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
@@ -23,6 +24,13 @@ func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
 	now := time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
 	store.SetNow(func() time.Time { return now })
 	deviceID := "device-" + uuid.NewString()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, uuid.NewString(), bootstrap.SeedTenantID, deviceID, enrollment.HashToken("bootstrap-secret"), device.StatusPending, now)
+	if err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
 
 	issued, err := store.IssueToken(context.Background(), bootstrap.SeedTenantID, now.Add(time.Hour))
 	if err != nil {
@@ -92,6 +100,14 @@ func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
 		t.Fatalf("expected duplicate device conflict, got %v", err)
 	}
 
+	missingIssued, err := store.IssueToken(context.Background(), bootstrap.SeedTenantID, now.Add(5*time.Hour))
+	if err != nil {
+		t.Fatalf("issue missing device token: %v", err)
+	}
+	if _, err := store.BindDevice(context.Background(), bootstrap.SeedTenantID, missingIssued.Secret, "missing-"+uuid.NewString(), nil); !errors.Is(err, httpx.ErrNotFound) {
+		t.Fatalf("expected missing device not found, got %v", err)
+	}
+
 	expiringIssued, err := store.IssueToken(context.Background(), bootstrap.SeedTenantID, now.Add(10*time.Minute))
 	if err != nil {
 		t.Fatalf("issue expiring token: %v", err)
@@ -105,6 +121,43 @@ func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
 	}
 	if _, err := store.ValidateToken(context.Background(), bootstrap.SeedTenantID, expiringIssued.Secret); !errors.Is(err, enrollment.ErrTokenExpired) {
 		t.Fatalf("expected expired validation error, got %v", err)
+	}
+}
+
+func TestStoreListTokens(t *testing.T) {
+	pool := openTestPool(t)
+	t.Cleanup(pool.Close)
+	resetEnrollmentTestDB(t, pool)
+
+	store := New(pool)
+	now := time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
+	store.SetNow(func() time.Time { return now })
+
+	issued, err := store.IssueToken(context.Background(), bootstrap.SeedTenantID, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+	revokedIssued, err := store.IssueToken(context.Background(), bootstrap.SeedTenantID, now.Add(2*time.Hour))
+	if err != nil {
+		t.Fatalf("issue revoke token: %v", err)
+	}
+	revoked, err := store.RevokeToken(context.Background(), bootstrap.SeedTenantID, revokedIssued.ID)
+	if err != nil {
+		t.Fatalf("revoke token: %v", err)
+	}
+
+	items, err := store.ListTokens(context.Background(), bootstrap.SeedTenantID)
+	if err != nil {
+		t.Fatalf("list tokens: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 tokens, got %d", len(items))
+	}
+	if items[0].ID != revoked.ID || items[0].Status != enrollment.TokenStatusRevoked {
+		t.Fatalf("expected newest revoked token first, got %#v", items[0])
+	}
+	if items[1].ID != issued.ID || items[1].Status != enrollment.TokenStatusIssued {
+		t.Fatalf("expected older issued token second, got %#v", items[1])
 	}
 }
 

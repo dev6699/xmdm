@@ -548,6 +548,78 @@ Owner roles used below:
 - Task: document installation, upgrade, completion, and shell integration for the CLI tool.
 - Done when: the CLI can be distributed and operated with documented procedures.
 
+## Milestone M9 - Admin Dashboard
+
+### M9-01 Dashboard Blueprint And Contract
+
+- Owner: `PM/Arch`
+- Depends on: M8-10
+- Task: define the browser admin dashboard scope, routes, permissions, and operator workflows.
+- Done when: the roadmap, README snapshot, and dashboard docs describe every dashboard page and mutation flow.
+
+### M9-02 Console Foundation
+
+- Owner: `BE`
+- Depends on: M9-01, M1-01, M1-02
+- Task: implement the server-rendered dashboard shell, login/logout flow, CSRF protection, shared layout, navigation, and permission checks.
+- Done when: `/admin` routes render authenticated HTML pages and reject unauthorized or CSRF-invalid mutations.
+
+### M9-03 Overview Dashboard
+
+- Owner: `BE`
+- Depends on: M9-02
+- Task: implement the dashboard home page with fleet, content, command, and audit summaries.
+- Done when: `/admin` shows live summary counts from the control-plane repositories.
+
+### M9-04 Core Resource Views
+
+- Owner: `BE`
+- Depends on: M9-02, M1-04
+- Task: implement browser list/detail views for users, roles, groups, policies, and devices.
+- Done when: operators can inspect core resources and open a device support view from the browser.
+
+### M9-05 Core Resource Mutations
+
+- Owner: `BE`
+- Depends on: M9-04
+- Task: implement browser create, update, and retire forms for users, roles, groups, policies, and devices.
+- Done when: core resource browser mutations enforce CSRF, RBAC, validation, and audit capture.
+
+### M9-06 Content Dashboard
+
+- Owner: `BE`
+- Depends on: M9-02, M4-01, M4-02, M4-03
+- Task: implement browser pages for apps, app versions, files, managed files, and certificates.
+- Done when: operators can manage app metadata, publish app versions, upload file/certificate artifacts, create managed files, and retire content records.
+
+### M9-07 Enrollment Dashboard
+
+- Owner: `BE`
+- Depends on: M9-02, M2-01, M2-02
+- Task: implement browser workflows for enrollment token issuance, validation, revocation, and enrollment material inspection.
+- Done when: operators can prepare enrollment material without the CLI.
+
+### M9-08 Commands Dashboard
+
+- Owner: `BE`
+- Depends on: M9-02, M5-05, M6-06
+- Task: implement browser command listing and send forms for device, group, and broadcast targets.
+- Done when: operators can create and inspect command rows through `/admin/commands`.
+
+### M9-09 Inspection Dashboard
+
+- Owner: `BE`
+- Depends on: M9-02, M6-04, M6-05, M6-06
+- Task: implement browser views for logs, device info, audit events, and device support inspection.
+- Done when: operators can answer support questions from browser-visible operational records.
+
+### M9-10 Dashboard E2E And Docs
+
+- Owner: `QA`
+- Depends on: M9-03 through M9-09
+- Task: verify the dashboard workflow and document browser operation.
+- Done when: dashboard handler coverage, admin e2e coverage, and operator documentation prove login, resource management, content, enrollment, commands, inspection, and logout.
+
 ## Backlog Rules
 
 - An item may only move forward if every dependency is complete.

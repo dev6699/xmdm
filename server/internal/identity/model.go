@@ -2,13 +2,17 @@ package identity
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 )
+
+var ErrInvalidCredentials = errors.New("invalid credentials")
 
 type RecordBase struct {
 	ID        string     `json:"id"`
 	TenantID  string     `json:"tenantId"`
 	Status    string     `json:"status"`
+	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
 	DeletedAt *time.Time `json:"deletedAt,omitempty"`
 }

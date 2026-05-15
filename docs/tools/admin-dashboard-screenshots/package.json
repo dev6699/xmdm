@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "install-browser": "playwright install chromium",
+    "capture": "node capture-admin-dashboard.js"
+  },
+  "dependencies": {
+    "playwright": "^1.60.0"
+  }
+}

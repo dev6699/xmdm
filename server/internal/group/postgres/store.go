@@ -36,7 +36,7 @@ func (s *Store) CreateGroup(ctx context.Context, tenantID string, req group.Grou
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO groups (id, tenant_id, name, updated_at)
 		 VALUES ($1, $2, $3, $4)
-		 RETURNING id::text, tenant_id::text, name, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, name, status, created_at, updated_at, deleted_at`,
 		uuid.NewString(), tenantID, req.Name, s.now(),
 	)
 	return scanGroup(row)
@@ -44,7 +44,7 @@ func (s *Store) CreateGroup(ctx context.Context, tenantID string, req group.Grou
 
 func (s *Store) ListGroups(ctx context.Context, tenantID string) ([]group.Group, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, tenant_id::text, name, status, updated_at, deleted_at
+		`SELECT id::text, tenant_id::text, name, status, created_at, updated_at, deleted_at
 		 FROM groups
 		 WHERE tenant_id = $1
 		 ORDER BY created_at`,
@@ -77,7 +77,7 @@ func (s *Store) UpdateGroup(ctx context.Context, tenantID, id string, req group.
 		`UPDATE groups
 		 SET name = $3, updated_at = $4
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, name, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, name, status, created_at, updated_at, deleted_at`,
 		tenantID, id, req.Name, s.now(),
 	)
 	rec, err := scanGroup(row)
@@ -95,7 +95,7 @@ func (s *Store) RetireGroup(ctx context.Context, tenantID, id string) (group.Gro
 		`UPDATE groups
 		 SET status = 'retired', deleted_at = $3, updated_at = $3
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, name, status, updated_at, deleted_at`,
+		 RETURNING id::text, tenant_id::text, name, status, created_at, updated_at, deleted_at`,
 		tenantID, id, s.now(),
 	)
 	rec, err := scanGroup(row)
@@ -110,9 +110,13 @@ func (s *Store) RetireGroup(ctx context.Context, tenantID, id string) (group.Gro
 
 func scanGroup(scanner rowScanner) (group.Group, error) {
 	var rec group.Group
+	var createdAt pgtype.Timestamptz
 	var deletedAt pgtype.Timestamptz
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &rec.Status, &rec.UpdatedAt, &deletedAt); err != nil {
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &rec.Status, &createdAt, &rec.UpdatedAt, &deletedAt); err != nil {
 		return group.Group{}, err
+	}
+	if createdAt.Valid {
+		rec.CreatedAt = createdAt.Time
 	}
 	if deletedAt.Valid {
 		rec.DeletedAt = &deletedAt.Time

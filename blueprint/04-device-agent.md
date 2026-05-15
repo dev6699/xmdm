@@ -129,7 +129,7 @@ flowchart TD
 - If policy requests kiosk keep-awake behavior, keep the kiosk activity screen on while kiosk policy is active.
 - If policy requests kiosk stay-awake-while-plugged-in behavior, update the device-owner global stay-on setting while kiosk policy is active.
 - If policy requests kiosk boot unlock, attempt a best-effort keyguard dismissal after reboot without password policy.
-- Kiosk policies must include a kiosk exit passcode hash. When present, accept a hidden top-left tap sequence, prompt for the passcode locally, and suppress kiosk until the current policy revision is replaced or the device reboots.
+- Kiosk policies must include a kiosk exit passcode. The server hashes it into the signed snapshot, and when present the launcher accepts a hidden top-left tap sequence, prompts for the passcode locally, and suppresses kiosk until the current policy revision is replaced or the device reboots.
 - Enforce app allow/block lists and package suspension.
 - Enforce screen lock, restriction flags, and behavior toggles from the server.
 - Never treat local UI state as authoritative over the latest policy snapshot.

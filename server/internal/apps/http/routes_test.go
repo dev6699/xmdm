@@ -84,6 +84,10 @@ func (s *fakeAppStore) ListApps(context.Context, string) ([]apps.App, error) {
 	return nil, nil
 }
 
+func (s *fakeAppStore) GetApp(context.Context, string, string) (apps.App, error) {
+	return apps.App{}, httpx.ErrNotFound
+}
+
 func (s *fakeAppStore) CreateApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
 	return apps.App{}, nil
 }

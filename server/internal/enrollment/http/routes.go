@@ -120,9 +120,18 @@ func Register(mux httpx.Router, svc *auth.Service, devices device.Repository, st
 			}
 			return
 		}
-		config, err := buildSignedConfigSnapshot(r.Context(), policyStore, appStore, managedFileStore, artifactStore, certStore, tenantID, authDevice.Name, authDevice.BootstrapExtras, runtime, secret)
+		deviceIdentity := strings.TrimSpace(authDevice.DeviceID)
+		if deviceIdentity == "" {
+			deviceIdentity = authDevice.Name
+		}
+		config, err := buildSignedConfigSnapshot(r.Context(), policyStore, appStore, managedFileStore, artifactStore, certStore, tenantID, deviceIdentity, authDevice.PolicyID, authDevice.BootstrapExtras, runtime, secret)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			switch err {
+			case httpx.ErrNotFound:
+				http.Error(w, "not found", http.StatusNotFound)
+			default:
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
 			return
 		}
 		writeJSON(w, config)
@@ -303,30 +312,110 @@ func Register(mux httpx.Router, svc *auth.Service, devices device.Repository, st
 	})
 }
 
-func buildSignedConfigSnapshot(ctx context.Context, policyStore policy.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, artifactStore artifacts.Store, certStore certificates.Repository, tenantID, deviceID string, bootstrapExtras map[string]any, runtime enrollment.RuntimeSnapshot, secret string) (enrollment.ConfigSnapshot, error) {
-	appsSnapshot, err := listPublishedApps(ctx, appStore, deviceID, tenantID)
+func BuildConfigSnapshot(ctx context.Context, policyStore policy.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, artifactStore artifacts.Store, certStore certificates.Repository, tenantID, deviceID string, policyID *string, bootstrapExtras map[string]any, runtime enrollment.RuntimeSnapshot) (enrollment.ConfigSnapshot, error) {
+	appsSnapshot, err := listPublishedPolicyApps(ctx, policyStore, appStore, deviceID, tenantID, policyID)
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
 	}
 	deviceIDUse := managedfiles.TemplateValues(deviceID, bootstrapExtras)["DEVICE_ID_USE"]
-	filesSnapshot, err := listManagedFiles(ctx, managedFileStore, artifactStore, deviceID, tenantID, bootstrapExtras)
+	filesSnapshot, err := listPolicyManagedFiles(ctx, policyStore, managedFileStore, artifactStore, deviceID, tenantID, policyID, bootstrapExtras)
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
 	}
-	certs, err := listActiveCertificates(ctx, certStore, tenantID, deviceID)
+	certs, err := listPolicyCertificates(ctx, policyStore, certStore, tenantID, deviceID, policyID)
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
 	}
-	policySnapshot, err := latestPolicySnapshot(ctx, policyStore, tenantID)
+	policySnapshot, err := devicePolicySnapshot(ctx, policyStore, tenantID, policyID)
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
 	}
 	config := enrollment.NewBootstrapConfigSnapshot(deviceID, deviceIDUse, runtime, policySnapshot, appsSnapshot, filesSnapshot, certs)
+	return config, nil
+}
+
+func buildSignedConfigSnapshot(ctx context.Context, policyStore policy.Repository, appStore apps.Repository, managedFileStore managedfiles.Repository, artifactStore artifacts.Store, certStore certificates.Repository, tenantID, deviceID string, policyID *string, bootstrapExtras map[string]any, runtime enrollment.RuntimeSnapshot, secret string) (enrollment.ConfigSnapshot, error) {
+	config, err := BuildConfigSnapshot(ctx, policyStore, appStore, managedFileStore, artifactStore, certStore, tenantID, deviceID, policyID, bootstrapExtras, runtime)
+	if err != nil {
+		return enrollment.ConfigSnapshot{}, err
+	}
 	return enrollment.SignConfigSnapshot(config, secret)
 }
 
-func listManagedFiles(ctx context.Context, store managedfiles.Repository, artifactStore artifacts.Store, deviceID, tenantID string, bootstrapExtras map[string]any) ([]enrollment.ManagedFileSnapshot, error) {
-	if store == nil {
+func devicePolicySnapshot(ctx context.Context, store policy.Repository, tenantID string, policyID *string) (enrollment.PolicySnapshot, error) {
+	if policyID == nil || strings.TrimSpace(*policyID) == "" {
+		return enrollment.PolicySnapshot{}, httpx.ErrNotFound
+	}
+	rec, err := store.GetPolicy(ctx, tenantID, strings.TrimSpace(*policyID))
+	if err != nil {
+		return enrollment.PolicySnapshot{}, err
+	}
+	restrictions, err := policySnapshotRestrictions(rec.Restrictions)
+	if err != nil {
+		return enrollment.PolicySnapshot{}, err
+	}
+	snapshot := enrollment.PolicySnapshot{
+		Name:            rec.Name,
+		Version:         rec.Version,
+		KioskMode:       rec.KioskMode,
+		KioskAppPackage: rec.KioskAppPackage,
+		Restrictions:    restrictions,
+	}
+	return snapshot, nil
+}
+
+type policySnapshotRestrictionsPayload struct {
+	AllowPackages                []string `json:"allowPackages,omitempty"`
+	BlockPackages                []string `json:"blockPackages,omitempty"`
+	SuspendPackages              []string `json:"suspendPackages,omitempty"`
+	KioskKeepScreenOn            bool     `json:"kioskKeepScreenOn,omitempty"`
+	KioskStayAwakeWhilePluggedIn bool     `json:"kioskStayAwakeWhilePluggedIn,omitempty"`
+	KioskUnlockOnBoot            bool     `json:"kioskUnlockOnBoot,omitempty"`
+	KioskExitPasscode            string   `json:"kioskExitPasscode,omitempty"`
+	KioskExitPasscodeHash        string   `json:"kioskExitPasscodeHash,omitempty"`
+}
+
+func policySnapshotRestrictions(raw json.RawMessage) (enrollment.PolicyRestrictions, error) {
+	var parsed policySnapshotRestrictionsPayload
+	if len(raw) > 0 && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return enrollment.PolicyRestrictions{}, err
+		}
+	}
+	passcodeHash := strings.TrimSpace(parsed.KioskExitPasscodeHash)
+	if passcodeHash == "" {
+		passcode := strings.TrimSpace(parsed.KioskExitPasscode)
+		if passcode != "" {
+			passcodeHash = enrollment.HashToken(passcode)
+		}
+	}
+	return enrollment.PolicyRestrictions{
+		AllowPackages:                parsed.AllowPackages,
+		BlockPackages:                parsed.BlockPackages,
+		SuspendPackages:              parsed.SuspendPackages,
+		KioskKeepScreenOn:            parsed.KioskKeepScreenOn,
+		KioskStayAwakeWhilePluggedIn: parsed.KioskStayAwakeWhilePluggedIn,
+		KioskUnlockOnBoot:            parsed.KioskUnlockOnBoot,
+		KioskExitPasscodeHash:        passcodeHash,
+	}, nil
+}
+
+func listPolicyManagedFiles(ctx context.Context, policyStore policy.Repository, store managedfiles.Repository, artifactStore artifacts.Store, deviceID, tenantID string, policyID *string, bootstrapExtras map[string]any) ([]enrollment.ManagedFileSnapshot, error) {
+	if policyStore == nil || store == nil || policyID == nil || strings.TrimSpace(*policyID) == "" {
+		return []enrollment.ManagedFileSnapshot{}, nil
+	}
+	assignments, err := policyStore.ListPolicyManagedFiles(ctx, tenantID, strings.TrimSpace(*policyID))
+	if err != nil {
+		return nil, err
+	}
+	assigned := make(map[string]struct{}, len(assignments))
+	for _, assignment := range assignments {
+		if assignment.Status != policy.StatusActive {
+			continue
+		}
+		assigned[assignment.ManagedFileID] = struct{}{}
+	}
+	if len(assigned) == 0 {
 		return []enrollment.ManagedFileSnapshot{}, nil
 	}
 	files, err := store.ListManagedFiles(ctx, tenantID)
@@ -335,6 +424,9 @@ func listManagedFiles(ctx context.Context, store managedfiles.Repository, artifa
 	}
 	snapshots := make([]enrollment.ManagedFileSnapshot, 0, len(files))
 	for _, file := range files {
+		if _, ok := assigned[file.ID]; !ok {
+			continue
+		}
 		if file.Status != managedfiles.StatusActive {
 			continue
 		}
@@ -384,42 +476,6 @@ func renderedManagedFileContent(ctx context.Context, artifactStore artifacts.Sto
 		return nil, err
 	}
 	return managedfiles.RenderTemplate(content, deviceID, bootstrapExtras), nil
-}
-
-func latestPolicySnapshot(ctx context.Context, store policy.Repository, tenantID string) (enrollment.PolicySnapshot, error) {
-	snapshot := enrollment.PolicySnapshot{}
-	if store == nil {
-		return snapshot, nil
-	}
-	policies, err := store.ListPolicies(ctx, tenantID)
-	if err != nil {
-		return enrollment.PolicySnapshot{}, err
-	}
-	var selected *policy.Policy
-	for i := range policies {
-		rec := policies[i]
-		if rec.Status != "active" {
-			continue
-		}
-		if selected == nil || rec.Version > selected.Version || (rec.Version == selected.Version && rec.UpdatedAt.After(selected.UpdatedAt)) {
-			selected = &rec
-		}
-	}
-	if selected == nil {
-		return snapshot, nil
-	}
-	snapshot.Name = selected.Name
-	snapshot.Version = selected.Version
-	snapshot.KioskMode = selected.KioskMode
-	snapshot.KioskAppPackage = selected.KioskAppPackage
-	if len(selected.Restrictions) > 0 {
-		var restrictions enrollment.PolicyRestrictions
-		if err := json.Unmarshal(selected.Restrictions, &restrictions); err != nil {
-			return enrollment.PolicySnapshot{}, err
-		}
-		snapshot.Restrictions = restrictions
-	}
-	return snapshot, nil
 }
 
 func decodeTokenIssueRequest(r *http.Request, dst *TokenIssueRequest) error {
@@ -641,16 +697,33 @@ func writeJSON(w http.ResponseWriter, value any) {
 	_, _ = w.Write(bytes.TrimSpace(buf.Bytes()))
 }
 
-func listActiveCertificates(ctx context.Context, store certificates.Repository, tenantID, deviceID string) ([]enrollment.CertificateSnapshot, error) {
-	if store == nil {
+func listPolicyCertificates(ctx context.Context, policyStore policy.Repository, certStore certificates.Repository, tenantID, deviceID string, policyID *string) ([]enrollment.CertificateSnapshot, error) {
+	if policyStore == nil || certStore == nil || policyID == nil || strings.TrimSpace(*policyID) == "" {
 		return []enrollment.CertificateSnapshot{}, nil
 	}
-	items, err := store.ListActiveCertificates(ctx, tenantID)
+	assignments, err := policyStore.ListPolicyCertificates(ctx, tenantID, strings.TrimSpace(*policyID))
+	if err != nil {
+		return nil, err
+	}
+	assigned := make(map[string]struct{}, len(assignments))
+	for _, assignment := range assignments {
+		if assignment.Status != policy.StatusActive {
+			continue
+		}
+		assigned[assignment.CertificateID] = struct{}{}
+	}
+	if len(assigned) == 0 {
+		return []enrollment.CertificateSnapshot{}, nil
+	}
+	items, err := certStore.ListActiveCertificates(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]enrollment.CertificateSnapshot, 0, len(items))
 	for _, item := range items {
+		if _, ok := assigned[item.ID]; !ok {
+			continue
+		}
 		out = append(out, enrollment.CertificateSnapshot{
 			ID:           item.ID,
 			Name:         item.Name,
@@ -666,11 +739,25 @@ func certificateDownloadPath(deviceID, certificateID string) string {
 	return "/api/v1/devices/" + deviceID + "/certificates/" + certificateID + "/artifact"
 }
 
-func listPublishedApps(ctx context.Context, store apps.Repository, deviceID, tenantID string) ([]enrollment.AppSnapshot, error) {
-	if store == nil {
+func listPublishedPolicyApps(ctx context.Context, policyStore policy.Repository, appStore apps.Repository, deviceID, tenantID string, policyID *string) ([]enrollment.AppSnapshot, error) {
+	if policyStore == nil || appStore == nil || policyID == nil || strings.TrimSpace(*policyID) == "" {
 		return []enrollment.AppSnapshot{}, nil
 	}
-	items, err := store.ListApps(ctx, tenantID)
+	assignments, err := policyStore.ListPolicyApps(ctx, tenantID, strings.TrimSpace(*policyID))
+	if err != nil {
+		return nil, err
+	}
+	assigned := make(map[string]struct{}, len(assignments))
+	for _, assignment := range assignments {
+		if assignment.Status != policy.StatusActive {
+			continue
+		}
+		assigned[assignment.AppID] = struct{}{}
+	}
+	if len(assigned) == 0 {
+		return []enrollment.AppSnapshot{}, nil
+	}
+	items, err := appStore.ListApps(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -679,7 +766,10 @@ func listPublishedApps(ctx context.Context, store apps.Repository, deviceID, ten
 		if appRecord.Status != apps.StatusActive {
 			continue
 		}
-		versions, err := store.ListVersions(ctx, tenantID, appRecord.ID)
+		if _, ok := assigned[appRecord.ID]; !ok {
+			continue
+		}
+		versions, err := appStore.ListVersions(ctx, tenantID, appRecord.ID)
 		if err != nil {
 			return nil, err
 		}

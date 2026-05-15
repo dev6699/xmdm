@@ -67,6 +67,24 @@ type Dependencies struct {
 func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
+	adminhttp.RegisterDashboard(mux, svc, adminhttp.DashboardDependencies{
+		Identity:     deps.Identity,
+		Apps:         deps.Apps,
+		Files:        deps.Files,
+		ManagedFiles: deps.ManagedFiles,
+		Logs:         deps.Logs,
+		Commands:     deps.Commands,
+		DeviceInfo:   deps.DeviceInfo,
+		Certificates: deps.Certificates,
+		Artifacts:    deps.Artifacts,
+		Groups:       deps.Groups,
+		Policies:     deps.Policies,
+		Devices:      deps.Devices,
+		Enrollment:   deps.Enrollment,
+		Runtime:      deps.Runtime,
+		Audit:        deps.Audit,
+		TenantID:     deps.TenantID,
+	})
 	enrollmenthttp.Register(apiMux, svc, deps.Devices, deps.Enrollment, deps.Apps, deps.ManagedFiles, deps.Artifacts, deps.Certificates, deps.Policies, deps.Runtime, deps.TenantID)
 	telemetryhttp.Register(apiMux, deps.Telemetry, deps.TenantID)
 	loghttp.Register(apiMux, svc, deps.Devices, deps.Logs, deps.TenantID)
@@ -90,7 +108,15 @@ func defaultRateLimitRules() []httpx.RateLimitRule {
 			Name:           "admin-login",
 			Method:         http.MethodPost,
 			Prefix:         "/api/v1/admin/login",
-			Burst:          5,
+			Burst:          100,
+			RefillInterval: 10 * time.Second,
+			RetryAfter:     10 * time.Second,
+		},
+		{
+			Name:           "admin-login",
+			Method:         http.MethodPost,
+			Prefix:         "/admin/login",
+			Burst:          100,
 			RefillInterval: 10 * time.Second,
 			RetryAfter:     10 * time.Second,
 		},

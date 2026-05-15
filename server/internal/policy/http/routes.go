@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
-	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 	policy "xmdm/server/internal/policy"
 )
@@ -54,9 +54,11 @@ func kioskExitPasscodeConfigured(restrictions json.RawMessage) bool {
 	if len(restrictions) == 0 || string(restrictions) == "null" {
 		return false
 	}
-	var parsed enrollment.PolicyRestrictions
+	var parsed struct {
+		KioskExitPasscode string `json:"kioskExitPasscode,omitempty"`
+	}
 	if err := json.Unmarshal(restrictions, &parsed); err != nil {
 		return false
 	}
-	return parsed.KioskExitPasscodeHash != ""
+	return strings.TrimSpace(parsed.KioskExitPasscode) != ""
 }
