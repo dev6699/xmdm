@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/telemetry"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const seededDeviceID = "33333333-3333-3333-3333-333333333333"
@@ -26,7 +28,7 @@ func TestStoreUploadTelemetry(t *testing.T) {
 	store := New(pool)
 	store.SetNow(func() time.Time { return now })
 
-	rec, err := store.Upload(context.Background(), bootstrap.SeedTenantID, "device-123", deviceSecret, telemetry.UploadRequest{
+	rec, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, deviceSecret, telemetry.UploadRequest{
 		Heartbeat: map[string]any{"online": true},
 		Battery:   map[string]any{"level": 87},
 	})
@@ -41,18 +43,18 @@ func TestStoreUploadTelemetry(t *testing.T) {
 	}
 
 	var status string
-	if err := pool.QueryRow(context.Background(), `SELECT status FROM devices WHERE tenant_id = $1 AND device_id = $2`, bootstrap.SeedTenantID, "device-123").Scan(&status); err != nil {
+	if err := pool.QueryRow(context.Background(), `SELECT status FROM devices WHERE tenant_id = $1 AND id = $2`, bootstrap.SeedTenantID, seededDeviceID).Scan(&status); err != nil {
 		t.Fatalf("load device status: %v", err)
 	}
 	if status != device.StatusActive {
 		t.Fatalf("expected active status after telemetry, got %q", status)
 	}
 
-	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, "missing-device", deviceSecret, telemetry.UploadRequest{Heartbeat: map[string]any{"online": true}}); !errors.Is(err, telemetry.ErrDeviceNotFound) {
+	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, uuid.NewString(), deviceSecret, telemetry.UploadRequest{Heartbeat: map[string]any{"online": true}}); !errors.Is(err, telemetry.ErrDeviceNotFound) {
 		t.Fatalf("expected device not found, got %v", err)
 	}
 
-	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, "device-123", "wrong-secret", telemetry.UploadRequest{Heartbeat: map[string]any{"online": true}}); !errors.Is(err, telemetry.ErrDeviceUnauthorized) {
+	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "wrong-secret", telemetry.UploadRequest{Heartbeat: map[string]any{"online": true}}); !errors.Is(err, telemetry.ErrDeviceUnauthorized) {
 		t.Fatalf("expected unauthorized, got %v", err)
 	}
 }
@@ -79,11 +81,10 @@ func resetTelemetryTestDB(t *testing.T, pool *pgxpool.Pool) {
 		TRUNCATE TABLE device_telemetry, enrollment_tokens, audit_events, device_groups, devices, policies, groups, users, roles, tenants RESTART IDENTITY CASCADE;
 		INSERT INTO tenants (id, name, status)
 		VALUES ('`+bootstrap.SeedTenantID+`', '`+bootstrap.SeedTenantName+`', 'active');
-		INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
+		INSERT INTO devices (id, tenant_id, secret_hash, status, updated_at)
 		VALUES (
 			'`+seededDeviceID+`',
 			'`+bootstrap.SeedTenantID+`',
-			'device-123',
 			'`+enrollment.HashToken("device-secret")+`',
 			'enrolled',
 			now()

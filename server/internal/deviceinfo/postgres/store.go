@@ -86,7 +86,7 @@ func (s *Store) Search(ctx context.Context, tenantID string, filter deviceinfo.S
 	conditions := []string{"i.tenant_id = $1"}
 	if filter.DeviceID != "" {
 		args = append(args, filter.DeviceID)
-		conditions = append(conditions, fmt.Sprintf("d.device_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("d.id = $%d", len(args)))
 	}
 	if filter.Query != "" {
 		args = append(args, filter.Query)
@@ -103,7 +103,7 @@ func (s *Store) Search(ctx context.Context, tenantID string, filter deviceinfo.S
 	args = append(args, limit)
 
 	query := strings.Builder{}
-	query.WriteString(`SELECT i.id::text, i.tenant_id::text, d.device_id, i.observed_at, i.payload_json
+	query.WriteString(`SELECT i.id::text, i.tenant_id::text, d.id::text, i.observed_at, i.payload_json
 		FROM device_info i`)
 	query.WriteString(` JOIN devices d ON d.id = i.device_id`)
 	query.WriteString(` WHERE `)
@@ -142,7 +142,7 @@ func loadDeviceForSecret(ctx context.Context, tx interface {
 	row := tx.QueryRow(ctx,
 		`SELECT id::text, secret_hash, status
 		 FROM devices
-		 WHERE tenant_id = $1 AND device_id = $2 AND deleted_at IS NULL
+		 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 		 FOR UPDATE`,
 		tenantID, deviceID,
 	)

@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/logs"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const seededDeviceID = "33333333-3333-3333-3333-333333333333"
@@ -25,7 +27,7 @@ func TestStoreUploadAndSearchLogs(t *testing.T) {
 	store := New(pool)
 	store.SetNow(func() time.Time { return now })
 
-	records, err := store.Upload(context.Background(), bootstrap.SeedTenantID, "device-123", "device-secret", logs.UploadRequest{
+	records, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "device-secret", logs.UploadRequest{
 		ObservedAt: now,
 		Entries: []logs.EntryUpsert{
 			{
@@ -48,12 +50,12 @@ func TestStoreUploadAndSearchLogs(t *testing.T) {
 	if len(records) != 2 {
 		t.Fatalf("expected two records, got %#v", records)
 	}
-	if records[0].DeviceID != "device-123" || records[0].TenantID != bootstrap.SeedTenantID {
+	if records[0].DeviceID != seededDeviceID || records[0].TenantID != bootstrap.SeedTenantID {
 		t.Fatalf("unexpected record: %#v", records[0])
 	}
 
 	var status string
-	if err := pool.QueryRow(context.Background(), `SELECT status FROM devices WHERE tenant_id = $1 AND device_id = $2`, bootstrap.SeedTenantID, "device-123").Scan(&status); err != nil {
+	if err := pool.QueryRow(context.Background(), `SELECT status FROM devices WHERE tenant_id = $1 AND id = $2`, bootstrap.SeedTenantID, seededDeviceID).Scan(&status); err != nil {
 		t.Fatalf("load device status: %v", err)
 	}
 	if status != device.StatusActive {
@@ -61,7 +63,7 @@ func TestStoreUploadAndSearchLogs(t *testing.T) {
 	}
 
 	found, err := store.Search(context.Background(), bootstrap.SeedTenantID, logs.SearchFilter{
-		DeviceID: "device-123",
+		DeviceID: seededDeviceID,
 		Query:    "log",
 		Limit:    10,
 	})
@@ -82,13 +84,13 @@ func TestStoreUploadLogsValidationAndAuth(t *testing.T) {
 	resetLogsTestDB(t, pool)
 
 	store := New(pool)
-	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, "device-123", "device-secret", logs.UploadRequest{}); !errors.Is(err, logs.ErrLogsInvalid) {
+	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "device-secret", logs.UploadRequest{}); !errors.Is(err, logs.ErrLogsInvalid) {
 		t.Fatalf("expected invalid logs payload, got %v", err)
 	}
-	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, "missing-device", "device-secret", logs.UploadRequest{Entries: []logs.EntryUpsert{{Message: "hello"}}}); !errors.Is(err, logs.ErrDeviceNotFound) {
+	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, uuid.NewString(), "device-secret", logs.UploadRequest{Entries: []logs.EntryUpsert{{Message: "hello"}}}); !errors.Is(err, logs.ErrDeviceNotFound) {
 		t.Fatalf("expected device not found, got %v", err)
 	}
-	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, "device-123", "wrong-secret", logs.UploadRequest{Entries: []logs.EntryUpsert{{Message: "hello"}}}); !errors.Is(err, logs.ErrDeviceUnauthorized) {
+	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "wrong-secret", logs.UploadRequest{Entries: []logs.EntryUpsert{{Message: "hello"}}}); !errors.Is(err, logs.ErrDeviceUnauthorized) {
 		t.Fatalf("expected unauthorized, got %v", err)
 	}
 }
@@ -115,11 +117,10 @@ func resetLogsTestDB(t *testing.T, pool *pgxpool.Pool) {
 		TRUNCATE TABLE device_logs, device_telemetry, enrollment_tokens, audit_events, device_groups, devices, policies, groups, users, roles, tenants RESTART IDENTITY CASCADE;
 		INSERT INTO tenants (id, name, status)
 		VALUES ('`+bootstrap.SeedTenantID+`', '`+bootstrap.SeedTenantName+`', 'active');
-		INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
+		INSERT INTO devices (id, tenant_id, secret_hash, status, updated_at)
 		VALUES (
 			'`+seededDeviceID+`',
 			'`+bootstrap.SeedTenantID+`',
-			'device-123',
 			'`+enrollment.HashToken("device-secret")+`',
 			'enrolled',
 			now()

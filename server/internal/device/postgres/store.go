@@ -46,7 +46,6 @@ func (s *Store) CreateDevice(ctx context.Context, tenantID string, req device.De
 	now := s.now()
 	groupIDs := uniqueStrings(req.GroupIDs)
 	deviceID := uuid.NewString()
-	recordID := uuid.NewString()
 	var policyID any
 	if req.PolicyID != "" {
 		policyID = req.PolicyID
@@ -60,10 +59,10 @@ func (s *Store) CreateDevice(ctx context.Context, tenantID string, req device.De
 		return device.Device{}, err
 	}
 	row := tx.QueryRow(ctx,
-		`INSERT INTO devices (id, tenant_id, device_id, display_name, secret_hash, policy_id, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`INSERT INTO devices (id, tenant_id, display_name, secret_hash, policy_id, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id::text`,
-		recordID, tenantID, deviceID, req.Name, req.SecretHash, policyID, now,
+		deviceID, tenantID, req.Name, req.SecretHash, policyID, now,
 	)
 	var createdID string
 	if err := row.Scan(&createdID); err != nil {
@@ -111,12 +110,12 @@ func (s *Store) ensureActiveGroups(ctx context.Context, tx pgx.Tx, tenantID stri
 
 func (s *Store) ListDevices(ctx context.Context, tenantID string) ([]device.Device, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT d.id::text, d.tenant_id::text, d.device_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id::text, d.bootstrap_extras::text,
+		`SELECT d.id::text, d.tenant_id::text, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id::text, d.bootstrap_extras::text,
 		        COALESCE(array_agg(DISTINCT dg.group_id::text ORDER BY dg.group_id::text) FILTER (WHERE dg.group_id IS NOT NULL), '{}'::text[]) AS group_ids
 		 FROM devices d
 		 LEFT JOIN device_groups dg ON dg.tenant_id = d.tenant_id AND dg.device_id = d.id
 		 WHERE d.tenant_id = $1
-		 GROUP BY d.id, d.tenant_id, d.device_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras
+		 GROUP BY d.id, d.tenant_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras
 		 ORDER BY d.created_at`,
 		tenantID,
 	)
@@ -199,7 +198,7 @@ func (s *Store) RetireDevice(ctx context.Context, tenantID, id string) (device.D
 		`UPDATE devices
 		 SET status = $3, deleted_at = $4, updated_at = $4
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, device_id, display_name, status, created_at, updated_at, deleted_at, policy_id::text, bootstrap_extras::text,
+		 RETURNING id::text, tenant_id::text, display_name, status, created_at, updated_at, deleted_at, policy_id::text, bootstrap_extras::text,
 		           COALESCE((SELECT array_agg(DISTINCT dg.group_id::text ORDER BY dg.group_id::text)
 		                    FROM device_groups dg
 		                    WHERE dg.tenant_id = devices.tenant_id AND dg.device_id = devices.id), '{}'::text[])`,
@@ -225,12 +224,12 @@ func (s *Store) Authenticate(ctx context.Context, tenantID, deviceID, secret str
 		return device.Device{}, httpx.ErrInvalidInput
 	}
 	row := s.pool.QueryRow(ctx,
-		`SELECT d.id::text, d.tenant_id::text, d.device_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id::text, d.bootstrap_extras::text,
+		`SELECT d.id::text, d.tenant_id::text, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id::text, d.bootstrap_extras::text,
 		        COALESCE(array_agg(DISTINCT dg.group_id::text ORDER BY dg.group_id::text) FILTER (WHERE dg.group_id IS NOT NULL), '{}'::text[]) AS group_ids
 		 FROM devices d
 		 LEFT JOIN device_groups dg ON dg.tenant_id = d.tenant_id AND dg.device_id = d.id
-		 WHERE d.tenant_id = $1 AND d.device_id = $2 AND d.secret_hash = $3
-		 GROUP BY d.id, d.tenant_id, d.device_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras`,
+		 WHERE d.tenant_id = $1 AND d.id = $2 AND d.secret_hash = $3
+		 GROUP BY d.id, d.tenant_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras`,
 		tenantID, deviceID, enrollment.HashToken(secret),
 	)
 	return scanAuthenticatedDevice(row)
@@ -243,7 +242,7 @@ func scanDevice(scanner rowScanner) (device.Device, error) {
 	var policyID pgtype.Text
 	var bootstrapExtrasJSON pgtype.Text
 	var groupIDs []string
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.DeviceID, &rec.Name, &rec.Status, &createdAt, &rec.UpdatedAt, &deletedAt, &policyID, &bootstrapExtrasJSON, &groupIDs); err != nil {
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.Name, &rec.Status, &createdAt, &rec.UpdatedAt, &deletedAt, &policyID, &bootstrapExtrasJSON, &groupIDs); err != nil {
 		return device.Device{}, err
 	}
 	if createdAt.Valid {
@@ -263,6 +262,7 @@ func scanDevice(scanner rowScanner) (device.Device, error) {
 		}
 		rec.BootstrapExtras = extras
 	}
+	rec.DeviceID = rec.ID
 	rec.GroupIDs = groupIDs
 	return rec, nil
 }
@@ -271,12 +271,12 @@ func (s *Store) loadDevice(ctx context.Context, querier interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, tenantID, id string) (device.Device, error) {
 	row := querier.QueryRow(ctx,
-		`SELECT d.id::text, d.tenant_id::text, d.device_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id::text, d.bootstrap_extras::text,
+		`SELECT d.id::text, d.tenant_id::text, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id::text, d.bootstrap_extras::text,
 		        COALESCE(array_agg(DISTINCT dg.group_id::text ORDER BY dg.group_id::text) FILTER (WHERE dg.group_id IS NOT NULL), '{}'::text[]) AS group_ids
 		 FROM devices d
 		 LEFT JOIN device_groups dg ON dg.tenant_id = d.tenant_id AND dg.device_id = d.id
 		 WHERE d.tenant_id = $1 AND d.id = $2
-		 GROUP BY d.id, d.tenant_id, d.device_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras`,
+		 GROUP BY d.id, d.tenant_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras`,
 		tenantID, id,
 	)
 	rec, err := scanDevice(row)

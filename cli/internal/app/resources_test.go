@@ -335,11 +335,10 @@ SET tenant_id = EXCLUDED.tenant_id,
     status = EXCLUDED.status,
     updated_at = now();
 
-INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, policy_id, created_at, updated_at)
-VALUES ('%[21]s', '%[1]s', '%[22]s', '%[23]s', 'active', '%[9]s', now(), now())
+INSERT INTO devices (id, tenant_id, secret_hash, status, policy_id, created_at, updated_at)
+VALUES ('%[21]s', '%[1]s', '%[23]s', 'active', '%[9]s', now(), now())
 ON CONFLICT (id) DO UPDATE
 SET tenant_id = EXCLUDED.tenant_id,
-    device_id = EXCLUDED.device_id,
     secret_hash = EXCLUDED.secret_hash,
     status = EXCLUDED.status,
     policy_id = EXCLUDED.policy_id,

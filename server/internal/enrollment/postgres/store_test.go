@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
@@ -23,11 +24,11 @@ func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
 	store := New(pool)
 	now := time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
 	store.SetNow(func() time.Time { return now })
-	deviceID := "device-" + uuid.NewString()
+	deviceID := uuid.NewString()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, uuid.NewString(), bootstrap.SeedTenantID, deviceID, enrollment.HashToken("bootstrap-secret"), device.StatusPending, now)
+		INSERT INTO devices (id, tenant_id, secret_hash, status, updated_at)
+		VALUES ($1, $2, $3, $4, $5)
+	`, deviceID, bootstrap.SeedTenantID, enrollment.HashToken("bootstrap-secret"), device.StatusPending, now)
 	if err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
@@ -104,7 +105,7 @@ func TestStoreIssueValidateConsumeRevokeAndExpire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue missing device token: %v", err)
 	}
-	if _, err := store.BindDevice(context.Background(), bootstrap.SeedTenantID, missingIssued.Secret, "missing-"+uuid.NewString(), nil); !errors.Is(err, httpx.ErrNotFound) {
+	if _, err := store.BindDevice(context.Background(), bootstrap.SeedTenantID, missingIssued.Secret, uuid.NewString(), nil); !errors.Is(err, httpx.ErrNotFound) {
 		t.Fatalf("expected missing device not found, got %v", err)
 	}
 

@@ -43,7 +43,7 @@ func NewDeps(cfg *config.Config) Dependencies {
 	provisioner := mustMQTTProvisioner(cfg)
 	publisherUsername := cfg.MQTT.Username
 	publisherPassword := cfg.MQTT.Password
-	if err := provisioner.EnsureServerPublisher(context.Background(), publisherUsername, publisherPassword); err != nil {
+	if err := ensureServerPublisherWithRetry(context.Background(), provisioner, publisherUsername, publisherPassword); err != nil {
 		log.Printf("mqtt dynsec server publisher provisioning failed: %v", err)
 	}
 	artifactStore := mustArtifactStore(cfg)
@@ -80,6 +80,19 @@ func NewDeps(cfg *config.Config) Dependencies {
 		TenantID:      bootstrap.SeedTenantID,
 		PluginManager: plugins.Disabled(),
 	}
+}
+
+func ensureServerPublisherWithRetry(ctx context.Context, provisioner mqttdynsec.Provisioner, username, password string) error {
+	var lastErr error
+	for attempt := 1; attempt <= 5; attempt++ {
+		if err := provisioner.EnsureServerPublisher(ctx, username, password); err != nil {
+			lastErr = err
+			time.Sleep(time.Duration(attempt) * 250 * time.Millisecond)
+			continue
+		}
+		return nil
+	}
+	return lastErr
 }
 
 func mustMQTTProvisioner(cfg *config.Config) mqttdynsec.Provisioner {

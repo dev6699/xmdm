@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/commands"
 	"xmdm/server/internal/enrollment"
@@ -73,20 +74,20 @@ func TestEnqueueFansOutToGroupAndBroadcast(t *testing.T) {
 	if err := pool.QueryRow(context.Background(), `INSERT INTO groups (id, tenant_id, name, updated_at) VALUES (gen_random_uuid(), $1, $2, $3) RETURNING id::text`, bootstrap.SeedTenantID, "field", now).Scan(&groupID); err != nil {
 		t.Fatalf("create group: %v", err)
 	}
-	deviceIDs := []string{"device-a", "device-b", "device-c"}
-	for _, deviceID := range deviceIDs {
+	deviceIDs := []string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
+	for i, deviceID := range deviceIDs {
 		if err := pool.QueryRow(context.Background(),
-			`INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
-			 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+			`INSERT INTO devices (id, tenant_id, secret_hash, status, updated_at)
+			 VALUES ($1, $2, $3, $4, $5)
 			 RETURNING id::text`,
-			bootstrap.SeedTenantID, deviceID, enrollment.HashToken("secret-"+deviceID), "active", now,
+			deviceID, bootstrap.SeedTenantID, enrollment.HashToken("secret-"+deviceID), "active", now,
 		).Scan(new(string)); err != nil {
 			t.Fatalf("create device %s: %v", deviceID, err)
 		}
-		if deviceID != "device-c" {
+		if i != len(deviceIDs)-1 {
 			if _, err := pool.Exec(context.Background(),
 				`INSERT INTO device_groups (tenant_id, device_id, group_id, created_at)
-				 VALUES ($1, (SELECT id FROM devices WHERE tenant_id = $1 AND device_id = $2), $3, $4)`,
+				 VALUES ($1, (SELECT id FROM devices WHERE tenant_id = $1 AND id = $2), $3, $4)`,
 				bootstrap.SeedTenantID, deviceID, groupID, now,
 			); err != nil {
 				t.Fatalf("assign device %s to group: %v", deviceID, err)
@@ -132,17 +133,18 @@ func TestEnqueuePublishesAndMarksSent(t *testing.T) {
 	store.SetPublisher(pub)
 
 	var deviceUUID string
-	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
-		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+	deviceID := uuid.NewString()
+	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, secret_hash, status, updated_at)
+		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id::text`,
-		bootstrap.SeedTenantID, "device-push", enrollment.HashToken("secret"), "active", now,
+		deviceID, bootstrap.SeedTenantID, enrollment.HashToken("secret"), "active", now,
 	).Scan(&deviceUUID); err != nil {
 		t.Fatalf("create device: %v", err)
 	}
 
 	created, err := store.Enqueue(context.Background(), bootstrap.SeedTenantID, commands.Upsert{
 		Type:   "reboot",
-		Target: commands.Target{Type: commands.TargetDevice, DeviceID: "device-push"},
+		Target: commands.Target{Type: commands.TargetDevice, DeviceID: deviceID},
 		Payload: map[string]any{
 			"force": true,
 		},
@@ -180,10 +182,11 @@ func TestAcknowledgeUpdatesCommandStatus(t *testing.T) {
 	store.SetNow(func() time.Time { return now })
 
 	var deviceUUID string
-	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
-		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+	deviceID := uuid.NewString()
+	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, secret_hash, status, updated_at)
+		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id::text`,
-		bootstrap.SeedTenantID, "device-ack", enrollment.HashToken("secret"), "active", now,
+		deviceID, bootstrap.SeedTenantID, enrollment.HashToken("secret"), "active", now,
 	).Scan(&deviceUUID); err != nil {
 		t.Fatalf("create device: %v", err)
 	}
@@ -222,10 +225,11 @@ func TestExpiredCommandIsNotPendingOrAckable(t *testing.T) {
 	store.SetNow(func() time.Time { return now })
 
 	var deviceUUID string
-	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
-		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+	deviceID := uuid.NewString()
+	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, secret_hash, status, updated_at)
+		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id::text`,
-		bootstrap.SeedTenantID, "device-expired", enrollment.HashToken("secret"), "active", now,
+		deviceID, bootstrap.SeedTenantID, enrollment.HashToken("secret"), "active", now,
 	).Scan(&deviceUUID); err != nil {
 		t.Fatalf("create device: %v", err)
 	}
@@ -274,10 +278,11 @@ func TestExpireDueCommandsMarksSentRowsExpired(t *testing.T) {
 	store.SetNow(func() time.Time { return now })
 
 	var deviceUUID string
-	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, device_id, secret_hash, status, updated_at)
-		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+	deviceID := uuid.NewString()
+	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, secret_hash, status, updated_at)
+		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id::text`,
-		bootstrap.SeedTenantID, "device-stale", enrollment.HashToken("secret"), "active", now,
+		deviceID, bootstrap.SeedTenantID, enrollment.HashToken("secret"), "active", now,
 	).Scan(&deviceUUID); err != nil {
 		t.Fatalf("create device: %v", err)
 	}

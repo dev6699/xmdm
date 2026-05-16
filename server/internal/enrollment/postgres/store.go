@@ -135,8 +135,8 @@ func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string
 	row := tx.QueryRow(ctx,
 		`UPDATE devices
 		 SET secret_hash = $3, status = $4, bootstrap_extras = $5, updated_at = $6
-		 WHERE tenant_id = $1 AND device_id = $2 AND status = $7
-		 RETURNING device_id, status`,
+		 WHERE tenant_id = $1 AND id = $2 AND status = $7
+		 RETURNING id::text, status`,
 		tenantID, deviceID, enrollment.HashToken(secret), device.StatusEnrolled, bootstrapExtrasJSON, now, device.StatusPending,
 	)
 	var bound enrollment.BoundDevice
@@ -333,7 +333,7 @@ func loadDeviceStatusByTenantAndDeviceIDForUpdate(ctx context.Context, tx interf
 	row := tx.QueryRow(ctx,
 		`SELECT status
 		 FROM devices
-		 WHERE tenant_id = $1 AND device_id = $2
+		 WHERE tenant_id = $1 AND id = $2
 		 FOR UPDATE`,
 		tenantID, deviceID,
 	)

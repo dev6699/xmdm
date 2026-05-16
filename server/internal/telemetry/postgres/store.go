@@ -92,7 +92,7 @@ func loadDeviceForSecret(ctx context.Context, tx interface {
 	row := tx.QueryRow(ctx,
 		`SELECT id::text, secret_hash, status
 		 FROM devices
-		 WHERE tenant_id = $1 AND device_id = $2 AND deleted_at IS NULL
+		 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 		 FOR UPDATE`,
 		tenantID, deviceID,
 	)

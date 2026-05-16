@@ -34,13 +34,12 @@ func TestScanAuthenticatedDeviceRejectsRetiredAndWiped(t *testing.T) {
 				scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "device-row-123"
 					*(dest[1].(*string)) = "tenant-1"
-					*(dest[2].(*string)) = "device-123"
-					*(dest[3].(*string)) = "name"
-					*(dest[4].(*string)) = status
+					*(dest[2].(*string)) = "name"
+					*(dest[3].(*string)) = status
 					now := time.Now()
-					*(dest[5].(*pgtype.Timestamptz)) = pgtype.Timestamptz{Time: now, Valid: true}
-					*(dest[6].(*time.Time)) = now
-					*(dest[10].(*[]string)) = nil
+					*(dest[4].(*pgtype.Timestamptz)) = pgtype.Timestamptz{Time: now, Valid: true}
+					*(dest[5].(*time.Time)) = now
+					*(dest[9].(*[]string)) = nil
 					return nil
 				},
 			})

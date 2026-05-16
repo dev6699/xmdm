@@ -11,6 +11,7 @@ import (
 	"xmdm/server/internal/bootstrap"
 	policy "xmdm/server/internal/policy"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -87,15 +88,16 @@ func TestStoreTogglesPolicyApps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create policy: %v", err)
 	}
+	appID := uuid.NewString()
 	_, err = pool.Exec(context.Background(), `
 		INSERT INTO apps (id, tenant_id, package_name, name, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, 'active', $5, $5)
-	`, "app-1", bootstrap.SeedTenantID, "com.example.catalog", "Catalog", time.Date(2026, 5, 13, 12, 11, 0, 0, time.UTC))
+	`, appID, bootstrap.SeedTenantID, "com.example.catalog", "Catalog", time.Date(2026, 5, 13, 12, 11, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("insert app: %v", err)
 	}
 
-	created, err := store.AddPolicyApp(context.Background(), bootstrap.SeedTenantID, policyRec.ID, "app-1")
+	created, err := store.AddPolicyApp(context.Background(), bootstrap.SeedTenantID, policyRec.ID, appID)
 	if err != nil {
 		t.Fatalf("add policy app: %v", err)
 	}
@@ -111,7 +113,7 @@ func TestStoreTogglesPolicyApps(t *testing.T) {
 		t.Fatalf("expected one active policy app, got %#v", items)
 	}
 
-	if err := store.RemovePolicyApp(context.Background(), bootstrap.SeedTenantID, policyRec.ID, "app-1"); err != nil {
+	if err := store.RemovePolicyApp(context.Background(), bootstrap.SeedTenantID, policyRec.ID, appID); err != nil {
 		t.Fatalf("remove policy app: %v", err)
 	}
 	items, err = store.ListPolicyApps(context.Background(), bootstrap.SeedTenantID, policyRec.ID)
@@ -122,7 +124,7 @@ func TestStoreTogglesPolicyApps(t *testing.T) {
 		t.Fatalf("expected disabled policy app, got %#v", items)
 	}
 
-	reactivated, err := store.AddPolicyApp(context.Background(), bootstrap.SeedTenantID, policyRec.ID, "app-1")
+	reactivated, err := store.AddPolicyApp(context.Background(), bootstrap.SeedTenantID, policyRec.ID, appID)
 	if err != nil {
 		t.Fatalf("reactivate policy app: %v", err)
 	}
@@ -217,12 +219,33 @@ func openTestPool(t *testing.T) *pgxpool.Pool {
 
 func resetPolicyTestDB(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	_, err := pool.Exec(context.Background(), `
-		TRUNCATE TABLE enrollment_tokens, device_telemetry, device_info, device_logs, audit_events, devices, policies, groups, users, roles, tenants RESTART IDENTITY CASCADE;
+
+	ctx := context.Background()
+
+	_, err := pool.Exec(ctx, `
+		TRUNCATE TABLE
+			enrollment_tokens,
+			device_telemetry,
+			device_info,
+			device_logs,
+			audit_events,
+			devices,
+			policies,
+			groups,
+			users,
+			roles,
+			tenants
+		RESTART IDENTITY CASCADE;
+	`)
+	if err != nil {
+		t.Fatalf("truncate postgres: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, `
 		INSERT INTO tenants (id, name, status)
-		VALUES ($1, $2, 'active');
+		VALUES ($1, $2, 'active')
 	`, bootstrap.SeedTenantID, bootstrap.SeedTenantName)
 	if err != nil {
-		t.Fatalf("reset postgres: %v", err)
+		t.Fatalf("seed postgres: %v", err)
 	}
 }

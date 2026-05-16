@@ -16,7 +16,7 @@
 | Tenant | Account boundary | `id`, `name`, `status` |
 | User | Admin identity | `id`, `tenant_id`, `email`, `password_hash`, `role_id`, `status` |
 | Role | Permission bundle | `id`, `tenant_id`, `name`, `permissions` |
-| Device | Managed Android endpoint | `id`, `tenant_id`, `device_id`, `secret_hash`, `status`, `policy_id` |
+| Device | Managed Android endpoint | `id`, `tenant_id`, `secret_hash`, `status`, `policy_id` |
 | Group | Device grouping | `id`, `tenant_id`, `name`, `status` |
 | Policy | Runtime device policy | `id`, `tenant_id`, `name`, `version`, `kiosk_mode`, `kiosk_app_package`, `restrictions_json` |
 | App | Logical app record | `id`, `tenant_id`, `package_name`, `name`, `status` |
@@ -109,7 +109,7 @@
 
 ## Indexing Rules
 
-- Device lookup by `tenant_id + device_id`.
+- Device lookup by `tenant_id + id`.
 - Device lookup by serial, IMEI, or enrollment token.
 - App lookup by `tenant_id + package_name`.
 - Command lookup by `device_id + status`.

@@ -280,12 +280,7 @@ func (s *Store) publishEnqueued(ctx context.Context, items []commands.Command) {
 		return
 	}
 	for _, item := range items {
-		deviceName, err := s.deviceNameByID(ctx, item.DeviceID)
-		if err != nil {
-			log.Printf("mqtt publish for command %s skipped: %v", item.ID, err)
-			continue
-		}
-		if err := s.publisher.PublishCommand(ctx, deviceName, push.CommandMessage{
+		if err := s.publisher.PublishCommand(ctx, item.DeviceID, push.CommandMessage{
 			Type:      item.Type,
 			CommandID: item.ID,
 			TenantID:  item.TenantID,
@@ -300,17 +295,6 @@ func (s *Store) publishEnqueued(ctx context.Context, items []commands.Command) {
 			log.Printf("mark command %s sent failed: %v", item.ID, err)
 		}
 	}
-}
-
-func (s *Store) deviceNameByID(ctx context.Context, id string) (string, error) {
-	var deviceName string
-	if err := s.pool.QueryRow(ctx,
-		`SELECT device_id FROM devices WHERE id = $1`,
-		id,
-	).Scan(&deviceName); err != nil {
-		return "", err
-	}
-	return deviceName, nil
 }
 
 func (s *Store) markSent(ctx context.Context, tenantID, deviceID, commandID string) error {
@@ -331,9 +315,9 @@ func (s *Store) resolveTargets(ctx context.Context, tenantID string, target comm
 			return nil, httpx.ErrInvalidInput
 		}
 		return s.listTargetDeviceIDs(ctx,
-			`SELECT id
+			`SELECT id::text
 			 FROM devices
-			 WHERE tenant_id = $1 AND device_id = $2 AND status <> $3 AND status <> $4
+			 WHERE tenant_id = $1 AND id = $2 AND status <> $3 AND status <> $4
 			 ORDER BY created_at, id`,
 			tenantID, target.DeviceID, device.StatusRetired, device.StatusWiped,
 		)
@@ -342,7 +326,7 @@ func (s *Store) resolveTargets(ctx context.Context, tenantID string, target comm
 			return nil, httpx.ErrInvalidInput
 		}
 		return s.listTargetDeviceIDs(ctx,
-			`SELECT d.id
+			`SELECT d.id::text
 			 FROM device_groups dg
 			 JOIN groups g ON g.tenant_id = dg.tenant_id AND g.id = dg.group_id AND g.status = $5
 			 JOIN devices d ON d.tenant_id = dg.tenant_id AND d.id = dg.device_id
@@ -352,7 +336,7 @@ func (s *Store) resolveTargets(ctx context.Context, tenantID string, target comm
 		)
 	case commands.TargetBroadcast:
 		return s.listTargetDeviceIDs(ctx,
-			`SELECT id
+			`SELECT id::text
 			 FROM devices
 			 WHERE tenant_id = $1 AND status <> $2 AND status <> $3
 			 ORDER BY created_at, id`,
