@@ -142,7 +142,7 @@ func waitForDeviceEnrollmentInDB(t *testing.T, pool *pgxpool.Pool, deviceID stri
 		func() (bool, error) {
 			var status string
 			if err := pool.QueryRow(context.Background(),
-				`SELECT status FROM devices WHERE device_id = $1`, deviceID,
+				`SELECT status FROM devices WHERE id = $1`, deviceID,
 			).Scan(&status); err != nil {
 				return false, nil
 			}
@@ -155,7 +155,7 @@ func deviceStatusSnapshotInDB(t *testing.T, pool *pgxpool.Pool, deviceID string)
 	t.Helper()
 	var status string
 	if err := pool.QueryRow(context.Background(),
-		`SELECT status FROM devices WHERE device_id = $1`, deviceID,
+		`SELECT status FROM devices WHERE id = $1`, deviceID,
 	).Scan(&status); err != nil {
 		return "device_err=" + strings.TrimSpace(err.Error())
 	}

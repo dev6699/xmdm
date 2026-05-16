@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -54,7 +53,7 @@ func TestAdminE2E(t *testing.T) {
 	auditStore := auditpg.NewDBStore(pool)
 	artifactStore := newTestArtifactStore(t)
 	defer func() { _ = artifactStore.Delete(context.Background(), "artifacts/launcher.apk") }()
-	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled(), artifactStore, false))
+	handler := v1.NewMux(svc, testDeps(t, pool, auditStore, plugins.Disabled(), artifactStore, false))
 	client := newE2EClient(t, handler)
 	baseURL := "http://xmdm.local"
 
@@ -231,7 +230,25 @@ func TestAdminE2E(t *testing.T) {
 		t.Fatalf("expected events array in admin audit list response: %#v", auditList)
 	}
 
-	assertStatus(t, client, http.MethodPost, baseURL+"/api/v1/admin/logout", "", http.StatusNoContent)
+	me := doJSON(t, client, http.MethodGet, baseURL+"/api/v1/admin/me", "", http.StatusOK)
+	csrfToken, _ := me["csrfToken"].(string)
+	if csrfToken == "" {
+		t.Fatalf("expected csrf token in admin me response: %#v", me)
+	}
+	logoutReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/admin/logout", nil)
+	if err != nil {
+		t.Fatalf("build logout request: %v", err)
+	}
+	logoutReq.Header.Set("X-XMDM-CSRF-Token", csrfToken)
+	logoutRes, err := client.Do(logoutReq)
+	if err != nil {
+		t.Fatalf("logout request: %v", err)
+	}
+	defer logoutRes.Body.Close()
+	io.Copy(io.Discard, logoutRes.Body)
+	if logoutRes.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected %d, got %d for POST %s", http.StatusNoContent, logoutRes.StatusCode, baseURL+"/api/v1/admin/logout")
+	}
 	assertStatus(t, client, http.MethodGet, baseURL+"/api/v1/admin/me", "", http.StatusUnauthorized)
 }
 
@@ -265,7 +282,7 @@ func crudUpdateBody(kind string) string {
 	case "apps":
 		return `{"packageName":"com.example.app.two","name":"apps-two"}`
 	case "policies":
-		return fmt.Sprintf(`{"name":"policies-two","version":2,"kioskMode":true,"kioskAppPackage":"com.example.kiosk.two","restrictions":{"camera":true,"kioskExitPasscodeHash":"%s"}}`, enrollment.HashToken("1234"))
+		return `{"name":"policies-two","version":2,"kioskMode":true,"kioskAppPackage":"com.example.kiosk.two","restrictions":{"camera":true,"kioskExitPasscode":"1234"}}`
 	case "devices":
 		return `{"name":"devices-two","secretHash":"hash-devices-two"}`
 	default:
@@ -383,7 +400,7 @@ func doJSON(t *testing.T, client *http.Client, method, url, body string, want in
 	return payload
 }
 
-func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins.Manager, artifactStore artifacts.Store, enableMQTT bool) v1.Dependencies {
+func testDeps(t *testing.T, pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins.Manager, artifactStore artifacts.Store, enableMQTT bool) v1.Dependencies {
 	devicesStore := devicepg.New(pool)
 	enrollmentStore := enrollmentpg.New(pool)
 	commandStore := commandspg.New(pool)
@@ -433,9 +450,24 @@ func testDeps(pool *pgxpool.Pool, auditStore audit.Store, pluginManager *plugins
 		}); err == nil {
 			devicesStore.SetProvisioner(provisioner)
 			enrollmentStore.SetProvisioner(provisioner)
+			ensureTestServerPublisher(t, provisioner)
 		}
 	}
 	return deps
+}
+
+func ensureTestServerPublisher(t *testing.T, provisioner mqttdynsec.Provisioner) {
+	t.Helper()
+	var lastErr error
+	for attempt := 1; attempt <= 5; attempt++ {
+		if err := provisioner.EnsureServerPublisher(context.Background(), "xmdm-server", "xmdm-server-secret"); err != nil {
+			lastErr = err
+			time.Sleep(time.Duration(attempt) * 250 * time.Millisecond)
+			continue
+		}
+		return
+	}
+	t.Fatalf("ensure mqtt server publisher: %v", lastErr)
 }
 
 func postMultipartFile(t *testing.T, client *http.Client, url string, fields map[string]string, fileField, fileName string, content []byte) map[string]any {

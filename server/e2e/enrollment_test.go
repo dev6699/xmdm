@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	v1 "xmdm/server/internal/api/v1"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/bootstrap"
 	device "xmdm/server/internal/device"
 	"xmdm/server/internal/plugins"
 )
@@ -25,13 +27,24 @@ func TestEnrollmentE2E(t *testing.T) {
 	svc.SetNow(func() time.Time { return now })
 
 	auditStore := auditpg.NewDBStore(pool)
-	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled(), newTestArtifactStore(t), false))
+	handler := v1.NewMux(svc, testDeps(t, pool, auditStore, plugins.Disabled(), newTestArtifactStore(t), false))
 	client := newE2EClient(t, handler)
 	baseURL := "http://xmdm.local"
-	deviceID := "device-" + uuid.NewString()
+	deviceID := uuid.NewString()
 
 	login(client, t, baseURL, "admin", "secret")
 
+	policy := postJSON(t, client, baseURL+"/api/v1/policies", `{"name":"enrollment-policy","kioskMode":false,"restrictions":{}}`)
+	policyID, _ := policy["id"].(string)
+	if policyID == "" {
+		t.Fatalf("expected policy id in enrollment policy response: %#v", policy)
+	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO devices (id, tenant_id, display_name, secret_hash, policy_id, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())
+	`, deviceID, bootstrap.SeedTenantID, deviceID, "hash-"+deviceID, policyID); err != nil {
+		t.Fatalf("seed pending device: %v", err)
+	}
 	issued := postJSON(t, client, baseURL+"/api/v1/enrollment/tokens", `{"ttlSeconds":3600}`)
 	token, _ := issued["token"].(string)
 	if token == "" {

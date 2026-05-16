@@ -19,6 +19,7 @@ import (
 	v1 "xmdm/server/internal/api/v1"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/checksum"
 	"xmdm/server/internal/plugins"
 
@@ -43,6 +44,7 @@ type baseTestEnv struct {
 	baseURL          string
 	serial           string
 	deviceID         string
+	policyID         string
 	launcherAPKPath  string
 	launcherChecksum string
 	requests         *requestRecorder
@@ -67,7 +69,7 @@ func newBaseTestEnv(t *testing.T, enableMQTT bool) baseTestEnv {
 	svc := newFrozenAuthService(t)
 	auditStore := auditpg.NewDBStore(pool)
 	artifactStore := newTestArtifactStore(t)
-	handler := v1.NewMux(svc, testDeps(pool, auditStore, plugins.Disabled(), artifactStore, enableMQTT))
+	handler := v1.NewMux(svc, testDeps(t, pool, auditStore, plugins.Disabled(), artifactStore, enableMQTT))
 
 	launcherAPKPath := defaultLauncherAPKPath()
 	launcherAPK := mustReadFile(t, "launcher apk", launcherAPKPath)
@@ -91,12 +93,17 @@ func newBaseTestEnv(t *testing.T, enableMQTT bool) baseTestEnv {
 	resetADBLauncherState(t, serial, launcherAPKPath)
 	resetDeviceEnrollmentState(t, pool)
 
+	deviceRowID := uuid.NewString()
+	policyID := seedDefaultDevicePolicy(t, pool)
+	seedPendingDevice(t, pool, deviceRowID, policyID)
+
 	return baseTestEnv{
 		pool:             pool,
 		client:           client,
 		baseURL:          baseURL,
 		serial:           serial,
-		deviceID:         "e2e-" + uuid.NewString(),
+		deviceID:         deviceRowID,
+		policyID:         policyID,
 		launcherAPKPath:  launcherAPKPath,
 		launcherChecksum: launcherChecksum,
 		requests:         requests,
@@ -135,6 +142,8 @@ func newContentTestEnvWithExtras(t *testing.T, extraBootstrapExtras map[string]s
 
 	mf := mustUploadManagedFile(t, base.client, base.baseURL, artifactStore)
 	chromeAppID := mustRegisterChromeApp(t, base.client, base.baseURL, artifactStore)
+	seedPolicyManagedFile(t, base.pool, base.policyID, mf.managedFileID)
+	seedPolicyApp(t, base.pool, base.policyID, chromeAppID)
 
 	token := mustCreateEnrollmentToken(t, base.client, base.baseURL)
 	bootstrapURI := mustBuildBootstrapURI(t, base.client, base.baseURL, base.launcherChecksum, base.deviceID, token, extraBootstrapExtras)
@@ -156,8 +165,8 @@ func newPackageRulesTestEnv(t *testing.T) packageRulesTestEnv {
 	base := newBaseTestEnv(t, false)
 	artifactStore := newTestArtifactStore(t)
 
-	mustRegisterChromeApp(t, base.client, base.baseURL, artifactStore)
-	mustCreatePolicy(t, base.client, base.baseURL, `{
+	chromeAppID := mustRegisterChromeApp(t, base.client, base.baseURL, artifactStore)
+	policyResp := mustCreatePolicy(t, base.client, base.baseURL, `{
 		"name":"package-rules",
 		"version":1,
 		"kioskMode":false,
@@ -165,6 +174,12 @@ func newPackageRulesTestEnv(t *testing.T) packageRulesTestEnv {
 			"blockPackages":["com.android.chrome"]
 		}
 	}`)
+	policyID, _ := policyResp["id"].(string)
+	if policyID == "" {
+		t.Fatalf("policy create returned empty id: %#v", policyResp)
+	}
+	seedPolicyApp(t, base.pool, policyID, chromeAppID)
+	updateDevicePolicy(t, base.pool, base.deviceID, policyID)
 
 	token := mustCreateEnrollmentToken(t, base.client, base.baseURL)
 	bootstrapURI := mustBuildBootstrapURI(t, base.client, base.baseURL, base.launcherChecksum, base.deviceID, token, nil)
@@ -652,6 +667,42 @@ func assertDeviceLogsRecordedViaAPI(t *testing.T, client *http.Client, baseURL, 
 	}
 }
 
+func waitForManagedAppsApplied(t *testing.T, requests *requestRecorder, start int, deviceID string, wantUninstalled int) {
+	t.Helper()
+	requests.waitForAfter(t, start, time.Minute, "managed apps applied log upload", func(r requestRecord) bool {
+		if r.method != http.MethodPost || r.path != "/api/v1/devices/"+deviceID+"/logs" || strings.TrimSpace(r.body) == "" {
+			return false
+		}
+		var upload struct {
+			ObservedAt string `json:"observedAt"`
+			Entries    []struct {
+				Source  string         `json:"source"`
+				Level   string         `json:"level"`
+				Message string         `json:"message"`
+				Payload map[string]any `json:"payload"`
+			} `json:"entries"`
+		}
+		if err := json.Unmarshal([]byte(r.body), &upload); err != nil {
+			return false
+		}
+		for _, entry := range upload.Entries {
+			if entry.Source != "apps" || entry.Level != "info" || entry.Message != "managed apps applied" {
+				continue
+			}
+			payload := entry.Payload
+			if payload == nil {
+				continue
+			}
+			uninstalled, ok := payload["uninstalled"].(float64)
+			if !ok || int(uninstalled) != wantUninstalled {
+				continue
+			}
+			return true
+		}
+		return false
+	})
+}
+
 func assertDeviceInfoUploadPayload(t *testing.T, requests *requestRecorder, deviceID string) {
 	t.Helper()
 	requests.waitFor(t, time.Minute, "device info upload body", func(r requestRecord) bool {
@@ -926,6 +977,72 @@ func resetDeviceEnrollmentState(t *testing.T, pool *pgxpool.Pool) {
 	}
 	if count != 0 {
 		t.Fatalf("expected 0 devices after reset, got %d", count)
+	}
+}
+
+func seedDefaultDevicePolicy(t *testing.T, pool *pgxpool.Pool) string {
+	t.Helper()
+	policyID := uuid.NewString()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO policies (id, tenant_id, name, version, kiosk_mode, restrictions_json, status, updated_at)
+		VALUES ($1, $2, $3, 1, false, '{}'::jsonb, 'active', NOW())
+	`, policyID, bootstrap.SeedTenantID, "e2e-default-policy"); err != nil {
+		t.Fatalf("seed default policy: %v", err)
+	}
+	return policyID
+}
+
+func seedPendingDevice(t *testing.T, pool *pgxpool.Pool, deviceRowID, policyID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO devices (id, tenant_id, display_name, secret_hash, policy_id, status, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'pending', NOW())
+	`, deviceRowID, bootstrap.SeedTenantID, deviceRowID, "hash-"+deviceRowID, policyID); err != nil {
+		t.Fatalf("seed pending device: %v", err)
+	}
+}
+
+func seedPolicyApp(t *testing.T, pool *pgxpool.Pool, policyID, appID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO policy_apps (id, tenant_id, policy_id, app_id, status, updated_at)
+		VALUES ($1, $2, $3, $4, 'active', NOW())
+		ON CONFLICT (tenant_id, policy_id, app_id) DO UPDATE SET status = 'active', updated_at = NOW()
+	`, uuid.NewString(), bootstrap.SeedTenantID, policyID, appID); err != nil {
+		t.Fatalf("seed policy app: %v", err)
+	}
+}
+
+func seedPolicyManagedFile(t *testing.T, pool *pgxpool.Pool, policyID, managedFileID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO policy_managed_files (id, tenant_id, policy_id, managed_file_id, status, updated_at)
+		VALUES ($1, $2, $3, $4, 'active', NOW())
+		ON CONFLICT (tenant_id, policy_id, managed_file_id) DO UPDATE SET status = 'active', updated_at = NOW()
+	`, uuid.NewString(), bootstrap.SeedTenantID, policyID, managedFileID); err != nil {
+		t.Fatalf("seed policy managed file: %v", err)
+	}
+}
+
+func seedPolicyCertificate(t *testing.T, pool *pgxpool.Pool, policyID, certificateID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO policy_certificates (id, tenant_id, policy_id, certificate_id, status, updated_at)
+		VALUES ($1, $2, $3, $4, 'active', NOW())
+		ON CONFLICT (tenant_id, policy_id, certificate_id) DO UPDATE SET status = 'active', updated_at = NOW()
+	`, uuid.NewString(), bootstrap.SeedTenantID, policyID, certificateID); err != nil {
+		t.Fatalf("seed policy certificate: %v", err)
+	}
+}
+
+func updateDevicePolicy(t *testing.T, pool *pgxpool.Pool, deviceRowID, policyID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE devices
+		SET policy_id = $2, updated_at = NOW()
+		WHERE tenant_id = $1 AND id = $3
+	`, bootstrap.SeedTenantID, policyID, deviceRowID); err != nil {
+		t.Fatalf("update device policy: %v", err)
 	}
 }
 

@@ -423,9 +423,3 @@ cd server
 eval "$(../infra/test-db-env.sh)"
 go test -p 1 -count=1 ./...
 ```
-
-To run the adb troubleshooting helper directly:
-
-```sh
-XMDM_ADB_SERIAL=<serial> XMDM_ADB_BOOTSTRAP_URI=<bootstrap-uri> XMDM_ADB_DEVICE_ID=<device-id> go test -run TestADBFlow -count=1 ./e2e
-```
