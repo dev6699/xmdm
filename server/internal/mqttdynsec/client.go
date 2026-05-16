@@ -58,7 +58,8 @@ func (c *Client) UpsertDevice(ctx context.Context, deviceID, deviceSecret string
 		return fmt.Errorf("missing device credentials")
 	}
 	commandTopic := fmt.Sprintf("devices/%s/commands", deviceID)
-	if err := c.ensureRole(ctx, "xmdm-device-command",
+	deviceRole := "xmdm-device-command"
+	if err := c.ensureRole(ctx, deviceRole,
 		map[string]any{
 			"acltype":  "subscribeLiteral",
 			"topic":    commandTopic,
@@ -75,25 +76,26 @@ func (c *Client) UpsertDevice(ctx context.Context, deviceID, deviceSecret string
 		return err
 	}
 
-	createClient := map[string]any{
+	if err := c.runCommand(ctx, map[string]any{
 		"command":  "createClient",
 		"username": deviceID,
 		"password": deviceSecret,
 		"clientid": deviceID,
-		"roles":    []map[string]any{{"rolename": "xmdm-device-command", "priority": 100}},
+		"roles":    []map[string]any{{"rolename": deviceRole, "priority": 100}},
+	}, "already exists"); err != nil {
+		return err
 	}
-	if err := c.runCommand(ctx, createClient, "already exists"); err != nil {
-		modifyClient := map[string]any{
-			"command":  "modifyClient",
-			"username": deviceID,
-			"password": deviceSecret,
-			"clientid": deviceID,
-			"roles":    []map[string]any{{"rolename": "xmdm-device-command", "priority": 100}},
-		}
-		if err := c.runCommand(ctx, modifyClient, "already exists"); err != nil {
-			return err
-		}
+
+	if err := c.runCommand(ctx, map[string]any{
+		"command":  "modifyClient",
+		"username": deviceID,
+		"password": deviceSecret,
+		"clientid": deviceID,
+		"roles":    []map[string]any{{"rolename": deviceRole, "priority": 100}},
+	}); err != nil {
+		return err
 	}
+
 	return nil
 }
 
@@ -101,7 +103,9 @@ func (c *Client) EnsureServerPublisher(ctx context.Context, username, password s
 	if strings.TrimSpace(username) == "" || strings.TrimSpace(password) == "" {
 		return fmt.Errorf("missing server publisher credentials")
 	}
-	if err := c.ensureRole(ctx, "xmdm-server-publisher",
+
+	serverRole := "xmdm-server-publisher"
+	if err := c.ensureRole(ctx, serverRole,
 		map[string]any{
 			"acltype":  "publishClientSend",
 			"topic":    "devices/+/commands",
@@ -111,9 +115,27 @@ func (c *Client) EnsureServerPublisher(ctx context.Context, username, password s
 	); err != nil {
 		return err
 	}
-	if err := c.ensureClient(ctx, username, password); err != nil {
+
+	if err := c.runCommand(ctx, map[string]any{
+		"command":  "createClient",
+		"username": username,
+		"clientid": username,
+		"password": password,
+		"roles":    []map[string]any{{"rolename": serverRole, "priority": 100}},
+	}, "already exists"); err != nil {
 		return err
 	}
+
+	if err := c.runCommand(ctx, map[string]any{
+		"command":  "modifyClient",
+		"username": username,
+		"clientid": username,
+		"password": password,
+		"roles":    []map[string]any{{"rolename": serverRole, "priority": 100}},
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -158,25 +180,6 @@ func (c *Client) ensureRole(ctx context.Context, roleName string, acls ...map[st
 		}, "already exists"); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func (c *Client) ensureClient(ctx context.Context, username, password string) error {
-	if err := c.runCommand(ctx, map[string]any{
-		"command":  "createClient",
-		"username": username,
-		"clientid": username,
-		"password": password,
-	}, "already exists"); err != nil {
-		return err
-	}
-	if err := c.runCommand(ctx, map[string]any{
-		"command":  "setClientPassword",
-		"username": username,
-		"password": password,
-	}, "not found"); err != nil {
-		return err
 	}
 	return nil
 }

@@ -14,6 +14,7 @@ func TestUpsertDevicePublishesDynsecCommand(t *testing.T) {
 		newRecordingConn(`{"responses":[{"command":"addRoleACL"}]}`),
 		newRecordingConn(`{"responses":[{"command":"addRoleACL"}]}`),
 		newRecordingConn(`{"responses":[{"command":"createClient"}]}`),
+		newRecordingConn(`{"responses":[{"command":"modifyClient"}]}`),
 	}
 	oldDial := dialMQTT
 	var dialCount int
@@ -42,11 +43,11 @@ func TestUpsertDevicePublishesDynsecCommand(t *testing.T) {
 	if err := client.UpsertDevice(context.Background(), "device-123", "device-secret"); err != nil {
 		t.Fatalf("upsert device: %v", err)
 	}
-	if !bytes.Contains(conns[len(conns)-1].writes.Bytes(), []byte(controlRequestTopic)) {
-		t.Fatalf("missing control request topic: %x", conns[len(conns)-1].writes.Bytes())
+	if !containsWrites(conns, controlRequestTopic) {
+		t.Fatalf("missing control request topic in writes")
 	}
-	if !bytes.Contains(conns[len(conns)-1].writes.Bytes(), []byte(`"device-123"`)) {
-		t.Fatalf("missing device id in payload: %s", conns[len(conns)-1].writes.Bytes())
+	if !containsWrites(conns, `"device-123"`) {
+		t.Fatalf("missing device id in payload")
 	}
 }
 
@@ -73,6 +74,45 @@ func TestDisableDeviceSendsDeleteCommands(t *testing.T) {
 	}
 	if err := client.DisableDevice(context.Background(), "device-123"); err != nil {
 		t.Fatalf("disable device: %v", err)
+	}
+}
+
+func TestEnsureServerPublisherAssignsRole(t *testing.T) {
+	conns := []*recordingConn{
+		newRecordingConn(`{"responses":[{"command":"createRole"}]}`),
+		newRecordingConn(`{"responses":[{"command":"addRoleACL"}]}`),
+		newRecordingConn(`{"responses":[{"command":"createClient"}]}`),
+		newRecordingConn(`{"responses":[{"command":"modifyClient"}]}`),
+	}
+	oldDial := dialMQTT
+	var dialCount int
+	dialMQTT = func(context.Context, string, string, time.Duration) (net.Conn, error) {
+		if dialCount >= len(conns) {
+			t.Fatalf("unexpected dial count: %d", dialCount)
+		}
+		conn := conns[dialCount]
+		dialCount++
+		return conn, nil
+	}
+	defer func() { dialMQTT = oldDial }()
+
+	client, err := New(Config{
+		Address:     "broker:1883",
+		ClientID:    "admin-client",
+		Username:    "admin",
+		Password:    "secret",
+		KeepAlive:   30 * time.Second,
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if err := client.EnsureServerPublisher(context.Background(), "xmdm-server", "server-secret"); err != nil {
+		t.Fatalf("ensure server publisher: %v", err)
+	}
+	if !containsWrites(conns, `"rolename":"xmdm-server-publisher"`) {
+		t.Fatalf("missing server publisher role assignment")
 	}
 }
 
@@ -105,6 +145,15 @@ func (c *recordingConn) RemoteAddr() net.Addr             { return dummyAddr("re
 func (c *recordingConn) SetDeadline(time.Time) error      { return nil }
 func (c *recordingConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *recordingConn) SetWriteDeadline(time.Time) error { return nil }
+
+func containsWrites(conns []*recordingConn, needle string) bool {
+	for _, conn := range conns {
+		if bytes.Contains(conn.writes.Bytes(), []byte(needle)) {
+			return true
+		}
+	}
+	return false
+}
 
 type dummyAddr string
 
