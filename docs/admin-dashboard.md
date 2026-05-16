@@ -36,15 +36,15 @@ The left navigation is grouped by operator task:
 | Identity | `/admin/users`, `/admin/roles` |
 | Operations | `/admin/audit` |
 
-The overview shows live counts for:
+The overview is the fleet command center. It combines:
 
-- devices
-- policies
-- apps
-- managed files
-- certificates
-- recent commands
-- audit events
+- a status banner with the current fleet health summary
+- quick actions for devices, policies, and the audit log
+- live health cards for device readiness, policy library, content readiness, command health, and audit activity
+- metric cards for policy coverage, pending enrollment, command acknowledgement rate, and content items
+- a needs-attention panel that surfaces active operational issues
+- a 7-day audit activity chart and command breakdown
+- content library and recent activity panels at the bottom of the page
 
 Use this page to confirm the control plane has data and to jump into the resource-specific pages.
 

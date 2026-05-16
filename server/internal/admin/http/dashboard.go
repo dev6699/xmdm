@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -82,6 +83,7 @@ type pageData struct {
 	Flash       string
 	Error       string
 	Callout     template.HTML
+	Overview    template.HTML
 	Sections    []sectionData
 	Forms       []formData
 	Items       any
@@ -92,6 +94,64 @@ type sectionData struct {
 	Title string
 	Count int
 	Body  template.HTML
+}
+
+type overviewSignal struct {
+	Label  string
+	Value  string
+	Detail string
+	Tone   string
+	Href   string // if set, the card navigates on click
+}
+
+type overviewMetric struct {
+	Label  string
+	Value  string
+	Detail string
+}
+
+type overviewAttention struct {
+	Title  string
+	Detail string
+	Tone   string
+	Href   string
+}
+
+type overviewChart struct {
+	Title     string
+	Subtitle  string
+	Labels    []string
+	Values    []int
+	Total     int
+	EmptyNote string
+}
+
+type overviewCommandStats struct {
+	Sent   int
+	Acked  int
+	Failed int
+	Total  int
+}
+
+type overviewContentStats struct {
+	ActiveApps  int
+	ActiveFiles int
+	ActiveCerts int
+}
+
+type overviewDashboardData struct {
+	Freshness      string
+	SummaryTitle   string
+	SummaryDetail  string
+	SummaryTone    string
+	CanWrite       bool
+	Signals        []overviewSignal
+	Metrics        []overviewMetric
+	Attention      []overviewAttention
+	Chart          overviewChart
+	CommandStats   overviewCommandStats
+	ContentStats   overviewContentStats
+	RecentActivity []audit.Event
 }
 
 type formData struct {
@@ -561,6 +621,545 @@ const dashboardTemplate = `<!doctype html>
       font-size: .75rem;
       color: var(--ink-2);
       margin-top: .5rem;
+    }
+    /* --------------------------------------------------
+       OVERVIEW - executive dashboard
+    -------------------------------------------------- */
+    .overview-stack {
+      display: grid;
+      gap: 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .overview-hero {
+      padding: 1.75rem 2rem;
+      background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      position: relative;
+      overflow: hidden;
+    }
+    .overview-hero::before {
+      content: '';
+      position: absolute;
+      top: 0; right: 0;
+      width: 340px; height: 210px;
+      background: radial-gradient(ellipse at top right, var(--accent-dim) 0%, transparent 72%);
+      pointer-events: none;
+    }
+    .overview-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1.25rem;
+      flex-wrap: wrap;
+      position: relative;
+    }
+    .overview-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      font-family: "Space Mono", monospace;
+      font-size: .6rem;
+      text-transform: uppercase;
+      letter-spacing: .15em;
+      color: var(--accent);
+      margin-bottom: .45rem;
+    }
+    .overview-kicker::before {
+      content: '';
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .overview-title-block h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -.03em;
+      color: var(--ink);
+      line-height: 1.15;
+    }
+    .overview-subtitle {
+      max-width: 46rem;
+      color: var(--ink-2);
+      font-size: .9rem;
+      margin-top: .45rem;
+    }
+    .overview-freshness {
+      color: var(--ink-3);
+      font-size: .76rem;
+      margin-top: .55rem;
+      font-family: "Space Mono", monospace;
+      letter-spacing: .02em;
+    }
+    .overview-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: .55rem;
+      flex-wrap: wrap;
+      position: relative;
+    }
+    .overview-status {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: .75rem;
+      align-items: start;
+      margin-top: 1.35rem;
+      padding: .95rem 1rem;
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      position: relative;
+    }
+    .overview-status-dot {
+      width: .62rem;
+      height: .62rem;
+      border-radius: 999px;
+      background: var(--ink-3);
+      margin-top: .35rem;
+    }
+    .overview-status-title {
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1.3;
+    }
+    .overview-status-detail {
+      color: var(--ink-2);
+      font-size: .82rem;
+      margin-top: .15rem;
+    }
+    .tone-good .overview-status-dot { background: var(--accent); }
+    .tone-warn .overview-status-dot { background: var(--warn); }
+    .tone-danger .overview-status-dot { background: var(--danger); }
+    .tone-good .overview-status-title { color: var(--accent); }
+    .tone-warn .overview-status-title { color: var(--warn); }
+    .tone-danger .overview-status-title { color: var(--danger); }
+
+    /* overview signal strip */
+    .health-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
+      gap: .75rem;
+      margin-top: 1.35rem;
+      padding-top: 1.35rem;
+      border-top: 1px solid var(--border);
+      position: relative;
+    }
+    .health-item-wrap {
+      display: block;
+      text-decoration: none;
+      border-radius: var(--radius);
+    }
+    a.health-item-wrap { cursor: pointer; }
+    a.health-item-wrap .health-item { transition: border-color .16s, background .16s, box-shadow .16s; }
+    a.health-item-wrap:hover .health-item {
+      border-color: var(--border-hi);
+      box-shadow: var(--shadow-sm);
+    }
+    .health-item {
+      display: grid;
+      gap: .3rem;
+      padding: 1rem 1.1rem;
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      min-width: 0;
+      position: relative;
+      overflow: hidden;
+    }
+    .health-item::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--ink-3);
+    }
+    .tone-good .health-item::after  { background: var(--accent); }
+    .tone-warn .health-item::after  { background: var(--warn); }
+    .tone-danger .health-item::after { background: var(--danger); }
+    .health-row {
+      display: flex;
+      align-items: center;
+      gap: .45rem;
+    }
+    .health-dot {
+      width: .45rem;
+      height: .45rem;
+      border-radius: 999px;
+      background: var(--ink-3);
+      flex: 0 0 auto;
+    }
+    .tone-good  .health-dot { background: var(--accent); }
+    .tone-warn  .health-dot { background: var(--warn); }
+    .tone-danger .health-dot { background: var(--danger); }
+    .health-label {
+      font-family: "DM Sans", system-ui, sans-serif;
+      font-size: .74rem;
+      font-weight: 700;
+      color: var(--ink-2);
+      flex: 1;
+    }
+    .health-nav-arrow {
+      font-size: .8rem;
+      color: var(--ink-3);
+      opacity: 0;
+      transition: opacity .15s, transform .15s;
+    }
+    a.health-item-wrap:hover .health-nav-arrow { opacity: 1; transform: translateX(2px); }
+    .health-value {
+      font-family: "Space Mono", monospace;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1.1;
+      padding-top: .1rem;
+    }
+    .tone-good  .health-value { color: var(--accent); }
+    .tone-warn  .health-value { color: var(--warn); }
+    .tone-danger .health-value { color: var(--danger); }
+    .health-detail {
+      color: var(--ink-3);
+      font-size: .74rem;
+      line-height: 1.4;
+      padding-bottom: .35rem;
+    }
+
+    /* overview metrics and attention */
+    .overview-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+      gap: .85rem;
+    }
+    .overview-metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.1rem 1.2rem;
+      box-shadow: var(--shadow-sm);
+    }
+    .overview-metric-label {
+      font-size: .72rem;
+      font-weight: 700;
+      color: var(--ink-2);
+      margin-bottom: .45rem;
+    }
+    .overview-metric-value {
+      font-family: "Space Mono", monospace;
+      font-size: 1.65rem;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1;
+    }
+    .overview-metric-detail {
+      color: var(--ink-3);
+      font-size: .76rem;
+      margin-top: .45rem;
+    }
+    .attention-list {
+      display: grid;
+      gap: .65rem;
+    }
+    .attention-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: start;
+      gap: .75rem;
+      padding: .8rem .9rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      text-decoration: none;
+    }
+    .attention-item:hover { border-color: var(--border-hi); background: var(--surface3); }
+    .attention-dot {
+      width: .5rem;
+      height: .5rem;
+      border-radius: 999px;
+      background: var(--ink-3);
+      margin-top: .45rem;
+    }
+    .tone-good .attention-dot { background: var(--accent); }
+    .tone-warn .attention-dot { background: var(--warn); }
+    .tone-danger .attention-dot { background: var(--danger); }
+    .attention-title {
+      color: var(--ink);
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .attention-detail {
+      color: var(--ink-2);
+      font-size: .8rem;
+      margin-top: .12rem;
+    }
+    .attention-arrow {
+      color: var(--ink-3);
+      font-size: .8rem;
+      padding-top: .2rem;
+    }
+
+    /* overview panels */
+    .overview-charts-row,
+    .overview-bottom-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+      gap: 1.25rem;
+    }
+    .overview-bottom-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .overview-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.35rem 1.5rem;
+      margin-bottom: 0;
+      box-shadow: var(--shadow-sm);
+    }
+    .overview-panel-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: .75rem;
+      margin-bottom: 1.1rem;
+      padding-bottom: .75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .overview-panel-title {
+      font-family: "Space Mono", monospace;
+      font-size: .62rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .13em;
+      color: var(--ink-3);
+    }
+    .overview-panel-meta {
+      font-size: .72rem;
+      color: var(--ink-3);
+    }
+    .overview-panel-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: .76rem;
+      font-weight: 600;
+    }
+    .overview-panel-link:hover { text-decoration: underline; }
+
+    /* audit bar chart */
+    .overview-chart { display: grid; gap: .5rem; }
+    .overview-chart svg { width: 100%; height: auto; display: block; }
+    .chart-axis {
+      fill: var(--ink-3);
+      font-family: "Space Mono", monospace;
+      font-size: 10px;
+    }
+    .chart-gridline { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; }
+    .chart-bar-bg  { fill: var(--surface3); }
+    .chart-bar     { fill: var(--accent-solid); opacity: .82; }
+    .chart-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: .25rem;
+      min-height: 120px;
+      color: var(--ink-2);
+      font-size: .82rem;
+      text-align: center;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .chart-empty small {
+      color: var(--ink-3);
+      font-size: .74rem;
+      line-height: 1.4;
+    }
+    .chart-total-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .3rem;
+      font-family: "Space Mono", monospace;
+      font-size: .62rem;
+      color: var(--accent);
+      background: var(--accent-dim);
+      border: 1px solid var(--border-hi);
+      border-radius: 999px;
+      padding: .12rem .55rem;
+    }
+
+    /* command breakdown */
+    .cmd-breakdown {
+      display: grid;
+      gap: .65rem;
+      margin-bottom: 1rem;
+    }
+    .cmd-row {
+      display: grid;
+      grid-template-columns: 4.5rem 1fr 2.5rem;
+      align-items: center;
+      gap: .6rem;
+    }
+    .cmd-row-label {
+      font-family: "Space Mono", monospace;
+      font-size: .62rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--ink-3);
+    }
+    .cmd-track {
+      height: 8px;
+      background: var(--surface3);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .cmd-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width .4s ease;
+      min-width: 2px;
+    }
+    .cmd-bar-sent   { background: var(--warn); }
+    .cmd-bar-acked  { background: var(--accent-solid); }
+    .cmd-bar-failed { background: var(--danger); }
+    .cmd-row-count {
+      font-family: "Space Mono", monospace;
+      font-size: .72rem;
+      font-weight: 700;
+      color: var(--ink-2);
+      text-align: right;
+    }
+    .cmd-summary {
+      display: flex;
+      gap: 1rem;
+      padding-top: .85rem;
+      border-top: 1px solid var(--border);
+    }
+    .cmd-stat { text-align: center; flex: 1; }
+    .cmd-stat-value {
+      font-family: "Space Mono", monospace;
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1.1;
+    }
+    .cmd-rate-good   { color: var(--accent); }
+    .cmd-rate-warn   { color: var(--warn); }
+    .cmd-rate-danger { color: var(--danger); }
+    .cmd-stat-label {
+      font-family: "Space Mono", monospace;
+      font-size: .58rem;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--ink-3);
+      margin-top: .2rem;
+    }
+
+    /* content composition */
+    .content-comp { display: grid; gap: 1rem; }
+    .comp-bar {
+      display: flex;
+      height: 10px;
+      border-radius: 999px;
+      overflow: hidden;
+      gap: 2px;
+      background: var(--surface3);
+    }
+    .comp-segment { height: 100%; transition: width .4s ease; min-width: 2px; }
+    .comp-apps  { background: var(--accent-solid); }
+    .comp-files { background: var(--warn); }
+    .comp-certs { background: #60a5fa; }
+    .comp-legend {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: .5rem;
+    }
+    .comp-legend-item {
+      display: flex;
+      flex-direction: column;
+      gap: .2rem;
+      padding: .75rem .85rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      transition: border-color .15s, background .15s;
+    }
+    .comp-legend-item:hover { border-color: var(--border-hi); background: var(--surface3); }
+    .comp-dot {
+      display: block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-bottom: .2rem;
+    }
+    .comp-dot.comp-apps  { background: var(--accent-solid); }
+    .comp-dot.comp-files { background: var(--warn); }
+    .comp-dot.comp-certs { background: #60a5fa; }
+    .comp-name {
+      font-family: "Space Mono", monospace;
+      font-size: .58rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--ink-3);
+    }
+    .comp-count {
+      font-family: "Space Mono", monospace;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1;
+    }
+    .comp-pct {
+      font-size: .72rem;
+      color: var(--ink-3);
+    }
+
+    /* recent activity */
+    .activity-list {
+      display: grid;
+      gap: .55rem;
+    }
+    .activity-item {
+      display: grid;
+      grid-template-columns: 5.8rem 1fr;
+      gap: .8rem;
+      padding: .7rem .75rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .activity-time {
+      font-family: "Space Mono", monospace;
+      color: var(--ink-3);
+      font-size: .68rem;
+      line-height: 1.45;
+    }
+    .activity-main {
+      min-width: 0;
+    }
+    .activity-action {
+      color: var(--ink);
+      font-weight: 700;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+    .activity-meta {
+      color: var(--ink-2);
+      font-size: .78rem;
+      margin-top: .12rem;
+      overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 1080px) {
+      .overview-charts-row,
+      .overview-bottom-row { grid-template-columns: 1fr; }
+      .comp-legend { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 640px) {
+      .overview-hero { padding: 1.35rem; }
+      .overview-actions { justify-content: flex-start; }
+      .comp-legend { grid-template-columns: 1fr; }
+      .activity-item { grid-template-columns: 1fr; }
     }
 
     /* ═══════════════════════════════════════════
@@ -1040,17 +1639,18 @@ const dashboardTemplate = `<!doctype html>
     </nav>
 
     <main class="content">
+      {{if not .Overview}}
       <div class="page-header">
         <div>
           <h1>{{.Title}}</h1>
           {{if .Subtitle}}<p class="page-subtitle">{{.Subtitle}}</p>{{end}}
         </div>
       </div>
+      {{end}}
       {{if .Flash}}<div class="flash">✓ {{.Flash}}</div>{{end}}
       {{if .Error}}<div class="error">⚠ {{.Error}}</div>{{end}}
       {{if .Callout}}<section class="panel">{{.Callout}}</section>{{end}}
-
-      {{if .Sections}}<div class="grid">{{range .Sections}}<div class="metric-card"><div class="metric-label">{{.Title}}</div><div class="metric-value">{{.Count}}</div>{{if .Body}}<div class="metric-note">{{.Body}}</div>{{end}}</div>{{end}}</div>{{end}}
+      {{if .Overview}}<div class="overview-stack">{{.Overview}}</div>{{end}}
 
       {{range .Forms}}<section class="panel"><h2>{{.Title}}</h2><form method="post" action="{{.Action}}" {{if .EncType}}enctype="{{.EncType}}"{{end}}><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}">{{range .Fields}}{{$field := .}}{{if eq $field.Type "checkbox"}}<label for="{{$field.Name}}">{{$field.Label}}</label><input id="{{$field.Name}}" name="{{$field.Name}}" type="checkbox" value="on" {{if $field.Value}}checked{{end}} aria-labelledby="{{$field.Name}}-label">{{else}}<label for="{{$field.Name}}" id="{{$field.Name}}-label">{{$field.Label}}</label>{{if eq $field.Type "textarea"}}<textarea id="{{$field.Name}}" name="{{$field.Name}}" placeholder="{{$field.Placeholder}}" {{if $field.Required}}required{{end}}>{{$field.Value}}</textarea>{{else if eq $field.Type "select"}}<select id="{{$field.Name}}" name="{{$field.Name}}" {{if $field.Required}}required{{end}}>{{if $field.Placeholder}}<option value="" disabled {{if not $field.Value}}selected{{end}}>{{$field.Placeholder}}</option>{{end}}{{range $field.Options}}<option value="{{.Value}}" {{if eq .Value $field.Value}}selected{{end}}>{{.Label}}</option>{{end}}</select>{{else if eq $field.Type "multiselect"}}<div class="checkbox-group" role="group" aria-label="{{$field.Label}}">{{range $field.Options}}<label class="checkbox-option"><input id="{{$field.Name}}-{{.Value}}" name="{{$field.Name}}" type="checkbox" value="{{.Value}}" {{if containsString $field.Values .Value}}checked{{end}}><span>{{.Label}}</span></label>{{end}}</div>{{else if eq $field.Type "radio"}}<div class="toggle-group" role="radiogroup" aria-label="{{$field.Label}}">{{range $field.Options}}<label class="toggle-option"><input id="{{$field.Name}}-{{.Value}}" name="{{$field.Name}}" type="radio" value="{{.Value}}" {{if eq .Value $field.Value}}checked{{end}}><span>{{.Label}}</span></label>{{end}}</div>{{else}}<input id="{{$field.Name}}" name="{{$field.Name}}" type="{{$field.Type}}" value="{{$field.Value}}" placeholder="{{$field.Placeholder}}" {{if $field.Required}}required{{end}}>{{end}}{{end}}{{end}}{{if .Help}}<div class="field-help">{{.Help}}</div>{{end}}<p><button type="submit" {{if .Danger}}class="danger"{{end}}>{{.Submit}}</button></p>{{if .After}}{{.After}}{{end}}</form></section>{{end}}
 
@@ -1228,52 +1828,632 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+
 	ctx := r.Context()
-	sections := []sectionData{}
-	add := func(title string, count int, note string) {
-		sections = append(sections, sectionData{Title: title, Count: count, Body: template.HTML(template.HTMLEscapeString(note))})
+	now := time.Now().Local()
+	ov := overviewDashboardData{
+		Freshness: "Last updated " + formatDashboardTime(now),
+		CanWrite:  d.canWrite(session),
 	}
+	appendSignal := func(label, value, detail, tone, href string) {
+		ov.Signals = append(ov.Signals, overviewSignal{Label: label, Value: value, Detail: detail, Tone: tone, Href: href})
+	}
+	appendAttention := func(title, detail, tone, href string) {
+		ov.Attention = append(ov.Attention, overviewAttention{Title: title, Detail: detail, Tone: tone, Href: href})
+	}
+
+	totalDevices := 0
+	activeDevices := 0
+	pendingDevices := 0
+	inactiveDevices := 0
+	assignedPolicyDevices := 0
+
 	if d.deps.Devices != nil {
 		items, err := d.deps.Devices.ListDevices(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		add("Devices", len(items), "Managed fleet records")
+		totalDevices = len(items)
+		for _, item := range items {
+			if item.Status == device.StatusActive {
+				activeDevices++
+			} else {
+				inactiveDevices++
+			}
+			if item.Status == device.StatusPending {
+				pendingDevices++
+			}
+			if firstPolicyID(item.PolicyID) != "" {
+				assignedPolicyDevices++
+			}
+		}
+		tone := "neutral"
+		if totalDevices == 0 {
+			tone = "warn"
+		} else if inactiveDevices > 0 {
+			tone = "warn"
+		} else {
+			tone = "good"
+		}
+		detail := fmt.Sprintf("%d of %d devices active", activeDevices, totalDevices)
+		if inactiveDevices > 0 {
+			detail = fmt.Sprintf("%d active, %d require review", activeDevices, inactiveDevices)
+		}
+		appendSignal("Device readiness", strconv.Itoa(activeDevices), detail, tone, "/admin/devices")
 	}
+
+	totalPolicies := 0
+	activePolicies := 0
+	retiredPolicies := 0
 	if d.deps.Policies != nil {
 		items, err := d.deps.Policies.ListPolicies(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		add("Policies", len(items), "Policy definitions")
+		totalPolicies = len(items)
+		for _, item := range items {
+			switch item.Status {
+			case policy.StatusActive:
+				activePolicies++
+			case policy.StatusRetired:
+				retiredPolicies++
+			}
+		}
+		tone := "neutral"
+		if activePolicies > 0 {
+			tone = "good"
+		} else if totalPolicies > 0 {
+			tone = "warn"
+		}
+		appendSignal("Policy library", strconv.Itoa(activePolicies), fmt.Sprintf("%d active, %d retired", activePolicies, retiredPolicies), tone, "/admin/policies")
 	}
+
 	if d.deps.Apps != nil {
 		items, err := d.deps.Apps.ListApps(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		add("Apps", len(items), "Managed packages")
+		for _, item := range items {
+			if item.Status == apps.StatusActive {
+				ov.ContentStats.ActiveApps++
+			}
+		}
 	}
-	if d.deps.Commands != nil {
-		items, err := d.deps.Commands.ListRecent(ctx, d.deps.TenantID, 25)
+
+	if d.deps.ManagedFiles != nil {
+		items, err := d.deps.ManagedFiles.ListManagedFiles(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		add("Recent Commands", len(items), "Last 25 command rows")
+		for _, item := range items {
+			if item.Status == managedfiles.StatusActive {
+				ov.ContentStats.ActiveFiles++
+			}
+		}
 	}
+
+	if d.deps.Certificates != nil {
+		items, err := d.deps.Certificates.ListCertificates(ctx, d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
+		}
+		for _, item := range items {
+			if item.Status == certificates.StatusActive {
+				ov.ContentStats.ActiveCerts++
+			}
+		}
+	}
+
+	totalContent := ov.ContentStats.ActiveApps + ov.ContentStats.ActiveFiles + ov.ContentStats.ActiveCerts
+	contentTone := "neutral"
+	if totalContent > 0 {
+		contentTone = "good"
+	}
+	appendSignal("Content readiness", strconv.Itoa(totalContent), fmt.Sprintf("%d apps, %d files, %d certs", ov.ContentStats.ActiveApps, ov.ContentStats.ActiveFiles, ov.ContentStats.ActiveCerts), contentTone, "/admin/apps")
+
+	if d.deps.Commands != nil {
+		items, err := d.deps.Commands.ListRecent(ctx, d.deps.TenantID, 50)
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
+		}
+		for _, item := range items {
+			ov.CommandStats.Total++
+			switch item.Status {
+			case commands.StatusSent:
+				ov.CommandStats.Sent++
+			case commands.StatusAcked:
+				ov.CommandStats.Acked++
+			case commands.StatusFailed:
+				ov.CommandStats.Failed++
+			}
+		}
+		commandTone := "good"
+		if ov.CommandStats.Failed > 0 {
+			commandTone = "danger"
+		} else if ov.CommandStats.Sent > 0 {
+			commandTone = "warn"
+		}
+		detail := fmt.Sprintf("%d acknowledged, %d pending, %d failed", ov.CommandStats.Acked, ov.CommandStats.Sent, ov.CommandStats.Failed)
+		appendSignal("Command health", strconv.Itoa(ov.CommandStats.Total), detail, commandTone, "/admin/commands")
+	}
+
+	var auditEvents []audit.Event
+	auditLast24h := 0
 	if d.deps.Audit != nil {
 		items, err := d.deps.Audit.List(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		add("Audit Events", len(items), "Immutable admin activity")
+		sort.SliceStable(items, func(i, j int) bool {
+			return items[i].CreatedAt.After(items[j].CreatedAt)
+		})
+		auditEvents = items
+		for _, item := range items {
+			if item.CreatedAt.After(now.Add(-24 * time.Hour)) {
+				auditLast24h++
+			}
+		}
+		if len(items) > 5 {
+			ov.RecentActivity = items[:5]
+		} else {
+			ov.RecentActivity = items
+		}
+		auditTone := "neutral"
+		if auditLast24h > 0 {
+			auditTone = "good"
+		}
+		appendSignal("Audit activity", strconv.Itoa(auditLast24h), "events in the last 24 hours", auditTone, "/admin/audit")
 	}
-	d.renderForSession(w, r, session, pageData{Title: "Overview", Sections: sections})
+
+	if totalDevices > 0 && inactiveDevices > 0 {
+		appendAttention("Devices require review", fmt.Sprintf("%d of %d devices are not active.", inactiveDevices, totalDevices), "warn", "/admin/devices")
+	}
+	if pendingDevices > 0 {
+		appendAttention("Pending enrollment", fmt.Sprintf("%d device%s awaiting enrollment or activation.", pendingDevices, pluralSuffix(pendingDevices)), "warn", "/admin/devices")
+	}
+	if totalDevices == 0 && d.deps.Devices != nil {
+		appendAttention("No devices enrolled", "Create or enroll the first device to activate fleet monitoring.", "warn", "/admin/devices")
+	}
+	if ov.CommandStats.Failed > 0 {
+		appendAttention("Failed commands", fmt.Sprintf("%d recent command%s failed and should be investigated.", ov.CommandStats.Failed, pluralSuffix(ov.CommandStats.Failed)), "danger", "/admin/commands")
+	}
+	if ov.CommandStats.Sent > 0 {
+		appendAttention("Commands pending acknowledgement", fmt.Sprintf("%d command%s still waiting for device acknowledgement.", ov.CommandStats.Sent, pluralSuffix(ov.CommandStats.Sent)), "warn", "/admin/commands")
+	}
+	if d.deps.Policies != nil && totalPolicies == 0 {
+		appendAttention("No policies configured", "Create a policy before onboarding production devices.", "warn", "/admin/policies")
+	} else if d.deps.Policies != nil && totalPolicies > 0 && activePolicies == 0 {
+		appendAttention("No active policies", "All policies are retired or inactive; devices may not receive the expected configuration.", "warn", "/admin/policies")
+	}
+	if totalDevices > 0 && assignedPolicyDevices < totalDevices {
+		missing := totalDevices - assignedPolicyDevices
+		appendAttention("Policy coverage gap", fmt.Sprintf("%d device%s have no policy assignment.", missing, pluralSuffix(missing)), "warn", "/admin/devices")
+	}
+	if d.deps.Audit != nil && auditLast24h == 0 {
+		appendAttention("No recent audit activity", "No operator or system events were recorded in the last 24 hours.", "neutral", "/admin/audit")
+	}
+
+	policyCoverage := 0
+	if totalDevices > 0 {
+		policyCoverage = assignedPolicyDevices * 100 / totalDevices
+	}
+	ackRate := 0
+	if ov.CommandStats.Total > 0 {
+		ackRate = ov.CommandStats.Acked * 100 / ov.CommandStats.Total
+	}
+	ov.Metrics = append(ov.Metrics,
+		overviewMetric{Label: "Policy coverage", Value: strconv.Itoa(policyCoverage) + "%", Detail: fmt.Sprintf("%d of %d devices assigned", assignedPolicyDevices, totalDevices)},
+		overviewMetric{Label: "Pending enrollment", Value: strconv.Itoa(pendingDevices), Detail: "Devices waiting to become active"},
+		overviewMetric{Label: "Command ack rate", Value: strconv.Itoa(ackRate) + "%", Detail: fmt.Sprintf("%d of %d recent commands acknowledged", ov.CommandStats.Acked, ov.CommandStats.Total)},
+		overviewMetric{Label: "Content items", Value: strconv.Itoa(totalContent), Detail: "Active apps, managed files, and certificates"},
+	)
+
+	ov.Chart = buildOverviewChart(auditEvents, now, 7)
+	ov.SummaryTitle, ov.SummaryDetail, ov.SummaryTone = overviewStatusSummary(ov, activeDevices, totalDevices, activePolicies, auditLast24h)
+
+	if len(ov.Signals) == 0 {
+		appendSignal("Snapshot", "ready", "No live repositories were attached", "neutral", "")
+	}
+
+	overviewHTML := renderOverviewDashboard(ov)
+	d.renderForSession(w, r, session, pageData{Title: "Fleet Overview", Subtitle: "Monitor device readiness, policy coverage, content distribution, and recent activity.", Overview: overviewHTML})
+}
+
+func renderOverviewDashboard(data overviewDashboardData) template.HTML {
+	var b strings.Builder
+
+	b.WriteString(`<div class="overview-hero">`)
+	b.WriteString(`<div class="overview-top">`)
+	b.WriteString(`<div class="overview-title-block">`)
+	b.WriteString(`<div class="overview-kicker">Control plane</div>`)
+	b.WriteString(`<h1>Fleet Overview</h1>`)
+	b.WriteString(`<div class="overview-subtitle">Monitor device readiness, policy coverage, content distribution, command delivery, and recent administrative activity.</div>`)
+	b.WriteString(`<div class="overview-freshness">` + esc(data.Freshness) + `</div>`)
+	b.WriteString(`</div>`)
+	b.WriteString(`<div class="overview-actions">`)
+	b.WriteString(`<a class="button btn-primary" href="/admin/devices">Manage devices</a>`)
+	b.WriteString(`<a class="button" href="/admin/policies">Review policies</a>`)
+	b.WriteString(`<a class="button" href="/admin/audit">View audit log</a>`)
+	b.WriteString(`</div>`)
+	b.WriteString(`</div>`)
+
+	statusTone := signalToneClass(data.SummaryTone)
+	b.WriteString(`<div class="overview-status ` + statusTone + `">`)
+	b.WriteString(`<span class="overview-status-dot"></span>`)
+	b.WriteString(`<div><div class="overview-status-title">` + esc(data.SummaryTitle) + `</div>`)
+	b.WriteString(`<div class="overview-status-detail">` + esc(data.SummaryDetail) + `</div></div>`)
+	b.WriteString(`</div>`)
+
+	if len(data.Signals) > 0 {
+		b.WriteString(`<div class="health-strip">`)
+		for _, signal := range data.Signals {
+			tone := signalToneClass(signal.Tone)
+			if signal.Href != "" {
+				b.WriteString(`<a class="health-item-wrap ` + tone + `" href="` + escAttr(signal.Href) + `">`)
+			} else {
+				b.WriteString(`<div class="health-item-wrap ` + tone + `">`)
+			}
+			b.WriteString(`<div class="health-item">`)
+			b.WriteString(`<div class="health-row"><span class="health-dot"></span><div class="health-label">` + esc(signal.Label) + `</div>`)
+			if signal.Href != "" {
+				b.WriteString(`<span class="health-nav-arrow">&rarr;</span>`)
+			}
+			b.WriteString(`</div>`)
+			b.WriteString(`<div class="health-value">` + esc(signal.Value) + `</div>`)
+			b.WriteString(`<div class="health-detail">` + esc(signal.Detail) + `</div>`)
+			b.WriteString(`</div>`)
+			if signal.Href != "" {
+				b.WriteString(`</a>`)
+			} else {
+				b.WriteString(`</div>`)
+			}
+		}
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</div>`)
+
+	if len(data.Metrics) > 0 {
+		b.WriteString(`<div class="overview-metrics-grid">`)
+		for _, metric := range data.Metrics {
+			b.WriteString(`<div class="overview-metric-card">`)
+			b.WriteString(`<div class="overview-metric-label">` + esc(metric.Label) + `</div>`)
+			b.WriteString(`<div class="overview-metric-value">` + esc(metric.Value) + `</div>`)
+			b.WriteString(`<div class="overview-metric-detail">` + esc(metric.Detail) + `</div>`)
+			b.WriteString(`</div>`)
+		}
+		b.WriteString(`</div>`)
+	}
+
+	b.WriteString(`<div class="overview-panel">`)
+	b.WriteString(`<div class="overview-panel-header"><span class="overview-panel-title">Needs attention</span><span class="overview-panel-meta">Operational priorities</span></div>`)
+	b.WriteString(string(renderAttentionList(data.Attention)))
+	b.WriteString(`</div>`)
+
+	b.WriteString(`<div class="overview-charts-row">`)
+	b.WriteString(`<div class="overview-panel">`)
+	b.WriteString(`<div class="overview-panel-header">`)
+	b.WriteString(`<span class="overview-panel-title">` + esc(data.Chart.Title) + `</span>`)
+	if data.Chart.Total > 0 {
+		b.WriteString(`<span class="chart-total-badge">` + strconv.Itoa(data.Chart.Total) + ` events</span>`)
+	} else {
+		b.WriteString(`<span class="overview-panel-meta">Last 7 days</span>`)
+	}
+	b.WriteString(`</div>`)
+	b.WriteString(`<div class="overview-chart">`)
+	b.WriteString(string(renderOverviewChart(data.Chart)))
+	b.WriteString(`</div>`)
+	b.WriteString(`</div>`)
+
+	b.WriteString(`<div class="overview-panel">`)
+	b.WriteString(`<div class="overview-panel-header"><span class="overview-panel-title">Commands</span><a class="overview-panel-link" href="/admin/commands">View all</a></div>`)
+	b.WriteString(string(renderCommandBreakdown(data.CommandStats)))
+	b.WriteString(`</div>`)
+	b.WriteString(`</div>`)
+
+	b.WriteString(`<div class="overview-bottom-row">`)
+	b.WriteString(`<div class="overview-panel">`)
+	b.WriteString(`<div class="overview-panel-header"><span class="overview-panel-title">Content library</span>`)
+	totalContent := data.ContentStats.ActiveApps + data.ContentStats.ActiveFiles + data.ContentStats.ActiveCerts
+	b.WriteString(`<span class="overview-panel-meta">` + strconv.Itoa(totalContent) + ` active items</span>`)
+	b.WriteString(`</div>`)
+	b.WriteString(string(renderContentComposition(data.ContentStats)))
+	b.WriteString(`</div>`)
+
+	b.WriteString(`<div class="overview-panel">`)
+	b.WriteString(`<div class="overview-panel-header"><span class="overview-panel-title">Recent activity</span><a class="overview-panel-link" href="/admin/audit">View audit log</a></div>`)
+	b.WriteString(string(renderRecentActivity(data.RecentActivity)))
+	b.WriteString(`</div>`)
+	b.WriteString(`</div>`)
+
+	return template.HTML(b.String())
+}
+
+func renderAttentionList(items []overviewAttention) template.HTML {
+	if len(items) == 0 {
+		return template.HTML(`<div class="attention-list"><div class="attention-item tone-good"><span class="attention-dot"></span><div><div class="attention-title">No immediate action required</div><div class="attention-detail">Fleet health, command delivery, and policy coverage are within the expected range.</div></div></div></div>`)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="attention-list">`)
+	for _, item := range items {
+		tone := signalToneClass(item.Tone)
+		if item.Href != "" {
+			b.WriteString(`<a class="attention-item ` + tone + `" href="` + escAttr(item.Href) + `">`)
+		} else {
+			b.WriteString(`<div class="attention-item ` + tone + `">`)
+		}
+		b.WriteString(`<span class="attention-dot"></span>`)
+		b.WriteString(`<div><div class="attention-title">` + esc(item.Title) + `</div><div class="attention-detail">` + esc(item.Detail) + `</div></div>`)
+		if item.Href != "" {
+			b.WriteString(`<span class="attention-arrow">&rarr;</span></a>`)
+		} else {
+			b.WriteString(`</div>`)
+		}
+	}
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func renderCommandBreakdown(stats overviewCommandStats) template.HTML {
+	if stats.Total == 0 {
+		return template.HTML(`<div class="chart-empty"><strong>No recent commands</strong><small>Commands sent to devices will appear here.</small></div>`)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="cmd-breakdown">`)
+	type bar struct {
+		label string
+		count int
+		cls   string
+	}
+	bars := []bar{
+		{"Sent", stats.Sent, "cmd-bar-sent"},
+		{"Acked", stats.Acked, "cmd-bar-acked"},
+		{"Failed", stats.Failed, "cmd-bar-failed"},
+	}
+	for _, entry := range bars {
+		pct := 0
+		if stats.Total > 0 {
+			pct = entry.count * 100 / stats.Total
+		}
+		b.WriteString(`<div class="cmd-row">`)
+		b.WriteString(`<div class="cmd-row-label">` + esc(entry.label) + `</div>`)
+		b.WriteString(`<div class="cmd-track"><div class="cmd-fill ` + entry.cls + `" style="width:` + strconv.Itoa(pct) + `%"></div></div>`)
+		b.WriteString(`<div class="cmd-row-count">` + strconv.Itoa(entry.count) + `</div>`)
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</div>`)
+
+	b.WriteString(`<div class="cmd-summary">`)
+	successRate := 0
+	if stats.Total > 0 {
+		successRate = stats.Acked * 100 / stats.Total
+	}
+	rateCls := "cmd-rate-good"
+	if successRate < 80 {
+		rateCls = "cmd-rate-warn"
+	}
+	if successRate < 50 {
+		rateCls = "cmd-rate-danger"
+	}
+	b.WriteString(`<div class="cmd-stat"><div class="cmd-stat-value ` + rateCls + `">` + strconv.Itoa(successRate) + `%</div><div class="cmd-stat-label">ack rate</div></div>`)
+	b.WriteString(`<div class="cmd-stat"><div class="cmd-stat-value">` + strconv.Itoa(stats.Total) + `</div><div class="cmd-stat-label">total</div></div>`)
+	b.WriteString(`<div class="cmd-stat"><div class="cmd-stat-value cmd-rate-danger">` + strconv.Itoa(stats.Failed) + `</div><div class="cmd-stat-label">failed</div></div>`)
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func renderContentComposition(stats overviewContentStats) template.HTML {
+	total := stats.ActiveApps + stats.ActiveFiles + stats.ActiveCerts
+	var b strings.Builder
+	b.WriteString(`<div class="content-comp">`)
+	type segment struct {
+		label string
+		count int
+		cls   string
+		href  string
+	}
+	segs := []segment{
+		{"Apps", stats.ActiveApps, "comp-apps", "/admin/apps"},
+		{"Managed files", stats.ActiveFiles, "comp-files", "/admin/managed-files"},
+		{"Certificates", stats.ActiveCerts, "comp-certs", "/admin/certificates"},
+	}
+	if total == 0 {
+		b.WriteString(`<div class="chart-empty"><strong>No content configured</strong><small>Active apps, managed files, and certificates will appear here once added.</small></div>`)
+		b.WriteString(`</div>`)
+		return template.HTML(b.String())
+	}
+	b.WriteString(`<div class="comp-bar">`)
+	for _, seg := range segs {
+		if seg.count == 0 {
+			continue
+		}
+		pct := seg.count * 100 / total
+		b.WriteString(`<div class="comp-segment ` + seg.cls + `" style="width:` + strconv.Itoa(pct) + `%" title="` + esc(seg.label) + `: ` + strconv.Itoa(seg.count) + `"></div>`)
+	}
+	b.WriteString(`</div>`)
+	b.WriteString(`<div class="comp-legend">`)
+	for _, seg := range segs {
+		pct := 0
+		if total > 0 {
+			pct = seg.count * 100 / total
+		}
+		b.WriteString(`<a class="comp-legend-item" href="` + escAttr(seg.href) + `">`)
+		b.WriteString(`<span class="comp-dot ` + seg.cls + `"></span>`)
+		b.WriteString(`<span class="comp-name">` + esc(seg.label) + `</span>`)
+		b.WriteString(`<span class="comp-count">` + strconv.Itoa(seg.count) + `</span>`)
+		b.WriteString(`<span class="comp-pct">` + strconv.Itoa(pct) + `% of library</span>`)
+		b.WriteString(`</a>`)
+	}
+	b.WriteString(`</div>`)
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func renderRecentActivity(items []audit.Event) template.HTML {
+	if len(items) == 0 {
+		return template.HTML(`<div class="chart-empty"><strong>No recent activity</strong><small>Operator actions and system events will appear here once recorded.</small></div>`)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="activity-list">`)
+	for _, item := range items {
+		resource := item.ResourceType
+		if strings.TrimSpace(item.ResourceID) != "" {
+			resource += "/" + item.ResourceID
+		}
+		actor := firstNonEmpty(item.Actor, "system")
+		b.WriteString(`<div class="activity-item">`)
+		b.WriteString(`<div class="activity-time">` + esc(formatDashboardTime(item.CreatedAt)) + `</div>`)
+		b.WriteString(`<div class="activity-main"><div class="activity-action">` + esc(item.Action) + `</div>`)
+		b.WriteString(`<div class="activity-meta">` + esc(actor) + ` on ` + esc(resource) + `</div></div>`)
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func renderOverviewChart(chart overviewChart) template.HTML {
+	if len(chart.Values) == 0 || chart.Total == 0 {
+		if chart.EmptyNote == "" {
+			chart.EmptyNote = "No activity in the selected window."
+		}
+		return template.HTML(`<div class="chart-empty"><strong>` + esc(chart.EmptyNote) + `</strong><small>Audit events will appear here as operators and systems make changes.</small></div>`)
+	}
+	const width = 720
+	const height = 220
+	const left = 36
+	const right = 14
+	const top = 18
+	const bottom = 42
+	plotWidth := width - left - right
+	plotHeight := height - top - bottom
+	maxValue := 0
+	for _, value := range chart.Values {
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+	if maxValue == 0 {
+		maxValue = 1
+	}
+	cellWidth := float64(plotWidth) / float64(len(chart.Values))
+	barWidth := cellWidth * 0.68
+	barGap := (cellWidth - barWidth) / 2
+	var b strings.Builder
+	b.WriteString(`<svg viewBox="0 0 720 220" role="img" aria-label="` + esc(chart.Title) + `">`)
+	for i := 0; i < 4; i++ {
+		y := float64(top+plotHeight) - (float64(plotHeight) * float64(i) / 3)
+		b.WriteString(fmt.Sprintf(`<line class="chart-gridline" x1="%d" x2="%d" y1="%.1f" y2="%.1f"></line>`, left, width-right, y, y))
+	}
+	for i, value := range chart.Values {
+		barHeight := float64(plotHeight) * float64(value) / float64(maxValue)
+		x := float64(left) + float64(i)*cellWidth + barGap
+		y := float64(top+plotHeight) - barHeight
+		barLabel := chart.Labels[i]
+		b.WriteString(fmt.Sprintf(`<rect class="chart-bar-bg" x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="6"></rect>`, x, float64(top), barWidth, float64(plotHeight)))
+		b.WriteString(fmt.Sprintf(`<rect class="chart-bar" x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="6"></rect>`, x, y, barWidth, barHeight))
+		if value > 0 {
+			b.WriteString(fmt.Sprintf(`<text class="chart-axis" x="%.1f" y="%.1f" text-anchor="middle">%d</text>`, x+barWidth/2, y-4, value))
+		}
+		b.WriteString(fmt.Sprintf(`<text class="chart-axis" x="%.1f" y="%d" text-anchor="middle">%s</text>`, x+barWidth/2, height-18, esc(barLabel)))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="chart-axis" x="%d" y="%d">%d</text>`, 4, top+11, maxValue))
+	b.WriteString(fmt.Sprintf(`<text class="chart-axis" x="%d" y="%d">0</text>`, 10, top+plotHeight+4))
+	b.WriteString(`</svg>`)
+	return template.HTML(b.String())
+}
+
+func buildOverviewChart(events []audit.Event, now time.Time, days int) overviewChart {
+	chart := overviewChart{
+		Title:     "Audit activity, last 7 days",
+		EmptyNote: "No audit activity in the last 7 days.",
+	}
+	if days <= 0 {
+		days = 7
+	}
+	loc := now.Location()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -(days - 1))
+	chart.Labels = make([]string, days)
+	chart.Values = make([]int, days)
+	for i := 0; i < days; i++ {
+		day := start.AddDate(0, 0, i)
+		chart.Labels[i] = day.Format("Jan 2")
+	}
+	for _, event := range events {
+		observed := event.CreatedAt.In(loc)
+		if observed.Before(start) || observed.After(now) {
+			continue
+		}
+		index := int(observed.Sub(start).Hours() / 24)
+		if index >= 0 && index < len(chart.Values) {
+			chart.Values[index]++
+			chart.Total++
+		}
+	}
+	return chart
+}
+
+func overviewStatusSummary(data overviewDashboardData, activeDevices, totalDevices, activePolicies, auditLast24h int) (string, string, string) {
+	tone := "good"
+	for _, item := range data.Attention {
+		switch strings.ToLower(strings.TrimSpace(item.Tone)) {
+		case "danger":
+			tone = "danger"
+		case "warn":
+			if tone != "danger" {
+				tone = "warn"
+			}
+		}
+	}
+
+	title := "Fleet status: Healthy"
+	switch tone {
+	case "warn":
+		title = "Fleet status: Review recommended"
+	case "danger":
+		title = "Fleet status: Attention required"
+	}
+
+	parts := make([]string, 0, 4)
+	if totalDevices > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d devices active", activeDevices, totalDevices))
+	}
+	if activePolicies > 0 {
+		parts = append(parts, fmt.Sprintf("%d active policies", activePolicies))
+	}
+	if data.CommandStats.Total > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d commands acknowledged", data.CommandStats.Acked, data.CommandStats.Total))
+	}
+	parts = append(parts, fmt.Sprintf("%d audit events in the last 24 hours", auditLast24h))
+	if len(parts) == 0 {
+		parts = append(parts, "Repositories are ready, but no live fleet data is attached yet")
+	}
+	return title, strings.Join(parts, " - "), tone
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func signalToneClass(tone string) string {
+	switch strings.ToLower(strings.TrimSpace(tone)) {
+	case "good":
+		return "tone-good"
+	case "warn":
+		return "tone-warn"
+	case "danger":
+		return "tone-danger"
+	default:
+		return "tone-neutral"
+	}
 }
 
 func (d *dashboard) users(w http.ResponseWriter, r *http.Request) {
@@ -3212,15 +4392,6 @@ func (d *dashboard) renderForSession(w http.ResponseWriter, r *http.Request, ses
 	d.render(w, data)
 }
 
-func (d *dashboard) renderForCurrentUser(w http.ResponseWriter, r *http.Request, title string, body template.HTML) {
-	session, ok := sessionFromRequest(r, d.svc)
-	if !ok {
-		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
-		return
-	}
-	d.renderForSession(w, r, session, pageData{Title: title, Items: body})
-}
-
 func (d *dashboard) render(w http.ResponseWriter, data pageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := d.tmpl.Execute(w, data); err != nil {
@@ -3377,17 +4548,6 @@ func commandUpsertFromForm(r *http.Request) (commands.Upsert, error) {
 	return commands.Upsert{Type: strings.TrimSpace(r.FormValue("type")), Payload: payload, ExpiresAt: expiresAt, Target: commands.Target{Type: targetType, DeviceID: strings.TrimSpace(r.FormValue("targetDeviceId")), GroupID: strings.TrimSpace(r.FormValue("targetGroupId"))}}, nil
 }
 
-func fileUpsertFromMultipart(r *http.Request) (files.FileUpsert, []byte, error) {
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		return files.FileUpsert{}, nil, err
-	}
-	content, size, err := uploadedBytes(r)
-	if err != nil {
-		return files.FileUpsert{}, nil, err
-	}
-	return files.FileUpsert{Name: strings.TrimSpace(r.FormValue("name")), StorageKey: strings.TrimSpace(r.FormValue("storageKey")), Checksum: strings.TrimSpace(r.FormValue("checksum")), SizeBytes: size, MimeType: strings.TrimSpace(r.FormValue("mimeType"))}, content, nil
-}
-
 func managedFileUpsertFromMultipart(r *http.Request) (files.FileUpsert, managedfiles.ManagedFileUpsert, []byte, error) {
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		return files.FileUpsert{}, managedfiles.ManagedFileUpsert{}, nil, err
@@ -3436,18 +4596,6 @@ func certificateUpsertFromMultipart(r *http.Request) (certificates.CertificateUp
 		SizeBytes:  int64(len(content)),
 		MimeType:   certificateMimeType(filename, content),
 	}, content, nil
-}
-
-func uploadedBytes(r *http.Request) ([]byte, int64, error) {
-	content, err := uploadedContent(r)
-	if err != nil {
-		return nil, 0, err
-	}
-	sizeBytes, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("sizeBytes")), 10, 64)
-	if err != nil || sizeBytes != int64(len(content)) {
-		return nil, 0, fmt.Errorf("invalid size")
-	}
-	return content, sizeBytes, nil
 }
 
 func uploadedContent(r *http.Request) ([]byte, error) {
@@ -3709,39 +4857,6 @@ func allPolicyOptions(items []policy.Policy) []optionData {
 			label += " (" + item.Status + ")"
 		}
 		options = append(options, optionData{Value: item.ID, Label: label})
-	}
-	return options
-}
-
-func allGroupOptions(items []group.Group) []optionData {
-	options := make([]optionData, 0, len(items))
-	for _, item := range items {
-		label := item.Name
-		if strings.TrimSpace(label) == "" {
-			label = item.ID
-		}
-		if item.Status != "active" {
-			label += " (" + item.Status + ")"
-		}
-		options = append(options, optionData{Value: item.ID, Label: label})
-	}
-	return options
-}
-
-func allDeviceOptions(items []device.Device) []optionData {
-	options := make([]optionData, 0, len(items))
-	for _, item := range items {
-		label := item.Name
-		if strings.TrimSpace(label) == "" {
-			label = item.DeviceID
-		}
-		if strings.TrimSpace(item.DeviceID) != "" && strings.TrimSpace(label) != item.DeviceID {
-			label += " (" + item.DeviceID + ")"
-		}
-		if item.Status != device.StatusActive {
-			label += " (" + item.Status + ")"
-		}
-		options = append(options, optionData{Value: item.DeviceID, Label: label})
 	}
 	return options
 }
@@ -4368,14 +5483,6 @@ func summaryHTMLItem(label string, value template.HTML) string {
 	return `<div class="policy-summary-item"><div class="policy-summary-label">` + esc(label) + `</div><div class="policy-summary-value">` + string(value) + `</div></div>`
 }
 
-func appNameByID(items []apps.App) map[string]apps.App {
-	out := make(map[string]apps.App, len(items))
-	for _, item := range items {
-		out[item.ID] = item
-	}
-	return out
-}
-
 func appAssignmentStatusByID(assignments []policy.PolicyApp) map[string]bool {
 	out := make(map[string]bool, len(assignments))
 	for _, assignment := range assignments {
@@ -4398,32 +5505,6 @@ func managedFileAssignmentStatusByID(assignments []policy.PolicyManagedFile) map
 		out[assignment.ManagedFileID] = assignment.Status == policy.StatusActive
 	}
 	return out
-}
-
-func activeAppOptions(items []apps.App) []optionData {
-	options := make([]optionData, 0, len(items))
-	for _, item := range items {
-		if item.Status != apps.StatusActive {
-			continue
-		}
-		label := item.Name
-		if strings.TrimSpace(label) == "" {
-			label = item.PackageName
-		}
-		options = append(options, optionData{Value: item.ID, Label: label})
-	}
-	return options
-}
-
-func deleteOptionByValue(options *[]optionData, value string) {
-	filtered := make([]optionData, 0, len(*options))
-	for _, option := range *options {
-		if option.Value == value {
-			continue
-		}
-		filtered = append(filtered, option)
-	}
-	*options = filtered
 }
 
 func policyRestrictionFormData(raw json.RawMessage) policyRestrictionFormState {
@@ -4467,10 +5548,6 @@ func boolValue(v bool) string {
 		return "on"
 	}
 	return ""
-}
-
-func uploadForm(title, action string) formData {
-	return formData{Title: title, Action: action, EncType: "multipart/form-data", Fields: []fieldData{{Name: "name", Label: "Name", Type: "text", Required: true}, {Name: "storageKey", Label: "Storage key", Type: "text", Required: true}, {Name: "checksum", Label: "SHA-256 base64url checksum", Type: "text", Required: true}, {Name: "sizeBytes", Label: "Size bytes", Type: "number", Required: true}, {Name: "mimeType", Label: "MIME type", Type: "text", Required: true}, {Name: "file", Label: "File", Type: "file", Required: true}}, Submit: title}
 }
 
 func certificateUploadForm(action string) formData {
@@ -4680,10 +5757,6 @@ func enrollmentQRCallout(result enrollmentQRResult) template.HTML {
 	b.WriteString(`<section><h3>QR preview</h3><img alt="Enrollment QR preview" style="max-width:320px;width:100%;height:auto;border:1px solid var(--border);border-radius:.5rem;background:#fff;padding:.5rem" src="` + escAttr(result.PNGDataURL) + `"></section>`)
 	b.WriteString(`</div>`)
 	return template.HTML(b.String())
-}
-
-func retireForm(action, csrf, label string) string {
-	return `<form class="inline" method="post" action="` + escAttr(action) + `"><input type="hidden" name="csrfToken" value="` + escAttr(csrf) + `"><button class="danger" type="submit">` + esc(label) + `</button></form>`
 }
 
 func policyAppToggleForm(action, csrf string, enabled bool) string {
