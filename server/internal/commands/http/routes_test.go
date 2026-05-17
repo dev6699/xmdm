@@ -193,7 +193,7 @@ func (s *fakeDeviceStore) RetireDevice(context.Context, string, string) (device.
 
 func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, secret string) (device.Device, error) {
 	if deviceID == s.deviceID && secret == s.secret {
-		return device.Device{DeviceID: s.deviceID, Name: s.deviceID}, nil
+		return device.Device{RecordBase: device.RecordBase{ID: s.deviceID}, Name: s.deviceID}, nil
 	}
 	return device.Device{}, httpx.ErrNotFound
 }

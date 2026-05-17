@@ -217,12 +217,11 @@ func TestRegisterEnrollmentConfigRequiresPolicyLink(t *testing.T) {
 	deviceStore := &fakeDeviceStore{
 		device: device.Device{
 			RecordBase: device.RecordBase{
-				ID:       "device-record-1",
+				ID:       "device-123",
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
-			DeviceID: "device-123",
-			Name:     "device-123",
+			Name: "device-123",
 			// Leave PolicyID unset to verify the config path no longer falls back to the latest policy.
 			BootstrapExtras: map[string]any{"customer": "Acme"},
 		},
@@ -432,11 +431,10 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	deviceStore := &fakeDeviceStore{
 		device: device.Device{
 			RecordBase: device.RecordBase{
-				ID:       "device-record-1",
+				ID:       "device-123",
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
-			DeviceID:        "device-123",
 			Name:            "device-123",
 			PolicyID:        strPtr("policy-old"),
 			BootstrapExtras: map[string]any{"customer": "Acme"},
@@ -702,11 +700,10 @@ func TestRegisterEnrollmentConfigRejectsWrongDeviceCredentials(t *testing.T) {
 	deviceStore := &fakeDeviceStore{
 		device: device.Device{
 			RecordBase: device.RecordBase{
-				ID:       "device-record-1",
+				ID:       "device-123",
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
-			DeviceID:        "device-123",
 			Name:            "device-123",
 			BootstrapExtras: map[string]any{"customer": "Acme"},
 		},
@@ -754,11 +751,10 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 	deviceStore := &fakeDeviceStore{
 		device: device.Device{
 			RecordBase: device.RecordBase{
-				ID:       "device-record-1",
+				ID:       "device-123",
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
-			DeviceID:        "device-123",
 			Name:            "device-123",
 			PolicyID:        strPtr("policy-1"),
 			BootstrapExtras: map[string]any{"customer": "Acme"},
@@ -899,11 +895,10 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 	deviceStore := &fakeDeviceStore{
 		device: device.Device{
 			RecordBase: device.RecordBase{
-				ID:       "device-record-1",
+				ID:       "device-123",
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
-			DeviceID:        "device-123",
 			Name:            "device-123",
 			PolicyID:        strPtr("policy-1"),
 			BootstrapExtras: map[string]any{"CUSTOMER": "Acme"},
@@ -1434,7 +1429,7 @@ func (s *fakeDeviceStore) RetireDevice(context.Context, string, string) (device.
 }
 
 func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, secret string) (device.Device, error) {
-	if s.secret != "" && (deviceID != s.device.DeviceID || secret != s.secret) {
+	if s.secret != "" && (deviceID != s.device.ID || secret != s.secret) {
 		return device.Device{}, httpx.ErrNotFound
 	}
 	return s.device, nil

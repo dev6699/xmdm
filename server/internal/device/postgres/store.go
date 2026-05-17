@@ -212,8 +212,8 @@ func (s *Store) RetireDevice(ctx context.Context, tenantID, id string) (device.D
 		return device.Device{}, err
 	}
 	if s.provisioner != nil {
-		if err := s.provisioner.DisableDevice(context.Background(), rec.DeviceID); err != nil {
-			log.Printf("mqtt dynsec revoke for %s failed: %v", rec.DeviceID, err)
+		if err := s.provisioner.DisableDevice(context.Background(), rec.ID); err != nil {
+			log.Printf("mqtt dynsec revoke for %s failed: %v", rec.ID, err)
 		}
 	}
 	return rec, nil
@@ -262,7 +262,6 @@ func scanDevice(scanner rowScanner) (device.Device, error) {
 		}
 		rec.BootstrapExtras = extras
 	}
-	rec.DeviceID = rec.ID
 	rec.GroupIDs = groupIDs
 	return rec, nil
 }

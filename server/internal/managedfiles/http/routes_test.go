@@ -121,7 +121,7 @@ func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, se
 		return device.Device{}, httpx.ErrNotFound
 	}
 	return device.Device{
-		DeviceID:        "device-123",
+		RecordBase:      device.RecordBase{ID: "device-123"},
 		Name:            "device-123",
 		BootstrapExtras: map[string]any{"CUSTOMER": "Acme"},
 	}, nil

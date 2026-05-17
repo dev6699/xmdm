@@ -244,11 +244,10 @@ func newLoadFixture(tb testing.TB) *loadFixture {
 	policyID := "policy-load"
 	devices.device = device.Device{
 		RecordBase: device.RecordBase{
-			ID:       "device-record-load",
+			ID:       loadDeviceID,
 			TenantID: loadTenantID,
 			Status:   device.StatusEnrolled,
 		},
-		DeviceID:        loadDeviceID,
 		Name:            loadDeviceID,
 		PolicyID:        &policyID,
 		BootstrapExtras: map[string]any{"deviceIdUse": "serial"},
@@ -565,7 +564,7 @@ func (s *loadDeviceStore) Authenticate(_ context.Context, _ string, deviceID, se
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.authCount++
-	expectedID := s.device.DeviceID
+	expectedID := s.device.ID
 	if expectedID == "" {
 		expectedID = s.device.Name
 	}

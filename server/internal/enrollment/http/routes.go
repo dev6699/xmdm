@@ -120,7 +120,7 @@ func Register(mux httpx.Router, svc *auth.Service, devices device.Repository, st
 			}
 			return
 		}
-		deviceIdentity := strings.TrimSpace(authDevice.DeviceID)
+		deviceIdentity := strings.TrimSpace(authDevice.ID)
 		if deviceIdentity == "" {
 			deviceIdentity = authDevice.Name
 		}

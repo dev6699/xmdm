@@ -23,7 +23,6 @@ type RecordBase struct {
 
 type Device struct {
 	RecordBase
-	DeviceID        string         `json:"deviceId"`
 	Name            string         `json:"name"`
 	PolicyID        *string        `json:"policyId,omitempty"`
 	GroupIDs        []string       `json:"groupIds,omitempty"`

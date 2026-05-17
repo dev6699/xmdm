@@ -244,7 +244,7 @@ func TestRegisterCommandsPageUsesSelectorsAndShowsAllCommandTypes(t *testing.T) 
 		t.Fatalf("login: %v", err)
 	}
 	devices := &fakeDashboardDeviceStore{
-		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", Status: device.StatusActive}, DeviceID: "device-uid-1", Name: "Tablet One"}, {RecordBase: device.RecordBase{ID: "device-2", Status: device.StatusSuspended}, DeviceID: "device-uid-2", Name: "Tablet Two"}},
+		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", Status: device.StatusActive}, Name: "Tablet One"}, {RecordBase: device.RecordBase{ID: "device-2", Status: device.StatusSuspended}, Name: "Tablet Two"}},
 	}
 	groups := &fakeDashboardGroupStore{
 		items: []group.Group{{RecordBase: group.RecordBase{ID: "group-1", Status: "active"}, Name: "Field Devices"}},
@@ -272,7 +272,7 @@ func TestRegisterCommandsPageUsesSelectorsAndShowsAllCommandTypes(t *testing.T) 
 		`value="exit_kiosk"`,
 		`value="device"`,
 		`value="group"`,
-		`device-uid-1`,
+		`device-1`,
 		`Tablet One`,
 		`Field Devices`,
 		`Select device`,
@@ -283,7 +283,7 @@ func TestRegisterCommandsPageUsesSelectorsAndShowsAllCommandTypes(t *testing.T) 
 			t.Fatalf("commands page missing %q: %s", want, body)
 		}
 	}
-	if strings.Contains(body, `device-uid-2`) || strings.Contains(body, `Tablet Two`) {
+	if strings.Contains(body, `device-2`) || strings.Contains(body, `Tablet Two`) {
 		t.Fatalf("commands page should not show suspended device in selector: %s", body)
 	}
 }
@@ -302,7 +302,7 @@ func TestRegisterCreatesCommandFromFormWithLocalExpiryAndTargetSelects(t *testin
 
 	expiry := time.Now().Add(time.Hour).In(time.Local).Truncate(time.Minute)
 	csrfToken := mustGetCSRFCookieFromDashboardLogin(t, mux)
-	form := strings.NewReader("csrfToken=" + csrfToken + "&type=reboot&targetType=device&targetDeviceId=device-uid-1&payload=%7B%22force%22%3Atrue%7D&expiresAt=" + expiry.Format("2006-01-02T15:04"))
+	form := strings.NewReader("csrfToken=" + csrfToken + "&type=reboot&targetType=device&targetDeviceId=device-1&payload=%7B%22force%22%3Atrue%7D&expiresAt=" + expiry.Format("2006-01-02T15:04"))
 	req := httptest.NewRequest(http.MethodPost, "/admin/commands/create", form)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
@@ -317,7 +317,7 @@ func TestRegisterCreatesCommandFromFormWithLocalExpiryAndTargetSelects(t *testin
 		t.Fatalf("expected one enqueue, got %#v", store.enqueues)
 	}
 	reqUpsert := store.enqueues[0]
-	if reqUpsert.Type != "reboot" || reqUpsert.Target.Type != commands.TargetDevice || reqUpsert.Target.DeviceID != "device-uid-1" {
+	if reqUpsert.Type != "reboot" || reqUpsert.Target.Type != commands.TargetDevice || reqUpsert.Target.DeviceID != "device-1" {
 		t.Fatalf("unexpected enqueue request: %#v", reqUpsert)
 	}
 	if reqUpsert.Target.GroupID != "" {
@@ -365,7 +365,7 @@ func TestRegisterShowsCommandDetailPageAndLinksDevice(t *testing.T) {
 		t.Fatalf("login: %v", err)
 	}
 	deviceStore := &fakeDashboardDeviceStore{
-		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-row-1", Status: device.StatusActive, CreatedAt: time.Date(2026, 5, 13, 11, 30, 0, 0, time.UTC)}, DeviceID: "device-uid-1", Name: "Tablet One"}},
+		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-row-1", Status: device.StatusActive, CreatedAt: time.Date(2026, 5, 13, 11, 30, 0, 0, time.UTC)}, Name: "Tablet One"}},
 	}
 	commandStore := &fakeAdminCommandStore{
 		items: []commands.Command{{
@@ -1408,7 +1408,7 @@ func TestRegisterDashboardDeviceDetailEnrollmentQRDefaults(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterDashboard(mux, svc, DashboardDependencies{
 		Devices: &fakeDashboardDeviceStore{
-			devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusPending, CreatedAt: time.Date(2026, 5, 13, 11, 31, 0, 0, time.UTC)}, DeviceID: "device-uid-1", Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
+			devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusPending, CreatedAt: time.Date(2026, 5, 13, 11, 31, 0, 0, time.UTC)}, Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
 		},
 		Policies: &fakeDashboardPolicyStore{
 			policies: []policy.Policy{{RecordBase: policy.RecordBase{ID: "policy-1", TenantID: "tenant-1", Status: "active"}, Name: "Default policy"}},
@@ -1453,7 +1453,7 @@ func TestRegisterDashboardDeviceDetailEnrollmentQRDefaults(t *testing.T) {
 	if !strings.Contains(postRR.Body.String(), "QR JSON") || !strings.Contains(postRR.Body.String(), "QR preview") {
 		t.Fatalf("qr response should render both outputs: %s", postRR.Body.String())
 	}
-	if !strings.Contains(postRR.Body.String(), "com.xmdm.DEVICE_ID") || !strings.Contains(postRR.Body.String(), "device-uid-1") {
+	if !strings.Contains(postRR.Body.String(), "com.xmdm.DEVICE_ID") || !strings.Contains(postRR.Body.String(), "device-1") {
 		t.Fatalf("qr json should include device id: %s", postRR.Body.String())
 	}
 	if !strings.Contains(postRR.Body.String(), "com.xmdm.DEVICE_ID_USE") || !strings.Contains(postRR.Body.String(), "serial") {
@@ -1629,7 +1629,7 @@ func TestRegisterDashboardUpdatesDeviceWithoutSecret(t *testing.T) {
 		t.Fatalf("login: %v", err)
 	}
 	store := &fakeDashboardDeviceStore{
-		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusActive}, DeviceID: "device-uid-1", Name: "device-a", PolicyID: strPtr("policy-1")}},
+		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusActive}, Name: "device-a", PolicyID: strPtr("policy-1")}},
 	}
 	mux := http.NewServeMux()
 	RegisterDashboard(mux, svc, DashboardDependencies{Devices: store, TenantID: "tenant-1"})
@@ -1660,7 +1660,7 @@ func TestRegisterDashboardDevicesListUsesIdentityStyleColumns(t *testing.T) {
 		t.Fatalf("login: %v", err)
 	}
 	deviceStore := &fakeDashboardDeviceStore{
-		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusActive, CreatedAt: time.Date(2026, 5, 13, 11, 30, 0, 0, time.UTC)}, DeviceID: "device-uid-1", Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
+		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusActive, CreatedAt: time.Date(2026, 5, 13, 11, 30, 0, 0, time.UTC)}, Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
 	}
 	policyStore := &fakeDashboardPolicyStore{
 		policies: []policy.Policy{{RecordBase: policy.RecordBase{ID: "policy-1", TenantID: "tenant-1", Status: "active"}, Name: "Default policy"}},
@@ -1696,7 +1696,7 @@ func TestRegisterDashboardDevicesListUsesPendingStatusBadge(t *testing.T) {
 		t.Fatalf("login: %v", err)
 	}
 	deviceStore := &fakeDashboardDeviceStore{
-		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusPending, CreatedAt: time.Date(2026, 5, 13, 11, 30, 0, 0, time.UTC)}, DeviceID: "device-uid-1", Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
+		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusPending, CreatedAt: time.Date(2026, 5, 13, 11, 30, 0, 0, time.UTC)}, Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
 	}
 	policyStore := &fakeDashboardPolicyStore{
 		policies: []policy.Policy{{RecordBase: policy.RecordBase{ID: "policy-1", TenantID: "tenant-1", Status: "active"}, Name: "Default policy"}},
@@ -1768,8 +1768,8 @@ func TestRegisterDashboardGroupDetailShowsMemberDevices(t *testing.T) {
 	}
 	deviceStore := &fakeDashboardDeviceStore{
 		devices: []device.Device{
-			{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusActive, CreatedAt: time.Date(2026, 5, 13, 11, 31, 0, 0, time.UTC)}, DeviceID: "device-uid-1", Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1"), GroupIDs: []string{"group-1"}},
-			{RecordBase: device.RecordBase{ID: "device-2", TenantID: "tenant-1", Status: device.StatusActive, CreatedAt: time.Date(2026, 5, 13, 11, 32, 0, 0, time.UTC)}, DeviceID: "device-uid-2", Name: "other-tablet", PolicyID: strPtr("policy-2")},
+			{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusActive, CreatedAt: time.Date(2026, 5, 13, 11, 31, 0, 0, time.UTC)}, Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1"), GroupIDs: []string{"group-1"}},
+			{RecordBase: device.RecordBase{ID: "device-2", TenantID: "tenant-1", Status: device.StatusActive, CreatedAt: time.Date(2026, 5, 13, 11, 32, 0, 0, time.UTC)}, Name: "other-tablet", PolicyID: strPtr("policy-2")},
 		},
 	}
 	policyStore := &fakeDashboardPolicyStore{
@@ -1823,7 +1823,7 @@ func TestRegisterDashboardDeviceDetailShowsUpdateAndRetire(t *testing.T) {
 		t.Fatalf("login: %v", err)
 	}
 	deviceStore := &fakeDashboardDeviceStore{
-		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusActive}, DeviceID: "device-uid-1", Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
+		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusActive}, Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
 	}
 	policyStore := &fakeDashboardPolicyStore{
 		policies: []policy.Policy{{RecordBase: policy.RecordBase{ID: "policy-1", TenantID: "tenant-1", Status: "active"}, Name: "Default policy"}},
@@ -1851,13 +1851,13 @@ func TestRegisterDashboardDeviceDetailShowsUpdateAndRetire(t *testing.T) {
 		t.Fatalf("device detail should link to active policy: %s", rr.Body.String())
 	}
 	unescaped := html.UnescapeString(rr.Body.String())
-	if !strings.Contains(unescaped, "Config preview") || !strings.Contains(unescaped, `"deviceId": "device-uid-1"`) || !strings.Contains(unescaped, `"name": "Default policy"`) {
+	if !strings.Contains(unescaped, "Config preview") || !strings.Contains(unescaped, `"deviceId": "device-1"`) || !strings.Contains(unescaped, `"name": "Default policy"`) {
 		t.Fatalf("device detail should show the config preview: %s", rr.Body.String())
 	}
 	if strings.Contains(unescaped, `"signature"`) {
 		t.Fatalf("device detail preview should not include a signature: %s", rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "deviceId") || !strings.Contains(rr.Body.String(), "device-uid-1") {
+	if !strings.Contains(rr.Body.String(), "deviceId") || !strings.Contains(rr.Body.String(), "device-1") {
 		t.Fatalf("device detail should show the immutable device id: %s", rr.Body.String())
 	}
 }
@@ -2194,7 +2194,7 @@ func TestRegisterDashboardHidesUpdateFormsForRetiredDevice(t *testing.T) {
 		t.Fatalf("login: %v", err)
 	}
 	deviceStore := &fakeDashboardDeviceStore{
-		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusRetired}, DeviceID: "device-uid-1", Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
+		devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusRetired}, Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
 	}
 	policyStore := &fakeDashboardPolicyStore{
 		policies: []policy.Policy{{RecordBase: policy.RecordBase{ID: "policy-1", TenantID: "tenant-1", Status: "active"}, Name: "Default policy"}},
@@ -2395,12 +2395,12 @@ func (s *fakeDashboardDeviceStore) ListDevices(context.Context, string) ([]devic
 
 func (s *fakeDashboardDeviceStore) CreateDevice(_ context.Context, _ string, req device.DeviceUpsert) (device.Device, error) {
 	s.createdDevice = req
-	return device.Device{RecordBase: device.RecordBase{ID: "device-new", Status: device.StatusPending}, DeviceID: "device-uid-new", Name: req.Name, PolicyID: strPtr(req.PolicyID), GroupIDs: append([]string(nil), req.GroupIDs...)}, nil
+	return device.Device{RecordBase: device.RecordBase{ID: "device-new", Status: device.StatusPending}, Name: req.Name, PolicyID: strPtr(req.PolicyID), GroupIDs: append([]string(nil), req.GroupIDs...)}, nil
 }
 
 func (s *fakeDashboardDeviceStore) UpdateDevice(_ context.Context, _ string, id string, req device.DeviceUpsert) (device.Device, error) {
 	s.updatedDevice = req
-	return device.Device{RecordBase: device.RecordBase{ID: id, Status: device.StatusActive}, DeviceID: "device-uid-active", Name: req.Name, PolicyID: strPtr(req.PolicyID), GroupIDs: append([]string(nil), req.GroupIDs...)}, nil
+	return device.Device{RecordBase: device.RecordBase{ID: id, Status: device.StatusActive}, Name: req.Name, PolicyID: strPtr(req.PolicyID), GroupIDs: append([]string(nil), req.GroupIDs...)}, nil
 }
 
 func (s *fakeDashboardDeviceStore) RetireDevice(context.Context, string, string) (device.Device, error) {

@@ -29,7 +29,7 @@ func Register(mux httpx.Router, svc *auth.Service, store device.Repository, audi
 			return store.RetireDevice(ctx, tenantID, id)
 		},
 		Audit: func(rec device.Device) map[string]any {
-			return map[string]any{"name": rec.Name, "deviceId": rec.DeviceID}
+			return map[string]any{"name": rec.Name, "deviceId": rec.ID}
 		},
 	})
 }

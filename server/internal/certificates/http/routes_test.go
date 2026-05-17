@@ -22,11 +22,10 @@ func TestRegisterCertificateArtifactRoute(t *testing.T) {
 	Register(httpx.WithPrefix(mux, "/api/v1"), svc, &fakeDeviceStore{
 		device: device.Device{
 			RecordBase: device.RecordBase{
-				ID:       "device-record-1",
+				ID:       "device-123",
 				TenantID: "tenant-1",
 				Status:   device.StatusEnrolled,
 			},
-			DeviceID:        "device-123",
 			Name:            "device-123",
 			BootstrapExtras: map[string]any{},
 		},
@@ -98,7 +97,7 @@ func (s *fakeDeviceStore) RetireDevice(context.Context, string, string) (device.
 }
 
 func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, secret string) (device.Device, error) {
-	expectedID := s.device.DeviceID
+	expectedID := s.device.ID
 	if expectedID == "" {
 		expectedID = s.device.Name
 	}
