@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,19 +76,21 @@ type dashboard struct {
 }
 
 type pageData struct {
-	Title       string
-	Subtitle    string
-	User        string
-	CSRFToken   string
-	CanWrite    bool
-	Flash       string
-	Error       string
-	Callout     template.HTML
-	Overview    template.HTML
-	Sections    []sectionData
-	Forms       []formData
-	Items       any
-	SearchQuery string
+	Title           string
+	Subtitle        string
+	User            string
+	CSRFToken       string
+	CanWrite        bool
+	Flash           string
+	Error           string
+	Callout         template.HTML
+	Overview        template.HTML
+	Sections        []sectionData
+	Forms           []formData
+	Items           any
+	SearchQuery     string
+	FormsAfterItems bool
+	ItemsRaw        bool
 }
 
 type sectionData struct {
@@ -140,18 +143,23 @@ type overviewContentStats struct {
 }
 
 type overviewDashboardData struct {
-	Freshness      string
-	SummaryTitle   string
-	SummaryDetail  string
-	SummaryTone    string
-	CanWrite       bool
-	Signals        []overviewSignal
-	Metrics        []overviewMetric
-	Attention      []overviewAttention
-	Chart          overviewChart
-	CommandStats   overviewCommandStats
-	ContentStats   overviewContentStats
-	RecentActivity []audit.Event
+	Freshness            string
+	SummaryTitle         string
+	SummaryDetail        string
+	SummaryTone          string
+	CanWrite             bool
+	Signals              []overviewSignal
+	Metrics              []overviewMetric
+	Attention            []overviewAttention
+	Chart                overviewChart
+	DeviceStatusChart    overviewChart
+	DeviceActivityChart  overviewChart
+	DeviceTelemetryChart overviewChart
+	CommandTrendChart    overviewChart
+	DeviceModelChart     overviewChart
+	CommandStats         overviewCommandStats
+	ContentStats         overviewContentStats
+	RecentActivity       []audit.Event
 }
 
 type formData struct {
@@ -748,6 +756,7 @@ const dashboardTemplate = `<!doctype html>
     }
     .health-item-wrap {
       display: block;
+      height: 100%;
       text-decoration: none;
       border-radius: var(--radius);
     }
@@ -759,7 +768,10 @@ const dashboardTemplate = `<!doctype html>
     }
     .health-item {
       display: grid;
+      grid-template-rows: auto auto 1fr;
       gap: .3rem;
+      height: 100%;
+      min-height: 8.1rem;
       padding: 1rem 1.1rem;
       background: var(--surface3);
       border: 1px solid var(--border);
@@ -822,7 +834,9 @@ const dashboardTemplate = `<!doctype html>
       color: var(--ink-3);
       font-size: .74rem;
       line-height: 1.4;
+      min-height: 2.1rem;
       padding-bottom: .35rem;
+      align-self: end;
     }
 
     /* overview metrics and attention */
@@ -837,6 +851,9 @@ const dashboardTemplate = `<!doctype html>
       border-radius: var(--radius-lg);
       padding: 1.1rem 1.2rem;
       box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      min-height: 8.25rem;
     }
     .overview-metric-label {
       font-size: .72rem;
@@ -855,6 +872,21 @@ const dashboardTemplate = `<!doctype html>
       color: var(--ink-3);
       font-size: .76rem;
       margin-top: .45rem;
+      margin-bottom: .75rem;
+    }
+    .overview-metric-spark {
+      margin-top: auto;
+      height: 4px;
+      border-radius: 999px;
+      background: var(--surface3);
+      overflow: hidden;
+    }
+    .overview-metric-spark span {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+      background: var(--accent-solid);
+      min-width: 4px;
     }
     .attention-list {
       display: grid;
@@ -906,6 +938,32 @@ const dashboardTemplate = `<!doctype html>
       gap: 1.25rem;
     }
     .overview-bottom-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .overview-device-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1.25rem;
+      align-items: stretch;
+    }
+    .overview-device-grid .overview-panel {
+      min-height: 23.5rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .overview-device-grid .overview-chart {
+      flex: 1;
+      min-height: 17rem;
+      display: flex;
+      align-items: stretch;
+    }
+    .overview-device-grid .overview-chart svg {
+      width: 100%;
+      height: 100%;
+      min-height: 17rem;
+    }
+    .overview-device-grid .chart-empty {
+      flex: 1;
+      min-height: 17rem;
+    }
     .overview-panel {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -1155,6 +1213,9 @@ const dashboardTemplate = `<!doctype html>
       .overview-bottom-row { grid-template-columns: 1fr; }
       .comp-legend { grid-template-columns: repeat(3, 1fr); }
     }
+    @media (max-width: 860px) {
+      .overview-device-grid { grid-template-columns: 1fr; }
+    }
     @media (max-width: 640px) {
       .overview-hero { padding: 1.35rem; }
       .overview-actions { justify-content: flex-start; }
@@ -1242,7 +1303,7 @@ const dashboardTemplate = `<!doctype html>
     }
     .form-grid .field-full { grid-column: 1 / -1; }
 
-    label {
+    label, .form-label {
       display: block;
       font-family: "Space Mono", monospace;
       font-size: .67rem;
@@ -1373,6 +1434,114 @@ const dashboardTemplate = `<!doctype html>
     }
 
     /* ═══════════════════════════════════════════
+       STRUCTURED DETAIL VIEWS
+    ═══════════════════════════════════════════ */
+    .structured-data {
+      display: grid;
+      gap: .75rem;
+      min-width: 0;
+    }
+    .structured-table {
+      width: 100%;
+      min-width: 0;
+      border-collapse: separate;
+      border-spacing: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--surface2);
+    }
+    .structured-table > thead > tr > th,
+    .structured-table > thead > tr > td,
+    .structured-table > tbody > tr > th,
+    .structured-table > tbody > tr > td {
+      vertical-align: top;
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      overflow-wrap: anywhere;
+    }
+    .structured-table > thead > tr > th:last-child,
+    .structured-table > thead > tr > td:last-child,
+    .structured-table > tbody > tr > th:last-child,
+    .structured-table > tbody > tr > td:last-child { border-right: none; }
+    .structured-table > tbody > tr:last-child > th,
+    .structured-table > tbody > tr:last-child > td { border-bottom: none; }
+    .structured-table > thead > tr:last-child > th,
+    .structured-table > thead > tr:last-child > td { border-bottom: 1px solid var(--border); }
+    .structured-table .structured-table {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-collapse: separate;
+      border-spacing: 0;
+      box-shadow: inset 0 0 0 1px var(--border);
+    }
+    .structured-table td > .structured-data,
+    .structured-table td > .structured-table {
+      margin-top: .15rem;
+    }
+    .structured-data .structured-table {
+      border: 1px solid var(--border);
+    }
+    .structured-key {
+      width: 13rem;
+      color: var(--ink-3);
+      background: var(--surface3);
+    }
+    .structured-empty {
+      padding: .85rem 1rem;
+      color: var(--ink-2);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      background: var(--surface2);
+    }
+    .structured-scalar {
+      color: var(--ink);
+    }
+    .structured-muted {
+      color: var(--ink-3);
+    }
+    .structured-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .35rem;
+    }
+    .structured-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: .16rem .5rem;
+      border-radius: 999px;
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      color: var(--ink-2);
+      font-family: "Space Mono", monospace;
+      font-size: .68rem;
+    }
+
+    /* audit table layout */
+    .audit-table {
+      table-layout: fixed;
+      min-width: 760px;
+    }
+    .audit-table .audit-created { width: 10.5rem; }
+    .audit-table .audit-actor { width: 7rem; max-width: 7rem; }
+    .audit-table .audit-action { width: 7.5rem; }
+    .audit-table .audit-resource { width: 13rem; }
+    .audit-table .audit-details { width: auto; }
+    .audit-table td.audit-actor,
+    .audit-table td.audit-action,
+    .audit-table td.audit-resource {
+      overflow-wrap: anywhere;
+    }
+    .audit-table td.audit-details {
+      min-width: 22rem;
+    }
+    .audit-table td.audit-details pre,
+    .audit-table td.audit-details .raw-data,
+    .audit-table td.audit-details .structured-data {
+      max-width: 100%;
+    }
+
+    /* ═══════════════════════════════════════════
        MISC HELPERS
     ═══════════════════════════════════════════ */
     .muted { color: var(--ink-2); }
@@ -1458,36 +1627,143 @@ const dashboardTemplate = `<!doctype html>
       gap: .25rem;
     }
     .policy-summary {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: .75rem;
+      display: block;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--surface2);
     }
     .policy-summary-item {
-      padding: .75rem .85rem;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
+      display: grid;
+      grid-template-columns: 13rem minmax(0, 1fr);
       min-width: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .policy-summary-item:last-child {
+      border-bottom: none;
     }
     .policy-summary-label {
       font-family: "Space Mono", monospace;
-      font-size: .58rem;
+      font-size: .635rem;
       font-weight: 700;
-      letter-spacing: .12em;
+      letter-spacing: .1em;
       text-transform: uppercase;
       color: var(--ink-3);
-    }
-    .policy-summary-value {
-      margin-top: .3rem;
-      color: var(--ink);
+      background: var(--surface3);
+      padding: .65rem .75rem;
       overflow-wrap: anywhere;
     }
+    .policy-summary-value {
+      color: var(--ink);
+      padding: .65rem .75rem;
+      overflow-wrap: anywhere;
+      min-width: 0;
+    }
     .policy-summary-wide {
-      grid-column: 1 / -1;
+      grid-template-columns: 13rem minmax(0, 1fr);
+    }
+    .policy-detail-section {
+      margin-top: 1.5rem;
+    }
+    .section-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: .75rem;
+    }
+    .section-heading-meta {
+      font-family: "DM Sans", system-ui, sans-serif;
+      font-size: .72rem;
+      font-weight: 600;
+      letter-spacing: 0;
+      text-transform: none;
+      color: var(--ink-3);
+      white-space: nowrap;
+    }
+    details.raw-data {
+      margin-top: .85rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface2);
+      overflow: hidden;
+      position: relative;
+    }
+    details.raw-data summary {
+      cursor: pointer;
+      padding: .7rem 4.8rem .7rem .85rem;
+      color: var(--ink-2);
+      font-size: .78rem;
+      font-weight: 700;
+      user-select: none;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+      min-height: 2.55rem;
+    }
+    details.raw-data summary::-webkit-details-marker { display: none; }
+    details.raw-data summary::before {
+      content: '▸';
+      color: var(--ink-3);
+      font-size: .78rem;
+      line-height: 1;
+      flex: 0 0 auto;
+    }
+    details.raw-data[open] summary {
+      border-bottom: 1px solid var(--border);
+    }
+    details.raw-data[open] summary::before { content: '▾'; }
+    .raw-data-header {
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
+      min-width: 0;
+    }
+    .raw-copy {
+      position: absolute;
+      top: .45rem;
+      right: .65rem;
+      z-index: 2;
+      padding: .25rem .55rem;
+      font-size: .72rem;
+      border-radius: var(--radius-sm);
+    }
+    details.raw-data pre {
+      margin: 0;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+    }
+    details.raw-data .structured-data {
+      padding: .85rem;
+    }
+    .policy-summary + .policy-detail-section {
+      margin-top: 1.75rem;
+    }
+    .policy-restrictions-value {
+      margin-top: .55rem;
+    }
+    .policy-restrictions-value .structured-table {
+      background: var(--surface);
+    }
+    .policy-restrictions-value .structured-key {
+      width: 14rem;
+    }
+    .policy-summary-value .structured-data {
+      margin-top: .35rem;
+    }
+    .summary-detail-note {
+      color: var(--ink-3);
+      font-size: .76rem;
+      margin-top: .55rem;
     }
     @media (max-width: 860px) {
-      .policy-summary {
+      .policy-summary-item,
+      .policy-summary-wide {
         grid-template-columns: 1fr;
+      }
+      .policy-summary-label {
+        border-bottom: 1px solid var(--border);
       }
     }
     .permission-catalog {
@@ -1652,9 +1928,11 @@ const dashboardTemplate = `<!doctype html>
       {{if .Callout}}<section class="panel">{{.Callout}}</section>{{end}}
       {{if .Overview}}<div class="overview-stack">{{.Overview}}</div>{{end}}
 
-      {{range .Forms}}<section class="panel"><h2>{{.Title}}</h2><form method="post" action="{{.Action}}" {{if .EncType}}enctype="{{.EncType}}"{{end}}><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}">{{range .Fields}}{{$field := .}}{{if eq $field.Type "checkbox"}}<label for="{{$field.Name}}">{{$field.Label}}</label><input id="{{$field.Name}}" name="{{$field.Name}}" type="checkbox" value="on" {{if $field.Value}}checked{{end}} aria-labelledby="{{$field.Name}}-label">{{else}}<label for="{{$field.Name}}" id="{{$field.Name}}-label">{{$field.Label}}</label>{{if eq $field.Type "textarea"}}<textarea id="{{$field.Name}}" name="{{$field.Name}}" placeholder="{{$field.Placeholder}}" {{if $field.Required}}required{{end}}>{{$field.Value}}</textarea>{{else if eq $field.Type "select"}}<select id="{{$field.Name}}" name="{{$field.Name}}" {{if $field.Required}}required{{end}}>{{if $field.Placeholder}}<option value="" disabled {{if not $field.Value}}selected{{end}}>{{$field.Placeholder}}</option>{{end}}{{range $field.Options}}<option value="{{.Value}}" {{if eq .Value $field.Value}}selected{{end}}>{{.Label}}</option>{{end}}</select>{{else if eq $field.Type "multiselect"}}<div class="checkbox-group" role="group" aria-label="{{$field.Label}}">{{range $field.Options}}<label class="checkbox-option"><input id="{{$field.Name}}-{{.Value}}" name="{{$field.Name}}" type="checkbox" value="{{.Value}}" {{if containsString $field.Values .Value}}checked{{end}}><span>{{.Label}}</span></label>{{end}}</div>{{else if eq $field.Type "radio"}}<div class="toggle-group" role="radiogroup" aria-label="{{$field.Label}}">{{range $field.Options}}<label class="toggle-option"><input id="{{$field.Name}}-{{.Value}}" name="{{$field.Name}}" type="radio" value="{{.Value}}" {{if eq .Value $field.Value}}checked{{end}}><span>{{.Label}}</span></label>{{end}}</div>{{else}}<input id="{{$field.Name}}" name="{{$field.Name}}" type="{{$field.Type}}" value="{{$field.Value}}" placeholder="{{$field.Placeholder}}" {{if $field.Required}}required{{end}}>{{end}}{{end}}{{end}}{{if .Help}}<div class="field-help">{{.Help}}</div>{{end}}<p><button type="submit" {{if .Danger}}class="danger"{{end}}>{{.Submit}}</button></p>{{if .After}}{{.After}}{{end}}</form></section>{{end}}
+      {{if not .FormsAfterItems}}{{range .Forms}}<section class="panel"><h2>{{.Title}}</h2><form method="post" action="{{.Action}}" {{if .EncType}}enctype="{{.EncType}}"{{end}}><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}">{{range .Fields}}{{$field := .}}{{if eq $field.Type "checkbox"}}<label id="{{$field.Name}}-label" for="{{$field.Name}}">{{$field.Label}}</label><input id="{{$field.Name}}" name="{{$field.Name}}" type="checkbox" value="on" {{if $field.Value}}checked{{end}}>{{else if eq $field.Type "multiselect"}}<div class="form-label" id="{{$field.Name}}-label">{{$field.Label}}</div><div class="checkbox-group" role="group" aria-labelledby="{{$field.Name}}-label">{{range $field.Options}}<label class="checkbox-option"><input id="{{$field.Name}}-{{.Value}}" name="{{$field.Name}}" type="checkbox" value="{{.Value}}" {{if containsString $field.Values .Value}}checked{{end}}><span>{{.Label}}</span></label>{{end}}</div>{{else if eq $field.Type "radio"}}<div class="form-label" id="{{$field.Name}}-label">{{$field.Label}}</div><div class="toggle-group" role="radiogroup" aria-labelledby="{{$field.Name}}-label">{{range $field.Options}}<label class="toggle-option"><input id="{{$field.Name}}-{{.Value}}" name="{{$field.Name}}" type="radio" value="{{.Value}}" {{if eq .Value $field.Value}}checked{{end}}><span>{{.Label}}</span></label>{{end}}</div>{{else}}<label for="{{$field.Name}}" id="{{$field.Name}}-label">{{$field.Label}}</label>{{if eq $field.Type "textarea"}}<textarea id="{{$field.Name}}" name="{{$field.Name}}" placeholder="{{$field.Placeholder}}" {{if $field.Required}}required{{end}}>{{$field.Value}}</textarea>{{else if eq $field.Type "select"}}<select id="{{$field.Name}}" name="{{$field.Name}}" {{if $field.Required}}required{{end}}>{{if $field.Placeholder}}<option value="" disabled {{if not $field.Value}}selected{{end}}>{{$field.Placeholder}}</option>{{end}}{{range $field.Options}}<option value="{{.Value}}" {{if eq .Value $field.Value}}selected{{end}}>{{.Label}}</option>{{end}}</select>{{else}}<input id="{{$field.Name}}" name="{{$field.Name}}" type="{{$field.Type}}" value="{{$field.Value}}" placeholder="{{$field.Placeholder}}" {{if $field.Required}}required{{end}}>{{end}}{{end}}{{end}}{{if .Help}}<div class="field-help">{{.Help}}</div>{{end}}<p><button type="submit" {{if .Danger}}class="danger"{{end}}>{{.Submit}}</button></p>{{if .After}}{{.After}}{{end}}</form></section>{{end}}{{end}}
 
-      {{if .Items}}<section class="panel"><div class="table-wrap">{{.Items}}</div></section>{{end}}
+      {{if .Items}}{{if .ItemsRaw}}{{.Items}}{{else}}<section class="panel"><div class="table-wrap">{{.Items}}</div></section>{{end}}{{end}}
+
+      {{if .FormsAfterItems}}{{range .Forms}}<section class="panel"><h2>{{.Title}}</h2><form method="post" action="{{.Action}}" {{if .EncType}}enctype="{{.EncType}}"{{end}}><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}">{{range .Fields}}{{$field := .}}{{if eq $field.Type "checkbox"}}<label id="{{$field.Name}}-label" for="{{$field.Name}}">{{$field.Label}}</label><input id="{{$field.Name}}" name="{{$field.Name}}" type="checkbox" value="on" {{if $field.Value}}checked{{end}}>{{else if eq $field.Type "multiselect"}}<div class="form-label" id="{{$field.Name}}-label">{{$field.Label}}</div><div class="checkbox-group" role="group" aria-labelledby="{{$field.Name}}-label">{{range $field.Options}}<label class="checkbox-option"><input id="{{$field.Name}}-{{.Value}}" name="{{$field.Name}}" type="checkbox" value="{{.Value}}" {{if containsString $field.Values .Value}}checked{{end}}><span>{{.Label}}</span></label>{{end}}</div>{{else if eq $field.Type "radio"}}<div class="form-label" id="{{$field.Name}}-label">{{$field.Label}}</div><div class="toggle-group" role="radiogroup" aria-labelledby="{{$field.Name}}-label">{{range $field.Options}}<label class="toggle-option"><input id="{{$field.Name}}-{{.Value}}" name="{{$field.Name}}" type="radio" value="{{.Value}}" {{if eq .Value $field.Value}}checked{{end}}><span>{{.Label}}</span></label>{{end}}</div>{{else}}<label for="{{$field.Name}}" id="{{$field.Name}}-label">{{$field.Label}}</label>{{if eq $field.Type "textarea"}}<textarea id="{{$field.Name}}" name="{{$field.Name}}" placeholder="{{$field.Placeholder}}" {{if $field.Required}}required{{end}}>{{$field.Value}}</textarea>{{else if eq $field.Type "select"}}<select id="{{$field.Name}}" name="{{$field.Name}}" {{if $field.Required}}required{{end}}>{{if $field.Placeholder}}<option value="" disabled {{if not $field.Value}}selected{{end}}>{{$field.Placeholder}}</option>{{end}}{{range $field.Options}}<option value="{{.Value}}" {{if eq .Value $field.Value}}selected{{end}}>{{.Label}}</option>{{end}}</select>{{else}}<input id="{{$field.Name}}" name="{{$field.Name}}" type="{{$field.Type}}" value="{{$field.Value}}" placeholder="{{$field.Placeholder}}" {{if $field.Required}}required{{end}}>{{end}}{{end}}{{end}}{{if .Help}}<div class="field-help">{{.Help}}</div>{{end}}<p><button type="submit" {{if .Danger}}class="danger"{{end}}>{{.Submit}}</button></p>{{if .After}}{{.After}}{{end}}</form></section>{{end}}{{end}}
     </main>
   </div>
   {{end}}
@@ -1669,6 +1947,35 @@ const dashboardTemplate = `<!doctype html>
       var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       document.documentElement.setAttribute('data-theme', t);
       localStorage.setItem('xmdm-theme', t);
+    }
+
+    function copyRawData(button){
+      var details = button.closest('details.raw-data');
+      var pre = details ? details.querySelector('pre') : null;
+      if(!pre) return;
+      var text = pre.innerText || pre.textContent || '';
+      var done = function(){
+        var original = button.textContent;
+        button.textContent = 'Copied';
+        button.disabled = true;
+        setTimeout(function(){ button.textContent = original; button.disabled = false; }, 1200);
+      };
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(done).catch(function(){ fallbackCopy(text); done(); });
+      } else {
+        fallbackCopy(text); done();
+      }
+    }
+    function fallbackCopy(text){
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch(e) {}
+      document.body.removeChild(ta);
     }
 
     /* ── active nav highlight ── */
@@ -1750,7 +2057,6 @@ func RegisterDashboard(mux httpx.Router, svc *auth.Service, deps DashboardDepend
 	mux.HandleFunc("/admin/commands/{id}", d.commandDetail)
 	mux.HandleFunc("/admin/commands/create", d.createCommand)
 	mux.HandleFunc("/admin/logs", d.logs)
-	mux.HandleFunc("/admin/device-info", d.deviceInfo)
 	mux.HandleFunc("/admin/audit", d.audit)
 }
 
@@ -1842,10 +2148,13 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 		ov.Attention = append(ov.Attention, overviewAttention{Title: title, Detail: detail, Tone: tone, Href: href})
 	}
 
+	allDevices := []device.Device{}
 	totalDevices := 0
 	activeDevices := 0
 	pendingDevices := 0
 	inactiveDevices := 0
+	retiredOrWipedDevices := 0
+	staleActiveDevices := 0
 	assignedPolicyDevices := 0
 
 	if d.deps.Devices != nil {
@@ -1854,6 +2163,7 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
+		allDevices = items
 		totalDevices = len(items)
 		for _, item := range items {
 			if item.Status == device.StatusActive {
@@ -1863,6 +2173,10 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 			}
 			if item.Status == device.StatusPending {
 				pendingDevices++
+			}
+			status := strings.ToLower(strings.TrimSpace(item.Status))
+			if status == "retired" || status == "wiped" {
+				retiredOrWipedDevices++
 			}
 			if firstPolicyID(item.PolicyID) != "" {
 				assignedPolicyDevices++
@@ -1973,6 +2287,7 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 				ov.CommandStats.Failed++
 			}
 		}
+		ov.CommandTrendChart = buildCommandDeliveryTrendChart(items, now, 7)
 		commandTone := "good"
 		if ov.CommandStats.Failed > 0 {
 			commandTone = "danger"
@@ -1981,6 +2296,18 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		detail := fmt.Sprintf("%d acknowledged, %d pending, %d failed", ov.CommandStats.Acked, ov.CommandStats.Sent, ov.CommandStats.Failed)
 		appendSignal("Command health", strconv.Itoa(ov.CommandStats.Total), detail, commandTone, "/admin/commands")
+	}
+
+	if d.deps.DeviceInfo != nil {
+		items, err := d.deps.DeviceInfo.Search(ctx, d.deps.TenantID, deviceinfo.SearchFilter{Limit: 200})
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
+		}
+		ov.DeviceActivityChart = buildUniqueDeviceActivityChart(items, now, 7)
+		ov.DeviceTelemetryChart = buildDeviceTelemetryFreshnessChart(allDevices, items, now)
+		staleActiveDevices = countStaleActiveDevices(allDevices, items, now, 72*time.Hour)
+		ov.DeviceModelChart = buildDeviceModelChart(allDevices, items, 6)
 	}
 
 	var auditEvents []audit.Event
@@ -2012,8 +2339,13 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 		appendSignal("Audit activity", strconv.Itoa(auditLast24h), "events in the last 24 hours", auditTone, "/admin/audit")
 	}
 
-	if totalDevices > 0 && inactiveDevices > 0 {
-		appendAttention("Devices require review", fmt.Sprintf("%d of %d devices are not active.", inactiveDevices, totalDevices), "warn", "/admin/devices")
+	reviewDevices := pendingDevices + staleActiveDevices
+	if totalDevices > 0 && reviewDevices > 0 {
+		detail := fmt.Sprintf("%d pending enrollment", pendingDevices)
+		if staleActiveDevices > 0 {
+			detail = fmt.Sprintf("%d pending enrollment, %d active device%s stale for over 72 hours", pendingDevices, staleActiveDevices, pluralSuffix(staleActiveDevices))
+		}
+		appendAttention("Devices require review", fmt.Sprintf("%d of %d devices need operator review: %s.", reviewDevices, totalDevices, detail), "warn", "/admin/devices")
 	}
 	if pendingDevices > 0 {
 		appendAttention("Pending enrollment", fmt.Sprintf("%d device%s awaiting enrollment or activation.", pendingDevices, pluralSuffix(pendingDevices)), "warn", "/admin/devices")
@@ -2032,31 +2364,38 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 	} else if d.deps.Policies != nil && totalPolicies > 0 && activePolicies == 0 {
 		appendAttention("No active policies", "All policies are retired or inactive; devices may not receive the expected configuration.", "warn", "/admin/policies")
 	}
-	if totalDevices > 0 && assignedPolicyDevices < totalDevices {
-		missing := totalDevices - assignedPolicyDevices
-		appendAttention("Policy coverage gap", fmt.Sprintf("%d device%s have no policy assignment.", missing, pluralSuffix(missing)), "warn", "/admin/devices")
-	}
 	if d.deps.Audit != nil && auditLast24h == 0 {
 		appendAttention("No recent audit activity", "No operator or system events were recorded in the last 24 hours.", "neutral", "/admin/audit")
 	}
 
-	policyCoverage := 0
-	if totalDevices > 0 {
-		policyCoverage = assignedPolicyDevices * 100 / totalDevices
-	}
 	ackRate := 0
 	if ov.CommandStats.Total > 0 {
 		ackRate = ov.CommandStats.Acked * 100 / ov.CommandStats.Total
 	}
 	ov.Metrics = append(ov.Metrics,
-		overviewMetric{Label: "Policy coverage", Value: strconv.Itoa(policyCoverage) + "%", Detail: fmt.Sprintf("%d of %d devices assigned", assignedPolicyDevices, totalDevices)},
+		telemetryFreshnessMetric(ov.DeviceTelemetryChart, totalDevices),
 		overviewMetric{Label: "Pending enrollment", Value: strconv.Itoa(pendingDevices), Detail: "Devices waiting to become active"},
 		overviewMetric{Label: "Command ack rate", Value: strconv.Itoa(ackRate) + "%", Detail: fmt.Sprintf("%d of %d recent commands acknowledged", ov.CommandStats.Acked, ov.CommandStats.Total)},
 		overviewMetric{Label: "Content items", Value: strconv.Itoa(totalContent), Detail: "Active apps, managed files, and certificates"},
 	)
 
 	ov.Chart = buildOverviewChart(auditEvents, now, 7)
-	ov.SummaryTitle, ov.SummaryDetail, ov.SummaryTone = overviewStatusSummary(ov, activeDevices, totalDevices, activePolicies, auditLast24h)
+	ov.DeviceStatusChart = buildDeviceStatusChart(allDevices)
+	if len(ov.DeviceActivityChart.Values) == 0 {
+		ov.DeviceActivityChart = buildOverviewChart(nil, now, 7)
+		ov.DeviceActivityChart.Title = "Device activity timeline"
+		ov.DeviceActivityChart.EmptyNote = "No device telemetry in the last 7 days."
+	}
+	if len(ov.DeviceTelemetryChart.Values) == 0 {
+		ov.DeviceTelemetryChart = overviewChart{Title: "Device telemetry freshness", EmptyNote: "No device telemetry freshness data available."}
+	}
+	if len(ov.DeviceModelChart.Values) == 0 {
+		ov.DeviceModelChart = overviewChart{Title: "Device model breakdown", EmptyNote: "No device model telemetry available."}
+	}
+	if len(ov.CommandTrendChart.Values) == 0 {
+		ov.CommandTrendChart = buildCommandDeliveryTrendChart(nil, now, 7)
+	}
+	ov.SummaryTitle, ov.SummaryDetail, ov.SummaryTone = overviewStatusSummary(ov, activeDevices, pendingDevices, retiredOrWipedDevices, totalDevices, activePolicies, auditLast24h)
 
 	if len(ov.Signals) == 0 {
 		appendSignal("Snapshot", "ready", "No live repositories were attached", "neutral", "")
@@ -2126,6 +2465,7 @@ func renderOverviewDashboard(data overviewDashboardData) template.HTML {
 			b.WriteString(`<div class="overview-metric-label">` + esc(metric.Label) + `</div>`)
 			b.WriteString(`<div class="overview-metric-value">` + esc(metric.Value) + `</div>`)
 			b.WriteString(`<div class="overview-metric-detail">` + esc(metric.Detail) + `</div>`)
+			b.WriteString(renderMetricSparkline(metric.Value))
 			b.WriteString(`</div>`)
 		}
 		b.WriteString(`</div>`)
@@ -2136,25 +2476,13 @@ func renderOverviewDashboard(data overviewDashboardData) template.HTML {
 	b.WriteString(string(renderAttentionList(data.Attention)))
 	b.WriteString(`</div>`)
 
-	b.WriteString(`<div class="overview-charts-row">`)
-	b.WriteString(`<div class="overview-panel">`)
-	b.WriteString(`<div class="overview-panel-header">`)
-	b.WriteString(`<span class="overview-panel-title">` + esc(data.Chart.Title) + `</span>`)
-	if data.Chart.Total > 0 {
-		b.WriteString(`<span class="chart-total-badge">` + strconv.Itoa(data.Chart.Total) + ` events</span>`)
-	} else {
-		b.WriteString(`<span class="overview-panel-meta">Last 7 days</span>`)
-	}
-	b.WriteString(`</div>`)
-	b.WriteString(`<div class="overview-chart">`)
-	b.WriteString(string(renderOverviewChart(data.Chart)))
-	b.WriteString(`</div>`)
-	b.WriteString(`</div>`)
-
-	b.WriteString(`<div class="overview-panel">`)
-	b.WriteString(`<div class="overview-panel-header"><span class="overview-panel-title">Commands</span><a class="overview-panel-link" href="/admin/commands">View all</a></div>`)
-	b.WriteString(string(renderCommandBreakdown(data.CommandStats)))
-	b.WriteString(`</div>`)
+	b.WriteString(`<div class="overview-device-grid">`)
+	b.WriteString(string(renderOverviewChartPanel(data.DeviceStatusChart, "devices", "/admin/devices", "View devices")))
+	b.WriteString(string(renderOverviewChartPanel(data.DeviceActivityChart, "Last 7 days", "/admin/devices", "View devices")))
+	b.WriteString(string(renderOverviewChartPanel(data.DeviceTelemetryChart, "freshness", "/admin/devices", "View devices")))
+	b.WriteString(string(renderOverviewChartPanel(data.CommandTrendChart, "Last 7 days", "/admin/commands", "View commands")))
+	b.WriteString(string(renderOverviewChartPanel(data.DeviceModelChart, "top models", "/admin/devices", "View devices")))
+	b.WriteString(string(renderOverviewCommandPanel(data.CommandStats)))
 	b.WriteString(`</div>`)
 
 	b.WriteString(`<div class="overview-bottom-row">`)
@@ -2173,6 +2501,73 @@ func renderOverviewDashboard(data overviewDashboardData) template.HTML {
 	b.WriteString(`</div>`)
 
 	return template.HTML(b.String())
+}
+
+func renderOverviewChartPanel(chart overviewChart, meta, href, linkLabel string) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<div class="overview-panel">`)
+	b.WriteString(`<div class="overview-panel-header"><span class="overview-panel-title">` + esc(chart.Title) + `</span>`)
+	if href != "" {
+		b.WriteString(`<a class="overview-panel-link" href="` + escAttr(href) + `">` + esc(linkLabel) + `</a>`)
+	} else if chart.Total > 0 {
+		b.WriteString(`<span class="chart-total-badge">` + strconv.Itoa(chart.Total) + ` total</span>`)
+	} else {
+		b.WriteString(`<span class="overview-panel-meta">` + esc(meta) + `</span>`)
+	}
+	b.WriteString(`</div><div class="overview-chart">`)
+	b.WriteString(string(renderOverviewChart(chart)))
+	b.WriteString(`</div></div>`)
+	return template.HTML(b.String())
+}
+
+func renderOverviewCommandPanel(stats overviewCommandStats) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<div class="overview-panel">`)
+	b.WriteString(`<div class="overview-panel-header"><span class="overview-panel-title">Command delivery</span><a class="overview-panel-link" href="/admin/commands">View all</a></div>`)
+	b.WriteString(string(renderCommandBreakdown(stats)))
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func segmentWidthPercent(count, total int) int {
+	if total <= 0 {
+		return 0
+	}
+	return count * 100 / total
+}
+
+func renderMetricSparkline(value string) string {
+	cleaned := strings.TrimSpace(strings.TrimSuffix(value, "%"))
+	n, err := strconv.Atoi(cleaned)
+	if err != nil {
+		return ""
+	}
+
+	width := n
+	if strings.Contains(value, "%") {
+		if width < 0 {
+			width = 0
+		}
+		if width > 100 {
+			width = 100
+		}
+	} else {
+		switch {
+		case n <= 0:
+			width = 0
+		case n <= 2:
+			width = 18
+		case n <= 5:
+			width = 32
+		case n <= 12:
+			width = 58
+		case n <= 25:
+			width = 78
+		default:
+			width = 100
+		}
+	}
+	return `<div class="overview-metric-spark" aria-hidden="true"><span style="width:` + strconv.Itoa(width) + `%"></span></div>`
 }
 
 func renderAttentionList(items []overviewAttention) template.HTML {
@@ -2273,21 +2668,27 @@ func renderContentComposition(stats overviewContentStats) template.HTML {
 		if seg.count == 0 {
 			continue
 		}
-		pct := seg.count * 100 / total
-		b.WriteString(`<div class="comp-segment ` + seg.cls + `" style="width:` + strconv.Itoa(pct) + `%" title="` + esc(seg.label) + `: ` + strconv.Itoa(seg.count) + `"></div>`)
+		b.WriteString(`<div class="comp-segment ` + seg.cls + `" style="width:` + strconv.Itoa(segmentWidthPercent(seg.count, total)) + `%" title="` + esc(seg.label) + `: ` + strconv.Itoa(seg.count) + `"></div>`)
 	}
 	b.WriteString(`</div>`)
 	b.WriteString(`<div class="comp-legend">`)
 	for _, seg := range segs {
-		pct := 0
-		if total > 0 {
-			pct = seg.count * 100 / total
-		}
 		b.WriteString(`<a class="comp-legend-item" href="` + escAttr(seg.href) + `">`)
 		b.WriteString(`<span class="comp-dot ` + seg.cls + `"></span>`)
 		b.WriteString(`<span class="comp-name">` + esc(seg.label) + `</span>`)
 		b.WriteString(`<span class="comp-count">` + strconv.Itoa(seg.count) + `</span>`)
-		b.WriteString(`<span class="comp-pct">` + strconv.Itoa(pct) + `% of library</span>`)
+		detail := ""
+		switch seg.label {
+		case "Apps":
+			detail = strconv.Itoa(seg.count) + " app" + pluralSuffix(seg.count)
+		case "Managed files":
+			detail = strconv.Itoa(seg.count) + " file" + pluralSuffix(seg.count)
+		case "Certificates":
+			detail = strconv.Itoa(seg.count) + " cert" + pluralSuffix(seg.count)
+		default:
+			detail = strconv.Itoa(seg.count) + " item" + pluralSuffix(seg.count)
+		}
+		b.WriteString(`<span class="comp-pct">` + esc(detail) + `</span>`)
 		b.WriteString(`</a>`)
 	}
 	b.WriteString(`</div>`)
@@ -2356,7 +2757,7 @@ func renderOverviewChart(chart overviewChart) template.HTML {
 		y := float64(top+plotHeight) - barHeight
 		barLabel := chart.Labels[i]
 		b.WriteString(fmt.Sprintf(`<rect class="chart-bar-bg" x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="6"></rect>`, x, float64(top), barWidth, float64(plotHeight)))
-		b.WriteString(fmt.Sprintf(`<rect class="chart-bar" x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="6"></rect>`, x, y, barWidth, barHeight))
+		b.WriteString(fmt.Sprintf(`<rect class="chart-bar" x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="6"><title>%s: %d</title></rect>`, x, y, barWidth, barHeight, esc(barLabel), value))
 		if value > 0 {
 			b.WriteString(fmt.Sprintf(`<text class="chart-axis" x="%.1f" y="%.1f" text-anchor="middle">%d</text>`, x+barWidth/2, y-4, value))
 		}
@@ -2366,6 +2767,452 @@ func renderOverviewChart(chart overviewChart) template.HTML {
 	b.WriteString(fmt.Sprintf(`<text class="chart-axis" x="%d" y="%d">0</text>`, 10, top+plotHeight+4))
 	b.WriteString(`</svg>`)
 	return template.HTML(b.String())
+}
+
+func buildDeviceStatusChart(items []device.Device) overviewChart {
+	chart := overviewChart{Title: "Device status distribution", EmptyNote: "No devices enrolled yet."}
+	if len(items) == 0 {
+		return chart
+	}
+	counts := map[string]int{}
+	for _, item := range items {
+		label := strings.TrimSpace(string(item.Status))
+		if label == "" {
+			label = "unknown"
+		}
+		counts[label]++
+	}
+	return chartFromCounts(chart.Title, counts, 8, chart.EmptyNote)
+}
+
+func buildDeviceTelemetryFreshnessChart(devices []device.Device, records any, now time.Time) overviewChart {
+	chart := overviewChart{Title: "Device telemetry freshness", EmptyNote: "No device telemetry freshness data available."}
+	if len(devices) == 0 {
+		return chart
+	}
+
+	latestByDevice := latestTelemetryByDevice(records)
+	counts := map[string]int{
+		"Last 24h":     0,
+		"2–7 days":     0,
+		"Stale 8+d":    0,
+		"No telemetry": 0,
+	}
+
+	for _, item := range devices {
+		deviceKey := strings.TrimSpace(firstNonEmpty(item.RecordID(), item.ID, item.Name))
+		if deviceKey == "" {
+			counts["No telemetry"]++
+			continue
+		}
+
+		latest, ok := latestByDevice[deviceKey]
+		if !ok {
+			counts["No telemetry"]++
+			continue
+		}
+
+		age := now.Sub(latest)
+		switch {
+		case age <= 24*time.Hour:
+			counts["Last 24h"]++
+		case age <= 7*24*time.Hour:
+			counts["2–7 days"]++
+		default:
+			counts["Stale 8+d"]++
+		}
+	}
+
+	for _, label := range []string{"Last 24h", "2–7 days", "Stale 8+d", "No telemetry"} {
+		value := counts[label]
+		if value <= 0 {
+			continue
+		}
+		chart.Labels = append(chart.Labels, label)
+		chart.Values = append(chart.Values, value)
+		chart.Total += value
+	}
+	return chart
+}
+
+func latestTelemetryByDevice(records any) map[string]time.Time {
+	latest := map[string]time.Time{}
+	values := reflect.ValueOf(records)
+	if values.Kind() != reflect.Slice && values.Kind() != reflect.Array {
+		return latest
+	}
+	for i := 0; i < values.Len(); i++ {
+		item := values.Index(i)
+		observed, ok := firstTimeField(item, "ObservedAt", "CreatedAt", "UpdatedAt")
+		if !ok {
+			continue
+		}
+		for _, key := range []string{
+			firstStringField(item, "DeviceID", "DeviceId", "DeviceRecordID", "DeviceRecordId"),
+			firstPayloadString(item, "deviceId", "deviceID", "deviceRecordId", "deviceRecordID", "serialNumber"),
+		} {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			if previous, exists := latest[key]; !exists || observed.After(previous) {
+				latest[key] = observed
+			}
+		}
+	}
+	return latest
+}
+
+func buildStatusTimelineChart(items any, now time.Time, days int, title, emptyNote string) overviewChart {
+	chart := overviewChart{Title: title, EmptyNote: emptyNote}
+	if days <= 0 {
+		days = 7
+	}
+	loc := now.Location()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -(days - 1))
+	chart.Labels = make([]string, days)
+	chart.Values = make([]int, days)
+	for i := 0; i < days; i++ {
+		chart.Labels[i] = start.AddDate(0, 0, i).Format("Jan 2")
+	}
+	values := reflect.ValueOf(items)
+	if values.Kind() != reflect.Slice && values.Kind() != reflect.Array {
+		return chart
+	}
+	for i := 0; i < values.Len(); i++ {
+		observed, ok := firstTimeField(values.Index(i), "ObservedAt", "CreatedAt", "UpdatedAt")
+		if !ok {
+			continue
+		}
+		observed = observed.In(loc)
+		if observed.Before(start) || observed.After(now) {
+			continue
+		}
+		idx := int(observed.Sub(start).Hours() / 24)
+		if idx >= 0 && idx < len(chart.Values) {
+			chart.Values[idx]++
+			chart.Total++
+		}
+	}
+	return chart
+}
+
+func countStaleActiveDevices(devices []device.Device, records any, now time.Time, threshold time.Duration) int {
+	if len(devices) == 0 {
+		return 0
+	}
+	latestByDevice := latestTelemetryByDevice(records)
+	count := 0
+	for _, item := range devices {
+		if item.Status != device.StatusActive {
+			continue
+		}
+		deviceKey := strings.TrimSpace(firstNonEmpty(item.RecordID(), item.ID, item.Name))
+		latest, ok := latestByDevice[deviceKey]
+		if !ok || now.Sub(latest) > threshold {
+			count++
+		}
+	}
+	return count
+}
+
+func buildUniqueDeviceActivityChart(records any, now time.Time, days int) overviewChart {
+	chart := overviewChart{Title: "Device activity timeline", EmptyNote: "No device telemetry in the last 7 days."}
+	if days <= 0 {
+		days = 7
+	}
+	loc := now.Location()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -(days - 1))
+	chart.Labels = make([]string, days)
+	chart.Values = make([]int, days)
+	for i := 0; i < days; i++ {
+		chart.Labels[i] = start.AddDate(0, 0, i).Format("Jan 2")
+	}
+	seen := make([]map[string]bool, days)
+	for i := range seen {
+		seen[i] = map[string]bool{}
+	}
+	values := reflect.ValueOf(records)
+	if values.Kind() != reflect.Slice && values.Kind() != reflect.Array {
+		return chart
+	}
+	for i := 0; i < values.Len(); i++ {
+		item := values.Index(i)
+		observed, ok := firstTimeField(item, "ObservedAt", "CreatedAt", "UpdatedAt")
+		if !ok {
+			continue
+		}
+		observed = observed.In(loc)
+		if observed.Before(start) || observed.After(now) {
+			continue
+		}
+		deviceKey := firstStringField(item, "DeviceID", "DeviceId", "DeviceRecordID", "DeviceRecordId")
+		if deviceKey == "" {
+			deviceKey = firstPayloadString(item, "deviceId", "deviceID", "deviceRecordId", "deviceRecordID")
+		}
+		deviceKey = strings.TrimSpace(deviceKey)
+		if deviceKey == "" {
+			continue
+		}
+		idx := int(observed.Sub(start).Hours() / 24)
+		if idx >= 0 && idx < len(chart.Values) && !seen[idx][deviceKey] {
+			seen[idx][deviceKey] = true
+			chart.Values[idx]++
+			chart.Total++
+		}
+	}
+	return chart
+}
+
+func buildCommandDeliveryTrendChart(items any, now time.Time, days int) overviewChart {
+	chart := overviewChart{Title: "Command delivery volume", EmptyNote: "No command activity in the last 7 days."}
+	if days <= 0 {
+		days = 7
+	}
+	loc := now.Location()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -(days - 1))
+	chart.Labels = make([]string, days)
+	chart.Values = make([]int, days)
+	for i := 0; i < days; i++ {
+		chart.Labels[i] = start.AddDate(0, 0, i).Format("Jan 2")
+	}
+	values := reflect.ValueOf(items)
+	if values.Kind() != reflect.Slice && values.Kind() != reflect.Array {
+		return chart
+	}
+	for i := 0; i < values.Len(); i++ {
+		item := values.Index(i)
+		observed, ok := firstTimeField(item, "UpdatedAt", "CreatedAt")
+		if !ok {
+			continue
+		}
+		observed = observed.In(loc)
+		if observed.Before(start) || observed.After(now) {
+			continue
+		}
+		idx := int(observed.Sub(start).Hours() / 24)
+		if idx >= 0 && idx < len(chart.Values) {
+			chart.Values[idx]++
+			chart.Total++
+		}
+	}
+	return chart
+}
+
+func buildDeviceModelChart(devices []device.Device, records any, limit int) overviewChart {
+	chart := overviewChart{Title: "Device model breakdown", EmptyNote: "No device model telemetry available."}
+	if len(devices) == 0 {
+		return chart
+	}
+	modelByDevice := latestTelemetryModelByDevice(records)
+	counts := map[string]int{}
+	for _, item := range devices {
+		deviceKey := strings.TrimSpace(firstNonEmpty(item.RecordID(), item.ID, item.Name))
+		if deviceKey == "" {
+			continue
+		}
+		label := modelByDevice[deviceKey]
+		if strings.TrimSpace(label) == "" {
+			label = "Unknown"
+		}
+		counts[label]++
+	}
+	return chartFromCounts(chart.Title, counts, limit, chart.EmptyNote)
+}
+
+func latestTelemetryModelByDevice(records any) map[string]string {
+	type observedModel struct {
+		observed time.Time
+		model    string
+	}
+	latest := map[string]observedModel{}
+	values := reflect.ValueOf(records)
+	if values.Kind() != reflect.Slice && values.Kind() != reflect.Array {
+		return map[string]string{}
+	}
+	for i := 0; i < values.Len(); i++ {
+		item := values.Index(i)
+		observed, ok := firstTimeField(item, "ObservedAt", "CreatedAt", "UpdatedAt")
+		if !ok {
+			continue
+		}
+		model := firstPayloadString(item, "model", "Model", "deviceModel", "DeviceModel")
+		deviceKey := firstStringField(item, "DeviceID", "DeviceId", "DeviceRecordID", "DeviceRecordId")
+		if deviceKey == "" {
+			deviceKey = firstPayloadString(item, "deviceId", "deviceID", "deviceRecordId", "deviceRecordID")
+		}
+		deviceKey = strings.TrimSpace(deviceKey)
+		if deviceKey == "" {
+			continue
+		}
+		if previous, exists := latest[deviceKey]; !exists || observed.After(previous.observed) {
+			latest[deviceKey] = observedModel{observed: observed, model: model}
+		}
+	}
+	result := map[string]string{}
+	for deviceKey, item := range latest {
+		result[deviceKey] = item.model
+	}
+	return result
+}
+
+func telemetryFreshnessMetric(chart overviewChart, totalDevices int) overviewMetric {
+	seenRecent := 0
+	for i, label := range chart.Labels {
+		normalized := strings.ToLower(strings.TrimSpace(label))
+		if (normalized == "last 24h" || normalized == "seen last 24h" || normalized == "seen today") && i < len(chart.Values) {
+			seenRecent = chart.Values[i]
+			break
+		}
+	}
+	value := "0%"
+	if totalDevices > 0 {
+		value = strconv.Itoa(seenRecent*100/totalDevices) + "%"
+	}
+	detail := fmt.Sprintf("%d of %d devices seen in the last 24 hours", seenRecent, totalDevices)
+	if seenRecent > 0 {
+		detail += " · latest telemetry is current"
+	}
+	return overviewMetric{Label: "Telemetry freshness", Value: value, Detail: detail}
+}
+
+func chartFromCounts(title string, counts map[string]int, limit int, emptyNote string) overviewChart {
+	chart := overviewChart{Title: title, EmptyNote: emptyNote}
+	if len(counts) == 0 {
+		return chart
+	}
+	type pair struct {
+		label string
+		count int
+	}
+	pairs := make([]pair, 0, len(counts))
+	for label, count := range counts {
+		if count <= 0 {
+			continue
+		}
+		pairs = append(pairs, pair{label: titleCaseLabel(label), count: count})
+	}
+	sort.SliceStable(pairs, func(i, j int) bool {
+		if pairs[i].count == pairs[j].count {
+			return pairs[i].label < pairs[j].label
+		}
+		return pairs[i].count > pairs[j].count
+	})
+	if limit > 0 && len(pairs) > limit {
+		other := 0
+		for _, item := range pairs[limit-1:] {
+			other += item.count
+		}
+		pairs = append(pairs[:limit-1], pair{label: "Other", count: other})
+	}
+	for _, item := range pairs {
+		chart.Labels = append(chart.Labels, item.label)
+		chart.Values = append(chart.Values, item.count)
+		chart.Total += item.count
+	}
+	return chart
+}
+
+func firstTimeField(value reflect.Value, names ...string) (time.Time, bool) {
+	value = indirectValue(value)
+	if !value.IsValid() || value.Kind() != reflect.Struct {
+		return time.Time{}, false
+	}
+	for _, name := range names {
+		field := value.FieldByName(name)
+		if field.IsValid() && field.CanInterface() {
+			if t, ok := field.Interface().(time.Time); ok && !t.IsZero() {
+				return t, true
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
+func firstStringField(value reflect.Value, names ...string) string {
+	value = indirectValue(value)
+	if !value.IsValid() || value.Kind() != reflect.Struct {
+		return ""
+	}
+	for _, name := range names {
+		field := value.FieldByName(name)
+		if field.IsValid() && field.CanInterface() {
+			if s := stringFromReflectValue(field); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func firstPayloadString(value reflect.Value, names ...string) string {
+	value = indirectValue(value)
+	if !value.IsValid() || value.Kind() != reflect.Struct {
+		return ""
+	}
+	for _, name := range names {
+		field := value.FieldByName(name)
+		if field.IsValid() && field.CanInterface() {
+			if s := stringFromReflectValue(field); s != "" {
+				return s
+			}
+		}
+	}
+	payload := value.FieldByName("Payload")
+	if payload.IsValid() && payload.CanInterface() {
+		payloadValue := payload.Interface()
+		if m, ok := payloadValue.(map[string]any); ok {
+			for _, name := range names {
+				if s, ok := m[name].(string); ok && strings.TrimSpace(s) != "" {
+					return strings.TrimSpace(s)
+				}
+			}
+		}
+		rv := indirectValue(payload)
+		if rv.IsValid() && rv.Kind() == reflect.Map {
+			for _, name := range names {
+				key := reflect.ValueOf(name)
+				if key.Type().AssignableTo(rv.Type().Key()) {
+					v := rv.MapIndex(key)
+					if v.IsValid() {
+						if s := stringFromReflectValue(v); s != "" {
+							return s
+						}
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func stringFromReflectValue(value reflect.Value) string {
+	value = indirectValue(value)
+	if !value.IsValid() || !value.CanInterface() {
+		return ""
+	}
+	if value.Kind() == reflect.String {
+		return strings.TrimSpace(value.String())
+	}
+	if s, ok := value.Interface().(fmt.Stringer); ok {
+		return strings.TrimSpace(s.String())
+	}
+	return ""
+}
+
+func titleCaseLabel(label string) string {
+	label = strings.TrimSpace(strings.ReplaceAll(label, "_", " "))
+	if label == "" {
+		return "Unknown"
+	}
+	parts := strings.Fields(label)
+	for i, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
 }
 
 func buildOverviewChart(events []audit.Event, now time.Time, days int) overviewChart {
@@ -2398,7 +3245,7 @@ func buildOverviewChart(events []audit.Event, now time.Time, days int) overviewC
 	return chart
 }
 
-func overviewStatusSummary(data overviewDashboardData, activeDevices, totalDevices, activePolicies, auditLast24h int) (string, string, string) {
+func overviewStatusSummary(data overviewDashboardData, activeDevices, pendingDevices, retiredOrWipedDevices, totalDevices, activePolicies, auditLast24h int) (string, string, string) {
 	tone := "good"
 	for _, item := range data.Attention {
 		switch strings.ToLower(strings.TrimSpace(item.Tone)) {
@@ -2419,15 +3266,17 @@ func overviewStatusSummary(data overviewDashboardData, activeDevices, totalDevic
 		title = "Fleet status: Attention required"
 	}
 
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 6)
 	if totalDevices > 0 {
-		parts = append(parts, fmt.Sprintf("%d of %d devices active", activeDevices, totalDevices))
+		parts = append(parts, fmt.Sprintf("%d active", activeDevices))
+		parts = append(parts, fmt.Sprintf("%d pending", pendingDevices))
+		parts = append(parts, fmt.Sprintf("%d retired/wiped", retiredOrWipedDevices))
 	}
 	if activePolicies > 0 {
 		parts = append(parts, fmt.Sprintf("%d active policies", activePolicies))
 	}
 	if data.CommandStats.Total > 0 {
-		parts = append(parts, fmt.Sprintf("%d of %d commands acknowledged", data.CommandStats.Acked, data.CommandStats.Total))
+		parts = append(parts, fmt.Sprintf("%d/%d commands acknowledged", data.CommandStats.Acked, data.CommandStats.Total))
 	}
 	parts = append(parts, fmt.Sprintf("%d audit events in the last 24 hours", auditLast24h))
 	if len(parts) == 0 {
@@ -3272,13 +4121,13 @@ func (d *dashboard) deviceEnrollmentQR(w http.ResponseWriter, r *http.Request) {
 		d.renderPageError(w, r, session, "Device Detail", fmt.Errorf("device must be pending"))
 		return
 	}
-	state := deviceEnrollmentQRState(firstNonEmpty(found.DeviceID, found.Name))
+	state := deviceEnrollmentQRState(firstNonEmpty(found.ID, found.Name))
 	result, err := d.generateEnrollmentQR(r.Context(), state)
 	if err != nil {
 		d.renderPageError(w, r, session, "Device Detail", err)
 		return
 	}
-	d.recordAudit(r, "create", "enrollment_tokens", result.Issued.ID, map[string]any{"expiresAt": result.Issued.ExpiresAt, "deviceId": firstNonEmpty(found.DeviceID, found.Name)})
+	d.recordAudit(r, "create", "enrollment_tokens", result.Issued.ID, map[string]any{"expiresAt": result.Issued.ExpiresAt, "deviceId": firstNonEmpty(found.ID, found.Name)})
 	data := d.deviceDetailPageData(r, session, found, policies, groups, enrollmentQRCallout(result))
 	data.Flash = "QR generated"
 	d.renderForSession(w, r, session, data)
@@ -3359,7 +4208,7 @@ func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session,
 		body += `<section class="panel"><h2>Assigned groups</h2><p class="muted">No groups linked.</p></section>`
 	}
 	body += string(d.deviceConfigPreviewSection(r.Context(), found))
-	deviceKey := firstNonEmpty(found.DeviceID, found.Name)
+	deviceKey := firstNonEmpty(found.ID, found.Name)
 	deviceRowID := found.RecordID()
 	if d.deps.Logs != nil {
 		rows, _ := d.deps.Logs.Search(r.Context(), d.deps.TenantID, logs.SearchFilter{DeviceID: deviceKey, Limit: 10})
@@ -3442,7 +4291,7 @@ func (d *dashboard) deviceConfigPreviewSection(ctx context.Context, found *devic
 	if d.deps.Policies == nil {
 		return `<section class="panel"><h2>Config preview</h2><p class="muted">Preview unavailable until policy data is configured.</p></section>`
 	}
-	deviceKey := firstNonEmpty(found.DeviceID, found.Name)
+	deviceKey := firstNonEmpty(found.ID, found.Name)
 	config, err := enrollmenthttp.BuildConfigSnapshot(ctx, d.deps.Policies, d.deps.Apps, d.deps.ManagedFiles, d.deps.Artifacts, d.deps.Certificates, d.deps.TenantID, deviceKey, found.PolicyID, found.BootstrapExtras, d.deps.Runtime)
 	if err != nil {
 		return template.HTML(`<section class="panel"><h2>Config preview</h2><p class="muted">Preview unavailable: ` + esc(err.Error()) + `</p></section>`)
@@ -3465,9 +4314,9 @@ func (d *dashboard) deviceConfigPreviewSection(ctx context.Context, found *devic
 		Certificates: config.Certificates,
 	}
 	var b strings.Builder
-	b.WriteString(`<section class="panel"><h2>Config preview</h2><p class="muted">Unsigned preview built from the current policy, app, file, and certificate inputs.</p><div class="policy-summary">`)
-	b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">JSON</div><div class="policy-summary-value">` + pre(preview) + `</div></div>`)
-	b.WriteString(`</div></section>`)
+	b.WriteString(`<section class="panel"><h2>Config preview</h2>`)
+	b.WriteString(pre(preview))
+	b.WriteString(`</section>`)
 	return template.HTML(b.String())
 }
 
@@ -3501,7 +4350,7 @@ func (d *dashboard) createDevice(w http.ResponseWriter, r *http.Request) {
 		d.redirectError(w, r, "/admin/devices", err.Error())
 		return
 	}
-	d.recordAudit(r, "create", "devices", rec.ID, map[string]any{"name": rec.Name, "deviceId": rec.DeviceID, "policyId": firstPolicyID(rec.PolicyID), "groupIds": req.GroupIDs})
+	d.recordAudit(r, "create", "devices", rec.ID, map[string]any{"name": rec.Name, "deviceId": rec.ID, "policyId": firstPolicyID(rec.PolicyID), "groupIds": req.GroupIDs})
 	d.redirectOK(w, r, "/admin/devices", "device created")
 }
 
@@ -3547,7 +4396,7 @@ func (d *dashboard) updateDevice(w http.ResponseWriter, r *http.Request) {
 		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), err.Error())
 		return
 	}
-	d.recordAudit(r, "update", "devices", rec.ID, map[string]any{"name": rec.Name, "deviceId": rec.DeviceID, "policyId": firstPolicyID(rec.PolicyID)})
+	d.recordAudit(r, "update", "devices", rec.ID, map[string]any{"name": rec.Name, "deviceId": rec.ID, "policyId": firstPolicyID(rec.PolicyID)})
 	d.redirectOK(w, r, "/admin/devices/"+rec.ID, "device updated")
 }
 
@@ -3917,7 +4766,9 @@ func (d *dashboard) managedFileDetailPageData(session *auth.Session, found *mana
 	}
 	body.WriteString(summaryHTMLItem("Template", template.HTML(boolBadge(found.ReplaceVariables, "enabled", "disabled"))))
 	body.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
-	body.WriteString(`</div></section>`)
+	body.WriteString(`</div>`)
+	body.WriteString(string(rawDataDetails("Raw managed file data", found)))
+	body.WriteString(`</section>`)
 	data := pageData{
 		Title:    "Managed File Detail",
 		Subtitle: "Review the managed file binding or retire it from active use.",
@@ -4131,7 +4982,9 @@ func (d *dashboard) certificateDetailPageData(session *auth.Session, found *cert
 		body.WriteString(summaryTextItem("MIME", found.Artifact.MimeType))
 	}
 	body.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
-	body.WriteString(`</div></section>`)
+	body.WriteString(`</div>`)
+	body.WriteString(string(rawDataDetails("Raw certificate data", found)))
+	body.WriteString(`</section>`)
 	data := pageData{
 		Title:    "Certificate Detail",
 		Subtitle: "Review the certificate artifact or retire it from active use.",
@@ -4307,24 +5160,6 @@ func (d *dashboard) logs(w http.ResponseWriter, r *http.Request) {
 	d.renderForSession(w, r, session, pageData{Title: "Logs", Items: searchAndTable("/admin/logs", []fieldData{{Name: "deviceId", Label: "Device ID", Type: "text", Value: r.URL.Query().Get("deviceId")}, {Name: "source", Label: "Source", Type: "text", Value: r.URL.Query().Get("source")}, {Name: "level", Label: "Level", Type: "text", Value: r.URL.Query().Get("level")}, {Name: "q", Label: "Query", Type: "text", Value: r.URL.Query().Get("q")}, {Name: "limit", Label: "Limit", Type: "number", Value: firstNonEmpty(r.URL.Query().Get("limit"), "25")}}, logsTable(items))})
 }
 
-func (d *dashboard) deviceInfo(w http.ResponseWriter, r *http.Request) {
-	session, ok := d.requireRead(w, r, "Device Info")
-	if !ok {
-		return
-	}
-	filter, err := deviceInfoFilterFromQuery(r)
-	if err != nil {
-		d.renderPageError(w, r, session, "Device Info", err)
-		return
-	}
-	items, err := d.deps.DeviceInfo.Search(r.Context(), d.deps.TenantID, filter)
-	if err != nil {
-		d.renderPageError(w, r, session, "Device Info", err)
-		return
-	}
-	d.renderForSession(w, r, session, pageData{Title: "Device Info", Items: searchAndTable("/admin/device-info", []fieldData{{Name: "deviceId", Label: "Device ID", Type: "text", Value: r.URL.Query().Get("deviceId")}, {Name: "q", Label: "Query", Type: "text", Value: r.URL.Query().Get("q")}, {Name: "limit", Label: "Limit", Type: "number", Value: firstNonEmpty(r.URL.Query().Get("limit"), "25")}}, deviceInfoTable(items))})
-}
-
 func (d *dashboard) audit(w http.ResponseWriter, r *http.Request) {
 	session, ok := d.requireRead(w, r, "Audit")
 	if !ok {
@@ -4389,6 +5224,10 @@ func (d *dashboard) renderForSession(w http.ResponseWriter, r *http.Request, ses
 	data.CanWrite = d.canWrite(session)
 	data.Flash = firstNonEmpty(data.Flash, r.URL.Query().Get("ok"))
 	data.Error = firstNonEmpty(data.Error, r.URL.Query().Get("error"))
+	if strings.Contains(data.Title, "Detail") {
+		data.FormsAfterItems = true
+		data.ItemsRaw = true
+	}
 	d.render(w, data)
 }
 
@@ -4760,8 +5599,261 @@ func urlQuery(value string) string {
 }
 
 func pre(value any) string {
-	data, _ := json.MarshalIndent(value, "", "  ")
-	return "<pre>" + template.HTMLEscapeString(string(data)) + "</pre>"
+	return string(structuredDataWithRaw(value))
+}
+
+func preStructuredOnly(value any) string {
+	return string(structuredData(value))
+}
+
+func structuredDataWithRaw(value any) template.HTML {
+	structured := string(structuredData(value))
+	return template.HTML(structured + string(rawDataDetails("Raw data", value)))
+}
+
+func rawDataDetails(label string, value any) template.HTML {
+	data, ok := rawDataJSON(value)
+	if !ok {
+		return ""
+	}
+	if strings.TrimSpace(label) == "" {
+		label = "Raw data"
+	}
+	return template.HTML(`<details class="raw-data"><summary><span class="raw-data-header"><span>` + esc(label) + `</span></span></summary><button type="button" class="button raw-copy" onclick="copyRawData(this)">Copy</button><pre class="qr-json">` + template.HTMLEscapeString(data) + `</pre></details>`)
+}
+
+func rawDataJSON(value any) (string, bool) {
+	if raw, ok := value.(json.RawMessage); ok {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+			return "", false
+		}
+		var decoded any
+		if err := json.Unmarshal(trimmed, &decoded); err == nil {
+			data, err := json.MarshalIndent(decoded, "", "  ")
+			if err == nil && len(data) > 0 && string(data) != "null" {
+				return string(data), true
+			}
+		}
+		return string(trimmed), true
+	}
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil || len(data) == 0 || string(data) == "null" {
+		return "", false
+	}
+	return string(data), true
+}
+
+func structuredData(value any) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<div class="structured-data">`)
+	b.WriteString(string(renderStructuredValue(reflect.ValueOf(value), 0)))
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func renderStructuredValue(v reflect.Value, depth int) template.HTML {
+	if !v.IsValid() {
+		return template.HTML(`<span class="structured-muted">—</span>`)
+	}
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return template.HTML(`<span class="structured-muted">—</span>`)
+		}
+		v = v.Elem()
+	}
+	if t, ok := v.Interface().(time.Time); ok {
+		return template.HTML(`<span class="structured-scalar">` + esc(formatDashboardTime(t)) + `</span>`)
+	}
+	if raw, ok := v.Interface().(json.RawMessage); ok {
+		return renderStructuredJSON(raw)
+	}
+	switch v.Kind() {
+	case reflect.Struct:
+		return renderStructuredStruct(v, depth)
+	case reflect.Map:
+		return renderStructuredMap(v, depth)
+	case reflect.Slice, reflect.Array:
+		return renderStructuredSlice(v, depth)
+	case reflect.Bool:
+		return template.HTML(boolBadge(v.Bool(), "true", "false"))
+	case reflect.String:
+		text := v.String()
+		if strings.TrimSpace(text) == "" {
+			return template.HTML(`<span class="structured-muted">—</span>`)
+		}
+		return template.HTML(`<span class="structured-scalar">` + esc(text) + `</span>`)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return template.HTML(`<span class="structured-scalar">` + strconv.FormatInt(v.Int(), 10) + `</span>`)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return template.HTML(`<span class="structured-scalar">` + strconv.FormatUint(v.Uint(), 10) + `</span>`)
+	case reflect.Float32, reflect.Float64:
+		return template.HTML(`<span class="structured-scalar">` + strconv.FormatFloat(v.Float(), 'f', -1, 64) + `</span>`)
+	default:
+		data, _ := json.MarshalIndent(v.Interface(), "", "  ")
+		if len(data) == 0 || string(data) == "null" {
+			return template.HTML(`<span class="structured-muted">—</span>`)
+		}
+		return template.HTML(`<code>` + template.HTMLEscapeString(string(data)) + `</code>`)
+	}
+}
+
+func renderStructuredJSON(raw json.RawMessage) template.HTML {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return template.HTML(`<span class="structured-muted">—</span>`)
+	}
+	var decoded any
+	if err := json.Unmarshal(trimmed, &decoded); err != nil {
+		return template.HTML(`<code>` + template.HTMLEscapeString(string(trimmed)) + `</code>`)
+	}
+	return renderStructuredValue(reflect.ValueOf(decoded), 0)
+}
+
+func renderStructuredStruct(v reflect.Value, depth int) template.HTML {
+	rows := structuredStructRows(v, depth, map[string]bool{})
+	if len(rows) == 0 {
+		return template.HTML(`<div class="structured-empty">No details available.</div>`)
+	}
+	return template.HTML(`<table class="structured-table"><tbody>` + strings.Join(rows, "") + `</tbody></table>`)
+}
+
+func structuredStructRows(v reflect.Value, depth int, seen map[string]bool) []string {
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return nil
+	}
+	t := v.Type()
+	rows := make([]string, 0, v.NumField())
+	for i := 0; i < v.NumField(); i++ {
+		field := t.Field(i)
+		if field.PkgPath != "" {
+			continue
+		}
+		fv := v.Field(i)
+		if isZeroValue(fv) {
+			continue
+		}
+		if shouldFlattenStructuredField(field, fv) {
+			rows = append(rows, structuredStructRows(fv, depth, seen)...)
+			continue
+		}
+		label := fieldLabel(field.Name)
+		if seen[label] {
+			continue
+		}
+		seen[label] = true
+		rows = append(rows, `<tr><th class="structured-key">`+esc(label)+`</th><td>`+string(renderStructuredValue(fv, depth+1))+`</td></tr>`)
+	}
+	return rows
+}
+
+func shouldFlattenStructuredField(field reflect.StructField, v reflect.Value) bool {
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return false
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSpace(field.Name))
+	return field.Anonymous || name == "recordbase" || name == "record" || name == "base" || name == "model"
+}
+
+func renderStructuredMap(v reflect.Value, depth int) template.HTML {
+	if v.IsNil() || v.Len() == 0 {
+		return template.HTML(`<div class="structured-empty">No values.</div>`)
+	}
+	keys := v.MapKeys()
+	sort.Slice(keys, func(i, j int) bool { return fmt.Sprint(keys[i].Interface()) < fmt.Sprint(keys[j].Interface()) })
+	rows := make([]string, 0, len(keys))
+	for _, key := range keys {
+		rows = append(rows, `<tr><th class="structured-key">`+esc(fmt.Sprint(key.Interface()))+`</th><td>`+string(renderStructuredValue(v.MapIndex(key), depth+1))+`</td></tr>`)
+	}
+	return template.HTML(`<table class="structured-table"><tbody>` + strings.Join(rows, "") + `</tbody></table>`)
+}
+
+func renderStructuredSlice(v reflect.Value, depth int) template.HTML {
+	if v.Len() == 0 {
+		return template.HTML(`<div class="structured-empty">No records found.</div>`)
+	}
+	if isScalarKind(indirectKind(v.Index(0))) {
+		items := make([]string, 0, v.Len())
+		for i := 0; i < v.Len(); i++ {
+			items = append(items, `<span class="structured-pill">`+strings.TrimPrefix(strings.TrimSuffix(string(renderStructuredValue(v.Index(i), depth+1)), `</span>`), `<span class="structured-scalar">`)+`</span>`)
+		}
+		return template.HTML(`<div class="structured-list">` + strings.Join(items, "") + `</div>`)
+	}
+	var b strings.Builder
+	b.WriteString(`<table class="structured-table"><thead><tr><th class="structured-key">#</th><th>Record</th></tr></thead><tbody>`)
+	for i := 0; i < v.Len(); i++ {
+		b.WriteString(`<tr><td>` + strconv.Itoa(i+1) + `</td><td>` + string(renderStructuredValue(v.Index(i), depth+1)) + `</td></tr>`)
+	}
+	b.WriteString(`</tbody></table>`)
+	return template.HTML(b.String())
+}
+
+func isZeroValue(v reflect.Value) bool {
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return true
+		}
+		v = v.Elem()
+	}
+	return v.IsZero()
+}
+
+func indirectValue(v reflect.Value) reflect.Value {
+	for v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) {
+		if v.IsNil() {
+			return reflect.Value{}
+		}
+		v = v.Elem()
+	}
+	return v
+}
+
+func indirectKind(v reflect.Value) reflect.Kind {
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return reflect.Invalid
+		}
+		v = v.Elem()
+	}
+	return v.Kind()
+}
+
+func isScalarKind(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Bool, reflect.String, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float32, reflect.Float64:
+		return true
+	default:
+		return false
+	}
+}
+
+func fieldLabel(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "Field"
+	}
+	var words []string
+	start := 0
+	runes := []rune(name)
+	for i := 1; i < len(runes); i++ {
+		if runes[i] >= 'A' && runes[i] <= 'Z' && (runes[i-1] < 'A' || runes[i-1] > 'Z') {
+			words = append(words, string(runes[start:i]))
+			start = i
+		}
+	}
+	words = append(words, string(runes[start:]))
+	return strings.Join(words, " ")
 }
 
 func usersTable(items []identity.User, roles map[string]identity.Role, csrf string, canWrite bool) template.HTML {
@@ -5083,6 +6175,10 @@ func appSummary(found apps.App, latest *apps.Version) template.HTML {
 	}
 	b.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
 	b.WriteString(`</div>`)
+	b.WriteString(string(rawDataDetails("Raw app data", found)))
+	if latest != nil {
+		b.WriteString(string(rawDataDetails("Raw latest version data", latest)))
+	}
 	return template.HTML(b.String())
 }
 
@@ -5144,7 +6240,7 @@ func commandsTable(items []commands.Command, devices map[string]device.Device) t
 		if rec, ok := devices[item.DeviceID]; ok {
 			deviceLabel = rec.Name
 			if strings.TrimSpace(deviceLabel) == "" {
-				deviceLabel = rec.DeviceID
+				deviceLabel = rec.ID
 			}
 			deviceLabel = `<a href="/admin/devices/` + escAttr(rec.ID) + `">` + esc(deviceLabel) + `</a>`
 		} else {
@@ -5189,9 +6285,9 @@ func commandDeviceOptions(items []device.Device) []optionData {
 		}
 		label := item.Name
 		if strings.TrimSpace(label) == "" {
-			label = item.DeviceID
+			label = item.ID
 		}
-		options = append(options, optionData{Value: item.DeviceID, Label: label})
+		options = append(options, optionData{Value: item.ID, Label: label})
 	}
 	return options
 }
@@ -5231,7 +6327,7 @@ func commandSummary(found commands.Command, deviceRec device.Device) template.HT
 	if strings.TrimSpace(deviceRec.ID) != "" {
 		deviceLabel = deviceRec.Name
 		if strings.TrimSpace(deviceLabel) == "" {
-			deviceLabel = deviceRec.DeviceID
+			deviceLabel = deviceRec.ID
 		}
 		deviceLabel = `<a href="/admin/devices/` + escAttr(deviceRec.ID) + `">` + esc(deviceLabel) + `</a>`
 	} else {
@@ -5255,13 +6351,14 @@ func commandSummary(found commands.Command, deviceRec device.Device) template.HT
 	b.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
 	b.WriteString(summaryTextItem("Expires", expires))
 	b.WriteString(summaryTextItem("Acked", acked))
-	b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">Payload</div><div class="policy-summary-value">` + pre(found.Payload) + `</div></div>`)
+	b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">Payload</div><div class="policy-summary-value">` + preStructuredOnly(found.Payload) + `</div></div>`)
 	if len(found.Result) > 0 {
-		b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">Result</div><div class="policy-summary-value">` + pre(found.Result) + `</div></div>`)
+		b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">Result</div><div class="policy-summary-value">` + preStructuredOnly(found.Result) + `</div></div>`)
 	} else {
 		b.WriteString(summaryTextItem("Result", "—"))
 	}
 	b.WriteString(`</div>`)
+	b.WriteString(string(rawDataDetails("Raw command data", found)))
 	return template.HTML(b.String())
 }
 
@@ -5287,9 +6384,15 @@ func deviceInfoTable(items []deviceinfo.Record) template.HTML {
 
 func auditTable(items []audit.Event) template.HTML {
 	var b strings.Builder
-	b.WriteString(`<table><thead><tr><th>Created</th><th>Actor</th><th>Action</th><th>Resource</th><th>Details</th></tr></thead><tbody>`)
+	b.WriteString(`<table class="audit-table"><colgroup><col class="audit-created"><col class="audit-actor"><col class="audit-action"><col class="audit-resource"><col class="audit-details"></colgroup><thead><tr><th class="audit-created">Created</th><th class="audit-actor">Actor</th><th class="audit-action">Action</th><th class="audit-resource">Resource</th><th class="audit-details">Details</th></tr></thead><tbody>`)
 	for _, item := range items {
-		b.WriteString("<tr><td>" + esc(item.CreatedAt.Format(time.RFC3339)) + "</td><td>" + esc(item.Actor) + "</td><td>" + esc(item.Action) + "</td><td>" + esc(item.ResourceType+"/"+item.ResourceID) + "</td><td>" + pre(item.Details) + "</td></tr>")
+		b.WriteString(`<tr>`)
+		b.WriteString(`<td class="audit-created">` + esc(item.CreatedAt.Format(time.RFC3339)) + `</td>`)
+		b.WriteString(`<td class="audit-actor">` + esc(item.Actor) + `</td>`)
+		b.WriteString(`<td class="audit-action">` + esc(item.Action) + `</td>`)
+		b.WriteString(`<td class="audit-resource">` + esc(item.ResourceType+"/"+item.ResourceID) + `</td>`)
+		b.WriteString(`<td class="audit-details">` + pre(item.Details) + `</td>`)
+		b.WriteString(`</tr>`)
 	}
 	b.WriteString(`</tbody></table>`)
 	return template.HTML(b.String())
@@ -5359,11 +6462,17 @@ func policyManagedAppsSummary(policyID string, items []apps.App, assignments []p
 		}
 	}
 	if activeCount == 0 {
-		return template.HTML(`<section class="panel"><h2>Managed apps</h2><p class="muted">No managed apps are available yet.</p></section>`)
+		return template.HTML(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed apps</span><span class="section-heading-meta">0 available</span></h2><p class="muted">No managed apps are available yet.</p></section>`)
 	}
 	assignmentMap := appAssignmentStatusByID(assignments)
+	enabledCount := 0
+	for _, app := range items {
+		if app.Status == apps.StatusActive && assignmentMap[app.ID] {
+			enabledCount++
+		}
+	}
 	var b strings.Builder
-	b.WriteString(`<section class="panel"><h2>Managed apps</h2><table><thead><tr><th>Name</th><th>Package</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
+	b.WriteString(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed apps</span><span class="section-heading-meta">` + strconv.Itoa(enabledCount) + ` enabled / ` + strconv.Itoa(activeCount) + ` available</span></h2><table><thead><tr><th>Name</th><th>Package</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
 	for _, app := range items {
 		if app.Status != apps.StatusActive {
 			continue
@@ -5391,11 +6500,17 @@ func policyManagedCertificatesSummary(policyID string, items []certificates.Cert
 		}
 	}
 	if activeCount == 0 {
-		return template.HTML(`<section class="panel"><h2>Managed certificates</h2><p class="muted">No managed certificates are available yet.</p></section>`)
+		return template.HTML(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed certificates</span><span class="section-heading-meta">0 available</span></h2><p class="muted">No managed certificates are available yet.</p></section>`)
 	}
 	assignmentMap := certificateAssignmentStatusByID(assignments)
+	enabledCount := 0
+	for _, cert := range items {
+		if cert.Status == certificates.StatusActive && assignmentMap[cert.ID] {
+			enabledCount++
+		}
+	}
 	var b strings.Builder
-	b.WriteString(`<section class="panel"><h2>Managed certificates</h2><table><thead><tr><th>Name</th><th>Artifact</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
+	b.WriteString(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed certificates</span><span class="section-heading-meta">` + strconv.Itoa(enabledCount) + ` enabled / ` + strconv.Itoa(activeCount) + ` available</span></h2><table><thead><tr><th>Name</th><th>Artifact</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
 	for _, cert := range items {
 		if cert.Status != certificates.StatusActive {
 			continue
@@ -5427,11 +6542,17 @@ func policyManagedFilesSummary(policyID string, items []managedfiles.ManagedFile
 		}
 	}
 	if activeCount == 0 {
-		return template.HTML(`<section class="panel"><h2>Managed files</h2><p class="muted">No managed files are available yet.</p></section>`)
+		return template.HTML(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed files</span><span class="section-heading-meta">0 available</span></h2><p class="muted">No managed files are available yet.</p></section>`)
 	}
 	assignmentMap := managedFileAssignmentStatusByID(assignments)
+	enabledCount := 0
+	for _, item := range items {
+		if item.Status == managedfiles.StatusActive && assignmentMap[item.ID] {
+			enabledCount++
+		}
+	}
 	var b strings.Builder
-	b.WriteString(`<section class="panel"><h2>Managed files</h2><table><thead><tr><th>Path</th><th>File</th><th>Template</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
+	b.WriteString(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed files</span><span class="section-heading-meta">` + strconv.Itoa(enabledCount) + ` enabled / ` + strconv.Itoa(activeCount) + ` available</span></h2><table><thead><tr><th>Path</th><th>File</th><th>Template</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
 	for _, item := range items {
 		if item.Status != managedfiles.StatusActive {
 			continue
@@ -5461,7 +6582,7 @@ func policySummary(found policy.Policy) template.HTML {
 		kioskAppPackage = "—"
 	}
 	var b strings.Builder
-	b.WriteString(`<h2>Current policy</h2><div class="policy-summary">`)
+	b.WriteString(`<section class="panel"><h2 class="section-heading"><span>Current policy</span><span class="section-heading-meta">` + esc(found.Status) + ` · v` + strconv.Itoa(found.Version) + `</span></h2><div class="policy-summary">`)
 	b.WriteString(summaryTextItem("Created", formatDashboardTime(found.CreatedAt)))
 	b.WriteString(summaryTextItem("Updated", formatDashboardTime(found.UpdatedAt)))
 	b.WriteString(summaryTextItem("ID", found.ID))
@@ -5470,7 +6591,49 @@ func policySummary(found policy.Policy) template.HTML {
 	b.WriteString(summaryHTMLItem("Kiosk mode", template.HTML(boolBadge(found.KioskMode, "enabled", "disabled"))))
 	b.WriteString(summaryTextItem("Kiosk app package", kioskAppPackage))
 	b.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
-	b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">Stored restrictions JSON</div><div class="policy-summary-value">` + pre(found.Restrictions) + `</div></div>`)
+	b.WriteString(`<div class="policy-summary-item policy-summary-wide"><div class="policy-summary-label">Stored restrictions</div><div class="policy-summary-value policy-restrictions-value">` + string(renderPolicyRestrictions(found.Restrictions)) + `</div></div>`)
+	b.WriteString(`</div>`)
+	b.WriteString(string(rawDataDetails("Raw policy data", found)))
+	b.WriteString(`</section>`)
+	return template.HTML(b.String())
+}
+
+func renderPolicyRestrictions(raw json.RawMessage) template.HTML {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return template.HTML(`<span class="structured-muted">No restrictions stored.</span>`)
+	}
+
+	var parsed policyRestrictionPayload
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		return renderStructuredJSON(raw)
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div class="policy-summary">`)
+	b.WriteString(summaryHTMLItem("Allow packages", restrictionPackageList(parsed.AllowPackages)))
+	b.WriteString(summaryHTMLItem("Block packages", restrictionPackageList(parsed.BlockPackages)))
+	b.WriteString(summaryHTMLItem("Suspend packages", restrictionPackageList(parsed.SuspendPackages)))
+	b.WriteString(summaryHTMLItem("Keep screen on", template.HTML(boolBadge(parsed.KioskKeepScreenOn, "enabled", "disabled"))))
+	b.WriteString(summaryHTMLItem("Stay awake while plugged in", template.HTML(boolBadge(parsed.KioskStayAwakeWhilePluggedIn, "enabled", "disabled"))))
+	b.WriteString(summaryHTMLItem("Unlock on boot", template.HTML(boolBadge(parsed.KioskUnlockOnBoot, "enabled", "disabled"))))
+	b.WriteString(summaryHTMLItem("Exit passcode configured", template.HTML(boolBadge(strings.TrimSpace(parsed.KioskExitPasscode) != "", "yes", "no"))))
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func restrictionPackageList(items []string) template.HTML {
+	if len(items) == 0 {
+		return template.HTML(`<span class="structured-muted">None</span>`)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="structured-list">`)
+	for _, item := range items {
+		if strings.TrimSpace(item) == "" {
+			continue
+		}
+		b.WriteString(`<span class="structured-pill">` + esc(item) + `</span>`)
+	}
 	b.WriteString(`</div>`)
 	return template.HTML(b.String())
 }

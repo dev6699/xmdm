@@ -29,7 +29,7 @@ GOCACHE=/tmp/go-build go run ./cmd/dashboard-screenshot-fixture
 Terminal 2:
 
 ```sh
-cd /home/puong/xmdm
+cd xmdm
 npm --prefix docs/tools/admin-dashboard-screenshots run capture
 ```
 
@@ -42,4 +42,3 @@ Optional environment variables:
 - `XMDM_DASHBOARD_URL`, default `http://127.0.0.1:39091`
 - `XMDM_DASHBOARD_USERNAME`, default `admin`
 - `XMDM_DASHBOARD_PASSWORD`, default `admin`
-- `CHROME_EXECUTABLE`, default `/home/puong/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome`

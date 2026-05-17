@@ -38,15 +38,16 @@ The left navigation is grouped by operator task:
 
 The overview is the fleet command center. It combines:
 
-- a status banner with the current fleet health summary
-- quick actions for devices, policies, and the audit log
+- a fleet health banner with active, pending, retired/wiped device counts, active policy count, command acknowledgement summary, and recent audit activity
+- quick actions for managing devices, reviewing policies, and viewing the audit log
 - live health cards for device readiness, policy library, content readiness, command health, and audit activity
-- metric cards for policy coverage, pending enrollment, command acknowledgement rate, and content items
-- a needs-attention panel that surfaces active operational issues
-- a 7-day audit activity chart and command breakdown
+- metric cards for telemetry freshness, pending enrollment, command acknowledgement rate, and content items, each with a compact visual indicator
+- a needs-attention panel that surfaces active operational issues such as pending enrollment, stale active devices, failed commands, and commands awaiting acknowledgement
+- device-focused charts for status distribution, activity timeline, telemetry freshness, and model breakdown
+- command-focused panels for delivery volume over time and delivery status breakdown
 - content library and recent activity panels at the bottom of the page
 
-Use this page to confirm the control plane has data and to jump into the resource-specific pages.
+Use this page to confirm the control plane has current fleet data, spot operational issues quickly, and jump into the resource-specific pages for deeper investigation.
 
 ## 3. Identity
 

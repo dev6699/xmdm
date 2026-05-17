@@ -5,8 +5,7 @@ const base = process.env.XMDM_DASHBOARD_URL || 'http://127.0.0.1:39091';
 const out = path.resolve(__dirname, '../../../docs/assets');
 const username = process.env.XMDM_DASHBOARD_USERNAME || 'admin';
 const password = process.env.XMDM_DASHBOARD_PASSWORD || 'admin';
-const executablePath = process.env.CHROME_EXECUTABLE ||
-  '/home/puong/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome';
+const executablePath = process.env.CHROME_EXECUTABLE || chromium.executablePath();
 
 const shots = [
   ['admin-dashboard-login.png', '/admin/login', false],
@@ -20,16 +19,16 @@ const shots = [
   ['admin-dashboard-policies.png', '/admin/policies', true],
   ['admin-dashboard-policy-detail.png', '/admin/policies/policy-baseline', true],
   ['admin-dashboard-devices.png', '/admin/devices', true],
-  ['admin-dashboard-device-detail.png', '/admin/devices/device-002', true],
-  ['admin-dashboard-device-qr.png', '/admin/devices/device-002', true],
+  ['admin-dashboard-device-detail.png', '/admin/devices/device-008', true],
+  ['admin-dashboard-device-qr.png', '/admin/devices/device-008', true],
   ['admin-dashboard-apps.png', '/admin/apps', true],
   ['admin-dashboard-app-detail.png', '/admin/apps/app-chrome', true],
   ['admin-dashboard-managed-files.png', '/admin/managed-files', true],
-  ['admin-dashboard-managed-file-detail.png', '/admin/managed-files/managed-file-1', true],
+  ['admin-dashboard-managed-file-detail.png', '/admin/managed-files/managed-file-config', true],
   ['admin-dashboard-certificates.png', '/admin/certificates', true],
   ['admin-dashboard-certificate-detail.png', '/admin/certificates/cert-root', true],
   ['admin-dashboard-commands.png', '/admin/commands', true],
-  ['admin-dashboard-command-detail.png', '/admin/commands/cmd-1', true],
+  ['admin-dashboard-command-detail.png', '/admin/commands/cmd-01', true],
   ['admin-dashboard-audit.png', '/admin/audit', true],
 ];
 
