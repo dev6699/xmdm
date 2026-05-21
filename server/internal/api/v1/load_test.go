@@ -374,7 +374,7 @@ func newLoadFixture(tb testing.TB) *loadFixture {
 	}, loadTenantID)
 	adminhttp.Register(apiMux, svc, nil, nil, commandStore, loadTenantID)
 	commandhttp.Register(apiMux, devices, commandStore, loadTenantID)
-	apphttp.Register(apiMux, svc, appsStore, devices, artifactStore, nil, loadTenantID)
+	apphttp.Register(apiMux, svc, appsStore, devices, artifactStore, nil, loadTenantID, "com.xmdm.launcher")
 	certificatehttp.Register(apiMux, svc, devices, certsStore, artifactStore, nil, loadTenantID)
 	managedfilehttp.Register(apiMux, svc, managedFilesStore, devices, artifactStore, loadTenantID)
 	telemetryhttp.Register(apiMux, telemetryStore, loadTenantID)

@@ -20,7 +20,7 @@ import (
 
 const deviceSecretHeader = "X-XMDM-Device-Secret"
 
-func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, devices device.Repository, artifactStore artifacts.Store, auditStore audit.Store, tenantID string) {
+func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, devices device.Repository, artifactStore artifacts.Store, auditStore audit.Store, tenantID, agentAppPackage string) {
 	httpx.RegisterCRUDFor(mux, svc, auditStore, tenantID, httpx.ResourceSpec[apps.AppUpsert, apps.App]{
 		Kind:      "apps",
 		ReadPerm:  auth.PermissionAdminRead,
@@ -44,6 +44,66 @@ func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, device
 				"name":        rec.Name,
 			}
 		},
+	})
+
+	mux.HandleFunc("/enrollment/agent.apk", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if store == nil || artifactStore == nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		appRecord, version, err := latestPublishedAgentAppVersion(r.Context(), store, tenantID, agentAppPackage)
+		if err != nil {
+			if err == httpx.ErrNotFound {
+				http.NotFound(w, r)
+				return
+			}
+			log.Printf("agent app version lookup failed: package=%s err=%v", strings.TrimSpace(agentAppPackage), err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		fullVersion, err := store.GetVersion(r.Context(), tenantID, appRecord.ID, version.ID)
+		if err != nil {
+			if err == httpx.ErrNotFound {
+				http.NotFound(w, r)
+				return
+			}
+			log.Printf("agent app version load failed: app=%s version=%s err=%v", appRecord.ID, version.ID, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if fullVersion.Status != apps.VersionStatusPublished || fullVersion.ArtifactID == nil || fullVersion.Artifact == nil {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := artifactStore.Get(r.Context(), fullVersion.Artifact.StorageKey)
+		if err != nil {
+			log.Printf("agent app artifact fetch failed: app=%s version=%s storage_key=%s err=%v", appRecord.ID, version.ID, fullVersion.Artifact.StorageKey, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		defer body.Close()
+		downloadName := strings.TrimSpace(appRecord.PackageName)
+		if downloadName == "" {
+			downloadName = strings.TrimSpace(appRecord.Name)
+		}
+		if downloadName == "" {
+			downloadName = appRecord.ID
+		}
+		if fullVersion.VersionName != "" {
+			downloadName += "-" + fullVersion.VersionName
+		}
+		downloadName += ".apk"
+		w.Header().Set("Content-Type", fullVersion.Artifact.MimeType)
+		w.Header().Set("Content-Length", strconv.FormatInt(fullVersion.Artifact.SizeBytes, 10))
+		w.Header().Set("X-XMDM-Artifact-Checksum", fullVersion.Artifact.Checksum)
+		w.Header().Set("X-XMDM-Artifact-Size", strconv.FormatInt(fullVersion.Artifact.SizeBytes, 10))
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadName))
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, body)
 	})
 
 	mux.HandleFunc("/devices/{deviceId}/apps/{appId}/versions/{versionId}/artifact", func(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +244,59 @@ func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, device
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})
+}
+
+func latestPublishedAgentAppVersion(ctx context.Context, store apps.Repository, tenantID, agentAppPackage string) (apps.App, apps.Version, error) {
+	packageName := strings.TrimSpace(agentAppPackage)
+	if packageName == "" {
+		packageName = "com.xmdm.launcher"
+	}
+	items, err := store.ListApps(ctx, tenantID)
+	if err != nil {
+		return apps.App{}, apps.Version{}, err
+	}
+	for _, item := range items {
+		if item.Status != apps.StatusActive || item.PackageName != packageName {
+			continue
+		}
+		versions, err := store.ListVersions(ctx, tenantID, item.ID)
+		if err != nil {
+			return apps.App{}, apps.Version{}, err
+		}
+		latest := latestPublishedVersion(versions)
+		if latest == nil || latest.ArtifactID == nil || strings.TrimSpace(latest.Checksum) == "" {
+			return apps.App{}, apps.Version{}, httpx.ErrNotFound
+		}
+		return item, *latest, nil
+	}
+	return apps.App{}, apps.Version{}, httpx.ErrNotFound
+}
+
+func latestPublishedVersion(items []apps.Version) *apps.Version {
+	var latest *apps.Version
+	for i := range items {
+		if items[i].Status != apps.VersionStatusPublished {
+			continue
+		}
+		if latest == nil {
+			latest = &items[i]
+			continue
+		}
+		if items[i].PublishedAt != nil && latest.PublishedAt != nil {
+			if items[i].PublishedAt.After(*latest.PublishedAt) {
+				latest = &items[i]
+			}
+			continue
+		}
+		if items[i].PublishedAt != nil && latest.PublishedAt == nil {
+			latest = &items[i]
+			continue
+		}
+		if items[i].PublishedAt == nil && latest.PublishedAt == nil && items[i].CreatedAt.After(latest.CreatedAt) {
+			latest = &items[i]
+		}
+	}
+	return latest
 }
 
 func decodeAppRequest(r *http.Request) (apps.AppUpsert, error) {

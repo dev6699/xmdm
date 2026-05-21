@@ -40,22 +40,24 @@ func main() {
 	svc := auth.NewService("admin", "admin", time.Hour)
 	mux := http.NewServeMux()
 	adminhttp.RegisterDashboard(mux, svc, adminhttp.DashboardDependencies{
-		Identity:     &identityStore{now: now},
-		Groups:       &groupStore{now: now},
-		Policies:     &policyStore{now: now},
-		Devices:      &deviceStore{now: now, policyID: policyID},
-		Apps:         &appStore{now: now, artifact: fileArtifact},
-		Files:        &fileStore{now: now, artifact: fileArtifact},
-		ManagedFiles: &managedFileStore{now: now, artifact: fileArtifact},
-		Certificates: &certificateStore{now: now, artifact: certArtifact},
-		Commands:     &commandStore{now: now},
-		Logs:         &logStore{now: now},
-		DeviceInfo:   &deviceInfoStore{now: now},
-		Audit:        &auditStore{now: now},
-		Enrollment:   &enrollmentStore{now: now},
-		Runtime:      enrollment.RuntimeSnapshot{},
-		Artifacts:    artifactStore{},
-		TenantID:     tenantID,
+		Identity:        &identityStore{now: now},
+		Groups:          &groupStore{now: now},
+		Policies:        &policyStore{now: now},
+		Devices:         &deviceStore{now: now, policyID: policyID},
+		Apps:            &appStore{now: now, artifact: fileArtifact},
+		Files:           &fileStore{now: now, artifact: fileArtifact},
+		ManagedFiles:    &managedFileStore{now: now, artifact: fileArtifact},
+		Certificates:    &certificateStore{now: now, artifact: certArtifact},
+		Commands:        &commandStore{now: now},
+		Logs:            &logStore{now: now},
+		DeviceInfo:      &deviceInfoStore{now: now},
+		Audit:           &auditStore{now: now},
+		Enrollment:      &enrollmentStore{now: now},
+		Runtime:         enrollment.RuntimeSnapshot{},
+		Artifacts:       artifactStore{},
+		ServerPublicURL: "http://127.0.0.1:39091",
+		AgentAppPackage: "com.xmdm.agent",
+		TenantID:        tenantID,
 	})
 	log.Fatal(http.ListenAndServe("127.0.0.1:39091", mux))
 }
@@ -275,12 +277,21 @@ func (s *appStore) GetApp(_ context.Context, _ string, id string) (apps.App, err
 	}
 	return apps.App{}, httpx.ErrNotFound
 }
-func (s *appStore) ListVersions(context.Context, string, string) ([]apps.Version, error) {
+func (s *appStore) ListVersions(_ context.Context, _ string, appID string) ([]apps.Version, error) {
 	artifactID := s.artifact.ID
-	return []apps.Version{
-		{ID: "version-100", PublishedAt: timePtr(s.now.AddDate(0, 0, -8)), TenantID: tenantID, AppID: "app-chrome", Status: apps.VersionStatusPublished, VersionName: "1.0.0", VersionCode: 100, ArtifactID: &artifactID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -8)},
-		{ID: "version-120", PublishedAt: timePtr(s.now.AddDate(0, 0, -2)), TenantID: tenantID, AppID: "app-chrome", Status: apps.VersionStatusPublished, VersionName: "1.2.0", VersionCode: 120, ArtifactID: &artifactID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -2)},
-	}, nil
+	switch appID {
+	case "app-chrome":
+		return []apps.Version{
+			{ID: "version-100", PublishedAt: timePtr(s.now.AddDate(0, 0, -8)), TenantID: tenantID, AppID: "app-chrome", Status: apps.VersionStatusPublished, VersionName: "1.0.0", VersionCode: 100, ArtifactID: &artifactID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -8)},
+			{ID: "version-120", PublishedAt: timePtr(s.now.AddDate(0, 0, -2)), TenantID: tenantID, AppID: "app-chrome", Status: apps.VersionStatusPublished, VersionName: "1.2.0", VersionCode: 120, ArtifactID: &artifactID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -2)},
+		}, nil
+	case "app-agent":
+		return []apps.Version{
+			{ID: "version-agent", PublishedAt: timePtr(s.now.AddDate(0, 0, -1)), TenantID: tenantID, AppID: "app-agent", Status: apps.VersionStatusPublished, VersionName: "0.1.0", VersionCode: 1, ArtifactID: &artifactID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -1)},
+		}, nil
+	default:
+		return nil, nil
+	}
 }
 func (s *appStore) GetVersion(context.Context, string, string, string) (apps.Version, error) {
 	return apps.Version{}, nil

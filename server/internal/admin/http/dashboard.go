@@ -43,22 +43,24 @@ import (
 )
 
 type DashboardDependencies struct {
-	Identity     identity.Repository
-	Apps         apps.Repository
-	Files        files.Repository
-	ManagedFiles managedfiles.Repository
-	Logs         logsRepository
-	Commands     commands.Repository
-	DeviceInfo   deviceInfoRepository
-	Certificates certificates.Repository
-	Artifacts    artifacts.Store
-	Groups       group.Repository
-	Policies     policy.Repository
-	Devices      device.Repository
-	Enrollment   enrollment.Repository
-	Runtime      enrollment.RuntimeSnapshot
-	Audit        audit.Store
-	TenantID     string
+	Identity        identity.Repository
+	Apps            apps.Repository
+	Files           files.Repository
+	ManagedFiles    managedfiles.Repository
+	Logs            logsRepository
+	Commands        commands.Repository
+	DeviceInfo      deviceInfoRepository
+	Certificates    certificates.Repository
+	Artifacts       artifacts.Store
+	Groups          group.Repository
+	Policies        policy.Repository
+	Devices         device.Repository
+	Enrollment      enrollment.Repository
+	Runtime         enrollment.RuntimeSnapshot
+	ServerPublicURL string
+	AgentAppPackage string
+	Audit           audit.Store
+	TenantID        string
 }
 
 type logsRepository interface {
@@ -4121,7 +4123,11 @@ func (d *dashboard) deviceEnrollmentQR(w http.ResponseWriter, r *http.Request) {
 		d.renderPageError(w, r, session, "Device Detail", fmt.Errorf("device must be pending"))
 		return
 	}
-	state := deviceEnrollmentQRState(firstNonEmpty(found.ID, found.Name))
+	state, err := d.deviceEnrollmentQRState(r.Context(), firstNonEmpty(found.ID, found.Name))
+	if err != nil {
+		d.renderPageError(w, r, session, "Device Detail", err)
+		return
+	}
 	result, err := d.generateEnrollmentQR(r.Context(), state)
 	if err != nil {
 		d.renderPageError(w, r, session, "Device Detail", err)
@@ -6828,22 +6834,71 @@ type enrollmentQRResult struct {
 }
 
 const (
-	deviceEnrollmentServerURL       = "https://mdm.example.com"
-	deviceEnrollmentTTL             = "2h"
-	deviceEnrollmentComponentName   = "com.xmdm.launcher/.AdminReceiver"
-	deviceEnrollmentPackageURL      = "https://mdm.example.com/agent.apk"
-	deviceEnrollmentPackageChecksum = "abc123"
+	deviceEnrollmentTTL        = "2h"
+	defaultAgentAppPackage     = "com.xmdm.launcher"
+	agentEnrollmentPackagePath = "/api/v1/enrollment/agent.apk"
 )
 
-func deviceEnrollmentQRState(deviceID string) enrollmentQRFormState {
-	return enrollmentQRFormState{
-		ServerURL:       deviceEnrollmentServerURL,
-		TTL:             deviceEnrollmentTTL,
-		ComponentName:   deviceEnrollmentComponentName,
-		PackageURL:      deviceEnrollmentPackageURL,
-		PackageChecksum: deviceEnrollmentPackageChecksum,
-		DeviceID:        deviceID,
+func (d *dashboard) deviceEnrollmentQRState(ctx context.Context, deviceID string) (enrollmentQRFormState, error) {
+	serverURL, err := normalizedPublicServerURL(d.deps.ServerPublicURL)
+	if err != nil {
+		return enrollmentQRFormState{}, err
 	}
+	appPackage := firstNonEmpty(strings.TrimSpace(d.deps.AgentAppPackage), defaultAgentAppPackage)
+	appRecord, latest, err := latestPublishedAgentAppVersion(ctx, d.deps.Apps, d.deps.TenantID, appPackage)
+	if err != nil {
+		if err == httpx.ErrNotFound {
+			return enrollmentQRFormState{}, fmt.Errorf("agent managed app %q must have a latest published APK version", appPackage)
+		}
+		return enrollmentQRFormState{}, err
+	}
+	packageURL := strings.TrimRight(serverURL, "/") + agentEnrollmentPackagePath
+	return enrollmentQRFormState{
+		ServerURL:       serverURL,
+		TTL:             deviceEnrollmentTTL,
+		ComponentName:   appRecord.PackageName + "/.AdminReceiver",
+		PackageURL:      packageURL,
+		PackageChecksum: latest.Checksum,
+		DeviceID:        deviceID,
+	}, nil
+}
+
+func normalizedPublicServerURL(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", fmt.Errorf("server public url is required")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("invalid server public url")
+	}
+	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func latestPublishedAgentAppVersion(ctx context.Context, store apps.Repository, tenantID, agentAppPackage string) (apps.App, apps.Version, error) {
+	if store == nil {
+		return apps.App{}, apps.Version{}, httpx.ErrNotFound
+	}
+	packageName := firstNonEmpty(strings.TrimSpace(agentAppPackage), defaultAgentAppPackage)
+	items, err := store.ListApps(ctx, tenantID)
+	if err != nil {
+		return apps.App{}, apps.Version{}, err
+	}
+	for _, item := range items {
+		if item.Status != apps.StatusActive || item.PackageName != packageName {
+			continue
+		}
+		versions, err := store.ListVersions(ctx, tenantID, item.ID)
+		if err != nil {
+			return apps.App{}, apps.Version{}, err
+		}
+		latest := appLatestPublishedVersion(versions)
+		if latest == nil || latest.ArtifactID == nil || strings.TrimSpace(latest.Checksum) == "" {
+			return apps.App{}, apps.Version{}, httpx.ErrNotFound
+		}
+		return item, *latest, nil
+	}
+	return apps.App{}, apps.Version{}, httpx.ErrNotFound
 }
 
 func deviceEnrollmentQRForm(deviceID string) formData {

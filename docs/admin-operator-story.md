@@ -108,6 +108,8 @@ xmdm --format json apps versions publish <app-id> --version-name 1.0.0 --version
 xmdm --format json certificates create --name MDM Root --storage-key certs/mdm-root.pem --source ./mdm-root.pem --mime-type application/x-pem-file
 ```
 
+For dashboard QR enrollment, publish the XMDM agent APK as the managed app whose package matches `device.agentAppPackage` in the server config. The default package is `com.xmdm.launcher`.
+
 ### 5. Enroll a device
 
 Enrollment is the moment a device becomes part of the managed fleet.
@@ -120,8 +122,8 @@ Relevant commands:
 ```sh
 xmdm --format json enrollment tokens issue --ttl 2h
 xmdm --format json enrollment tokens validate <token>
-xmdm --format json enrollment qr json --package-url https://cdn.example/launcher.apk --package-checksum abc123
-xmdm --format json enrollment qr png --package-url https://cdn.example/launcher.apk --package-checksum abc123 --output enrollment.png
+xmdm --format json enrollment qr json --package-url https://mdm.example/api/v1/enrollment/agent.apk --package-checksum <latest-agent-checksum>
+xmdm --format json enrollment qr png --package-url https://mdm.example/api/v1/enrollment/agent.apk --package-checksum <latest-agent-checksum> --output enrollment.png
 ```
 
 ### 6. Verify device health

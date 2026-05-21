@@ -42,25 +42,27 @@ import (
 )
 
 type Dependencies struct {
-	Identity      identity.Repository
-	Apps          apps.Repository
-	Files         files.Repository
-	ManagedFiles  managedfiles.Repository
-	Logs          logs.Repository
-	Commands      commands.Repository
-	DeviceInfo    deviceinfo.Repository
-	Certificates  certificates.Repository
-	Artifacts     artifacts.Store
-	Groups        group.Repository
-	Policies      policy.Repository
-	Devices       device.Repository
-	Enrollment    enrollment.Repository
-	Telemetry     telemetry.Repository
-	Audit         audit.Store
-	Push          push.Publisher
-	Runtime       enrollment.RuntimeSnapshot
-	PluginManager *plugins.Manager
-	TenantID      string
+	Identity        identity.Repository
+	Apps            apps.Repository
+	Files           files.Repository
+	ManagedFiles    managedfiles.Repository
+	Logs            logs.Repository
+	Commands        commands.Repository
+	DeviceInfo      deviceinfo.Repository
+	Certificates    certificates.Repository
+	Artifacts       artifacts.Store
+	Groups          group.Repository
+	Policies        policy.Repository
+	Devices         device.Repository
+	Enrollment      enrollment.Repository
+	Telemetry       telemetry.Repository
+	Audit           audit.Store
+	Push            push.Publisher
+	Runtime         enrollment.RuntimeSnapshot
+	ServerPublicURL string
+	AgentAppPackage string
+	PluginManager   *plugins.Manager
+	TenantID        string
 }
 
 // NewMux builds the versioned HTTP surface under /api/v1.
@@ -68,22 +70,24 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
 	adminhttp.RegisterDashboard(mux, svc, adminhttp.DashboardDependencies{
-		Identity:     deps.Identity,
-		Apps:         deps.Apps,
-		Files:        deps.Files,
-		ManagedFiles: deps.ManagedFiles,
-		Logs:         deps.Logs,
-		Commands:     deps.Commands,
-		DeviceInfo:   deps.DeviceInfo,
-		Certificates: deps.Certificates,
-		Artifacts:    deps.Artifacts,
-		Groups:       deps.Groups,
-		Policies:     deps.Policies,
-		Devices:      deps.Devices,
-		Enrollment:   deps.Enrollment,
-		Runtime:      deps.Runtime,
-		Audit:        deps.Audit,
-		TenantID:     deps.TenantID,
+		Identity:        deps.Identity,
+		Apps:            deps.Apps,
+		Files:           deps.Files,
+		ManagedFiles:    deps.ManagedFiles,
+		Logs:            deps.Logs,
+		Commands:        deps.Commands,
+		DeviceInfo:      deps.DeviceInfo,
+		Certificates:    deps.Certificates,
+		Artifacts:       deps.Artifacts,
+		Groups:          deps.Groups,
+		Policies:        deps.Policies,
+		Devices:         deps.Devices,
+		Enrollment:      deps.Enrollment,
+		Runtime:         deps.Runtime,
+		ServerPublicURL: deps.ServerPublicURL,
+		AgentAppPackage: deps.AgentAppPackage,
+		Audit:           deps.Audit,
+		TenantID:        deps.TenantID,
 	})
 	enrollmenthttp.Register(apiMux, svc, deps.Devices, deps.Enrollment, deps.Apps, deps.ManagedFiles, deps.Artifacts, deps.Certificates, deps.Policies, deps.Runtime, deps.TenantID)
 	telemetryhttp.Register(apiMux, deps.Telemetry, deps.TenantID)
@@ -91,7 +95,7 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	deviceinfohttp.Register(apiMux, svc, deps.Devices, deps.DeviceInfo, deps.TenantID)
 	adminhttp.Register(apiMux, svc, deps.PluginManager, deps.Audit, deps.Commands, deps.TenantID)
 	commandhttp.Register(apiMux, deps.Devices, deps.Commands, deps.TenantID)
-	apphttp.Register(apiMux, svc, deps.Apps, deps.Devices, deps.Artifacts, deps.Audit, deps.TenantID)
+	apphttp.Register(apiMux, svc, deps.Apps, deps.Devices, deps.Artifacts, deps.Audit, deps.TenantID, deps.AgentAppPackage)
 	filehttp.Register(apiMux, svc, deps.Files, deps.Artifacts, deps.Audit, deps.TenantID)
 	managedfilehttp.Register(apiMux, svc, deps.ManagedFiles, deps.Devices, deps.Artifacts, deps.TenantID)
 	certificatehttp.Register(apiMux, svc, deps.Devices, deps.Certificates, deps.Artifacts, deps.Audit, deps.TenantID)

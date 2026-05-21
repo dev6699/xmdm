@@ -1406,9 +1406,25 @@ func TestRegisterDashboardDeviceDetailEnrollmentQRDefaults(t *testing.T) {
 		t.Fatalf("login: %v", err)
 	}
 	mux := http.NewServeMux()
+	oldPublishedAt := time.Date(2026, 5, 12, 11, 31, 0, 0, time.UTC)
+	latestPublishedAt := time.Date(2026, 5, 13, 11, 31, 0, 0, time.UTC)
+	agentChecksum := "sha256-agent-latest"
 	RegisterDashboard(mux, svc, DashboardDependencies{
 		Devices: &fakeDashboardDeviceStore{
 			devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusPending, CreatedAt: time.Date(2026, 5, 13, 11, 31, 0, 0, time.UTC)}, Name: "warehouse-tablet-001", PolicyID: strPtr("policy-1")}},
+		},
+		Apps: &fakeDashboardAppStore{
+			apps: []apps.App{
+				{RecordBase: apps.RecordBase{ID: "app-agent", TenantID: "tenant-1", Status: apps.StatusActive}, PackageName: "com.xmdm.launcher", Name: "XMDM Agent"},
+				{RecordBase: apps.RecordBase{ID: "app-other", TenantID: "tenant-1", Status: apps.StatusActive}, PackageName: "com.example.other", Name: "Other"},
+			},
+			versions: map[string][]apps.Version{
+				"app-agent": {
+					{ID: "version-old", TenantID: "tenant-1", AppID: "app-agent", Status: apps.VersionStatusPublished, VersionName: "0.1.0", VersionCode: 1, ArtifactID: strPtr("artifact-old"), Checksum: "sha256-agent-old", PublishedAt: &oldPublishedAt, CreatedAt: oldPublishedAt},
+					{ID: "version-draft", TenantID: "tenant-1", AppID: "app-agent", Status: apps.VersionStatusUploaded, VersionName: "0.3.0", VersionCode: 3, ArtifactID: strPtr("artifact-draft"), Checksum: "sha256-agent-draft", CreatedAt: latestPublishedAt.Add(time.Hour)},
+					{ID: "version-latest", TenantID: "tenant-1", AppID: "app-agent", Status: apps.VersionStatusPublished, VersionName: "0.2.0", VersionCode: 2, ArtifactID: strPtr("artifact-latest"), Checksum: agentChecksum, PublishedAt: &latestPublishedAt, CreatedAt: latestPublishedAt},
+				},
+			},
 		},
 		Policies: &fakeDashboardPolicyStore{
 			policies: []policy.Policy{{RecordBase: policy.RecordBase{ID: "policy-1", TenantID: "tenant-1", Status: "active"}, Name: "Default policy"}},
@@ -1424,7 +1440,9 @@ func TestRegisterDashboardDeviceDetailEnrollmentQRDefaults(t *testing.T) {
 				Secret: "generated-secret",
 			},
 		},
-		TenantID: "tenant-1",
+		ServerPublicURL: "https://mdm.example.com",
+		AgentAppPackage: "com.xmdm.launcher",
+		TenantID:        "tenant-1",
 	})
 
 	getReq := httptest.NewRequest(http.MethodGet, "/admin/devices/device-1", nil)
@@ -1459,8 +1477,13 @@ func TestRegisterDashboardDeviceDetailEnrollmentQRDefaults(t *testing.T) {
 	if !strings.Contains(postRR.Body.String(), "com.xmdm.DEVICE_ID_USE") || !strings.Contains(postRR.Body.String(), "serial") {
 		t.Fatalf("qr json should default device id use to serial: %s", postRR.Body.String())
 	}
-	if !strings.Contains(postRR.Body.String(), "https://mdm.example.com") || !strings.Contains(postRR.Body.String(), "abc123") {
-		t.Fatalf("qr json should include hardcoded provisioning defaults: %s", postRR.Body.String())
+	for _, field := range []string{"https://mdm.example.com", "https://mdm.example.com/api/v1/enrollment/agent.apk", agentChecksum, "com.xmdm.launcher/.AdminReceiver"} {
+		if !strings.Contains(postRR.Body.String(), field) {
+			t.Fatalf("qr json should include managed agent provisioning field %q: %s", field, postRR.Body.String())
+		}
+	}
+	if strings.Contains(postRR.Body.String(), "abc123") || strings.Contains(postRR.Body.String(), "https://mdm.example.com/agent.apk") {
+		t.Fatalf("qr json should not include placeholder provisioning defaults: %s", postRR.Body.String())
 	}
 	if strings.Contains(postRR.Body.String(), "SERVER_PROJECT") || strings.Contains(postRR.Body.String(), "CUSTOMER") || strings.Contains(postRR.Body.String(), "GROUP") {
 		t.Fatalf("qr json should not include removed optional bootstrap fields: %s", postRR.Body.String())
@@ -1472,6 +1495,109 @@ func TestRegisterDashboardDeviceDetailEnrollmentQRDefaults(t *testing.T) {
 	mux.ServeHTTP(oldRR, oldReq)
 	if oldRR.Code != http.StatusNotFound {
 		t.Fatalf("old enrollment page should be removed, got %d body=%s", oldRR.Code, oldRR.Body.String())
+	}
+}
+
+func TestRegisterDashboardDeviceDetailEnrollmentQRRequiresDynamicDefaults(t *testing.T) {
+	cases := []struct {
+		name            string
+		serverPublicURL string
+		appStore        *fakeDashboardAppStore
+		wantError       string
+	}{
+		{
+			name:            "missing public url",
+			serverPublicURL: "",
+			appStore:        dashboardAgentAppStore("sha256-agent", apps.VersionStatusPublished, strPtr("artifact-agent")),
+			wantError:       "server public url is required",
+		},
+		{
+			name:            "missing agent app",
+			serverPublicURL: "https://mdm.example.com",
+			appStore: &fakeDashboardAppStore{
+				apps: []apps.App{{RecordBase: apps.RecordBase{ID: "app-other", TenantID: "tenant-1", Status: apps.StatusActive}, PackageName: "com.example.other", Name: "Other"}},
+			},
+			wantError: `agent managed app &#34;com.xmdm.launcher&#34; must have a latest published APK version`,
+		},
+		{
+			name:            "missing published artifact",
+			serverPublicURL: "https://mdm.example.com",
+			appStore:        dashboardAgentAppStore("sha256-agent", apps.VersionStatusUploaded, strPtr("artifact-agent")),
+			wantError:       `agent managed app &#34;com.xmdm.launcher&#34; must have a latest published APK version`,
+		},
+		{
+			name:            "missing artifact",
+			serverPublicURL: "https://mdm.example.com",
+			appStore:        dashboardAgentAppStore("sha256-agent", apps.VersionStatusPublished, nil),
+			wantError:       `agent managed app &#34;com.xmdm.launcher&#34; must have a latest published APK version`,
+		},
+		{
+			name:            "missing checksum",
+			serverPublicURL: "https://mdm.example.com",
+			appStore:        dashboardAgentAppStore("", apps.VersionStatusPublished, strPtr("artifact-agent")),
+			wantError:       `agent managed app &#34;com.xmdm.launcher&#34; must have a latest published APK version`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := auth.NewService("admin", "secret", time.Hour)
+			session, err := svc.Login("admin", "secret")
+			if err != nil {
+				t.Fatalf("login: %v", err)
+			}
+			mux := http.NewServeMux()
+			RegisterDashboard(mux, svc, DashboardDependencies{
+				Devices: &fakeDashboardDeviceStore{
+					devices: []device.Device{{RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusPending}, Name: "warehouse-tablet-001"}},
+				},
+				Apps: tc.appStore,
+				Enrollment: &fakeDashboardEnrollmentStore{
+					issued: enrollment.IssuedToken{
+						Token:  enrollment.Token{ID: "token-generated", TenantID: "tenant-1", Status: enrollment.TokenStatusIssued, ExpiresAt: time.Date(2026, 5, 13, 13, 32, 0, 0, time.UTC)},
+						Secret: "generated-secret",
+					},
+				},
+				ServerPublicURL: tc.serverPublicURL,
+				AgentAppPackage: "com.xmdm.launcher",
+				TenantID:        "tenant-1",
+			})
+
+			getReq := httptest.NewRequest(http.MethodGet, "/admin/devices/device-1", nil)
+			getReq.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+			getRR := httptest.NewRecorder()
+			mux.ServeHTTP(getRR, getReq)
+			csrf := mustGetCSRFCookie(t, getRR.Result())
+
+			form := strings.NewReader("csrfToken=" + csrf)
+			postReq := httptest.NewRequest(http.MethodPost, "/admin/devices/device-1/enrollment/qr", form)
+			postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			postReq.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+			postReq.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrf})
+			postRR := httptest.NewRecorder()
+			mux.ServeHTTP(postRR, postReq)
+
+			if postRR.Code != http.StatusOK {
+				t.Fatalf("qr response status = %d body=%s", postRR.Code, postRR.Body.String())
+			}
+			if !strings.Contains(postRR.Body.String(), tc.wantError) {
+				t.Fatalf("qr response should show error %q: %s", tc.wantError, postRR.Body.String())
+			}
+			if strings.Contains(postRR.Body.String(), "QR JSON") {
+				t.Fatalf("qr response should not generate output when defaults are unavailable: %s", postRR.Body.String())
+			}
+		})
+	}
+}
+
+func dashboardAgentAppStore(checksumValue, status string, artifactID *string) *fakeDashboardAppStore {
+	publishedAt := time.Date(2026, 5, 13, 11, 31, 0, 0, time.UTC)
+	return &fakeDashboardAppStore{
+		apps: []apps.App{{RecordBase: apps.RecordBase{ID: "app-agent", TenantID: "tenant-1", Status: apps.StatusActive}, PackageName: "com.xmdm.launcher", Name: "XMDM Agent"}},
+		versions: map[string][]apps.Version{
+			"app-agent": {
+				{ID: "version-agent", TenantID: "tenant-1", AppID: "app-agent", Status: status, VersionName: "0.1.0", VersionCode: 1, ArtifactID: artifactID, Checksum: checksumValue, PublishedAt: &publishedAt, CreatedAt: publishedAt},
+			},
+		},
 	}
 }
 

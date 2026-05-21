@@ -77,8 +77,10 @@ func NewDeps(cfg *config.Config) Dependencies {
 			CommandPollIntervalMs: cfg.Device.CommandPollInterval.Milliseconds(),
 			ConfigSyncIntervalMs:  cfg.Device.ConfigSyncInterval.Milliseconds(),
 		},
-		TenantID:      bootstrap.SeedTenantID,
-		PluginManager: plugins.Disabled(),
+		ServerPublicURL: cfg.Server.PublicURL,
+		AgentAppPackage: cfg.Device.AgentAppPackage,
+		TenantID:        bootstrap.SeedTenantID,
+		PluginManager:   plugins.Disabled(),
 	}
 }
 

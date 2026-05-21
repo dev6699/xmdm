@@ -152,6 +152,8 @@ Inputs:
 Runtime effect:
 - `POST /api/v1/enrollment/qr/json`
 
+Dashboard QR generation supplies these package values from the server-side managed XMDM agent app. CLI users can pass the same provisioning APK URL, `/api/v1/enrollment/agent.apk`, plus the latest published agent checksum.
+
 Example Output:
 - Android provisioning JSON under `data.item`
 
@@ -164,7 +166,7 @@ Example Output:
   "data": {
     "item": {
       "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.example/.AdminReceiver",
-      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://cdn.example/launcher.apk",
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://mdm.example/api/v1/enrollment/agent.apk",
       "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "abc123"
     }
   },
@@ -192,13 +194,13 @@ Example Output:
 Example Input:
 
 ```sh
-xmdm enrollment qr png --package-url https://cdn.example/launcher.apk --package-checksum abc123 --output enrollment.png
+xmdm enrollment qr png --package-url https://mdm.example/api/v1/enrollment/agent.apk --package-checksum <latest-agent-checksum> --output enrollment.png
 ```
 
 Example Inputs:
 
 ```sh
 xmdm enrollment tokens issue --ttl 2h
-xmdm enrollment qr json --package-url https://cdn.example/launcher.apk --package-checksum abc123
-xmdm enrollment qr png --package-url https://cdn.example/launcher.apk --package-checksum abc123 --output enrollment.png
+xmdm enrollment qr json --package-url https://mdm.example/api/v1/enrollment/agent.apk --package-checksum <latest-agent-checksum>
+xmdm enrollment qr png --package-url https://mdm.example/api/v1/enrollment/agent.apk --package-checksum <latest-agent-checksum> --output enrollment.png
 ```

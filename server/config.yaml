@@ -1,5 +1,6 @@
 server:
   address: ":8080"
+  publicURL: "http://127.0.0.1:8080"
   sessionTTL: 24h
 
 postgres:
@@ -22,6 +23,7 @@ mqtt:
 device:
   commandPollInterval: 30s
   configSyncInterval: 15m
+  agentAppPackage: "com.xmdm.launcher"
 
 objectStorage:
   endpoint: "http://127.0.0.1:8333"

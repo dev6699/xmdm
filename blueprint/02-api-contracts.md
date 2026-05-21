@@ -173,7 +173,7 @@
 ```json
 {
   "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.xmdm.launcher/.AdminReceiver",
-  "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://cdn.example/launcher.apk",
+  "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://mdm.example/api/v1/enrollment/agent.apk",
   "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "base64sha256",
   "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
   "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
@@ -186,6 +186,8 @@
   }
 }
 ```
+
+The dashboard-generated QR payload derives `com.xmdm.BASE_URL` from `server.publicURL` and derives the DPC package URL/checksum from the latest published version of the configured agent managed app. The default agent package is `com.xmdm.launcher` and can be overridden with `device.agentAppPackage`.
 
 ## Contract Decisions
 

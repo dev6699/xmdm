@@ -47,7 +47,7 @@ func TestRegisterDeviceArtifactDownload(t *testing.T) {
 				MimeType:   "application/vnd.android.package-archive",
 			},
 		},
-	}, &fakeDeviceStore{}, &fakeArtifactStore{content: artifactBytes}, nil, "tenant-1")
+	}, &fakeDeviceStore{}, &fakeArtifactStore{content: artifactBytes}, nil, "tenant-1", "com.xmdm.launcher")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/apps/app-1/versions/version-1/artifact", nil)
 	req.Header.Set(deviceSecretHeader, "device-secret")
@@ -76,12 +76,92 @@ func TestRegisterDeviceArtifactDownload(t *testing.T) {
 	}
 }
 
+func TestRegisterEnrollmentAgentAPKDownloadUsesLatestPublishedVersion(t *testing.T) {
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionAdminRead})
+	artifactBytes := []byte("latest-agent-apk")
+	olderPublishedAt := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	latestPublishedAt := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, &fakeAppStore{
+		apps: []apps.App{
+			{RecordBase: apps.RecordBase{ID: "app-other", TenantID: "tenant-1", Status: apps.StatusActive}, PackageName: "com.example.other", Name: "Other"},
+			{RecordBase: apps.RecordBase{ID: "app-agent", TenantID: "tenant-1", Status: apps.StatusActive}, PackageName: "com.xmdm.launcher", Name: "XMDM Agent"},
+		},
+		versions: map[string][]apps.Version{
+			"app-agent": {
+				{ID: "agent-old", TenantID: "tenant-1", AppID: "app-agent", Status: apps.VersionStatusPublished, VersionName: "0.1.0", VersionCode: 1, ArtifactID: strPtr("artifact-old"), Checksum: "checksum-old", PublishedAt: &olderPublishedAt, CreatedAt: olderPublishedAt},
+				{ID: "agent-draft", TenantID: "tenant-1", AppID: "app-agent", Status: apps.VersionStatusUploaded, VersionName: "0.3.0", VersionCode: 3, ArtifactID: strPtr("artifact-draft"), Checksum: "checksum-draft", CreatedAt: latestPublishedAt.Add(time.Hour)},
+				{ID: "agent-latest", TenantID: "tenant-1", AppID: "app-agent", Status: apps.VersionStatusPublished, VersionName: "0.2.0", VersionCode: 2, ArtifactID: strPtr("artifact-latest"), Checksum: "checksum-latest", PublishedAt: &latestPublishedAt, CreatedAt: latestPublishedAt},
+			},
+		},
+		version: apps.Version{
+			ID:          "agent-latest",
+			TenantID:    "tenant-1",
+			AppID:       "app-agent",
+			Status:      apps.VersionStatusPublished,
+			VersionName: "0.2.0",
+			VersionCode: 2,
+			ArtifactID:  strPtr("artifact-latest"),
+			Artifact: &files.Artifact{
+				RecordBase: files.RecordBase{ID: "artifact-latest", TenantID: "tenant-1", Status: files.StatusActive},
+				StorageKey: "artifacts/agent-latest.apk",
+				Checksum:   "checksum-latest",
+				SizeBytes:  int64(len(artifactBytes)),
+				MimeType:   "application/vnd.android.package-archive",
+			},
+			Checksum:    "checksum-latest",
+			PublishedAt: &latestPublishedAt,
+			CreatedAt:   latestPublishedAt,
+		},
+	}, &fakeDeviceStore{}, &fakeArtifactStore{content: artifactBytes}, nil, "tenant-1", "com.xmdm.launcher")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/enrollment/agent.apk", nil)
+	res := httptest.NewRecorder()
+
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected ok, got %d body=%s", res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("Content-Type"); got != "application/vnd.android.package-archive" {
+		t.Fatalf("unexpected content type: %q", got)
+	}
+	if got := res.Header().Get("X-XMDM-Artifact-Checksum"); got != "checksum-latest" {
+		t.Fatalf("unexpected checksum header: %q", got)
+	}
+	if got := res.Header().Get("Content-Disposition"); got != `attachment; filename="com.xmdm.launcher-0.2.0.apk"` {
+		t.Fatalf("unexpected disposition: %q", got)
+	}
+	if !bytes.Equal(res.Body.Bytes(), artifactBytes) {
+		t.Fatalf("unexpected body: %q", res.Body.Bytes())
+	}
+}
+
+func TestRegisterEnrollmentAgentAPKDownloadRejectsMissingAgent(t *testing.T) {
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionAdminRead})
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, &fakeAppStore{
+		apps: []apps.App{{RecordBase: apps.RecordBase{ID: "app-other", TenantID: "tenant-1", Status: apps.StatusActive}, PackageName: "com.example.other", Name: "Other"}},
+	}, &fakeDeviceStore{}, &fakeArtifactStore{}, nil, "tenant-1", "com.xmdm.launcher")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/enrollment/agent.apk", nil)
+	res := httptest.NewRecorder()
+
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("expected not found, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
 type fakeAppStore struct {
-	version apps.Version
+	apps     []apps.App
+	versions map[string][]apps.Version
+	version  apps.Version
 }
 
 func (s *fakeAppStore) ListApps(context.Context, string) ([]apps.App, error) {
-	return nil, nil
+	return append([]apps.App(nil), s.apps...), nil
 }
 
 func (s *fakeAppStore) GetApp(context.Context, string, string) (apps.App, error) {
@@ -100,8 +180,8 @@ func (s *fakeAppStore) RetireApp(context.Context, string, string) (apps.App, err
 	return apps.App{}, nil
 }
 
-func (s *fakeAppStore) ListVersions(context.Context, string, string) ([]apps.Version, error) {
-	return nil, nil
+func (s *fakeAppStore) ListVersions(_ context.Context, _ string, appID string) ([]apps.Version, error) {
+	return append([]apps.Version(nil), s.versions[appID]...), nil
 }
 
 func (s *fakeAppStore) GetVersion(context.Context, string, string, string) (apps.Version, error) {

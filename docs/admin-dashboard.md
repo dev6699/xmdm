@@ -215,6 +215,7 @@ Open the app name to reach the detail page.
 The dashboard derives the artifact storage key, checksum, and file record from the uploaded APK on the server.
 The server derives the app version name from the version code for this flow, so operators only need to supply the code.
 The dashboard always publishes the new APK as another version for that app instead of creating a duplicate app row.
+Device enrollment QR generation uses the latest published version of the configured agent app package, default `com.xmdm.launcher`, and serves it from `/api/v1/enrollment/agent.apk`.
 
 #### App Detail
 

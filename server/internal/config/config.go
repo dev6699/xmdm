@@ -20,6 +20,7 @@ type Config struct {
 
 type ServerConfig struct {
 	Address    string        `yaml:"address" env:"XMDM_ADDR"`
+	PublicURL  string        `yaml:"publicURL" env:"XMDM_SERVER_PUBLIC_URL"`
 	Port       string        `yaml:"port"`
 	SessionTTL time.Duration `yaml:"sessionTTL" env:"XMDM_SESSION_TTL"`
 }
@@ -46,6 +47,7 @@ type MQTTConfig struct {
 type DeviceConfig struct {
 	CommandPollInterval time.Duration `yaml:"commandPollInterval" env:"XMDM_DEVICE_COMMAND_POLL_INTERVAL"`
 	ConfigSyncInterval  time.Duration `yaml:"configSyncInterval" env:"XMDM_DEVICE_CONFIG_SYNC_INTERVAL"`
+	AgentAppPackage     string        `yaml:"agentAppPackage" env:"XMDM_DEVICE_AGENT_APP_PACKAGE"`
 }
 
 type ObjectStoreConfig struct {
@@ -66,6 +68,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	cfg := &Config{
 		Server: ServerConfig{
 			Address:    ":8080",
+			PublicURL:  "http://127.0.0.1:8080",
 			SessionTTL: 24 * time.Hour,
 		},
 		Postgres: PostgresConfig{
@@ -88,6 +91,7 @@ func LoadConfig(configPath string) (*Config, error) {
 		Device: DeviceConfig{
 			CommandPollInterval: 30 * time.Second,
 			ConfigSyncInterval:  15 * time.Minute,
+			AgentAppPackage:     "com.xmdm.launcher",
 		},
 		ObjectStore: ObjectStoreConfig{
 			Endpoint:        "http://127.0.0.1:8333",
@@ -128,6 +132,9 @@ func loadFromEnv(cfg *Config) {
 	// Server config
 	if addr := os.Getenv("XMDM_ADDR"); addr != "" {
 		cfg.Server.Address = addr
+	}
+	if publicURL := os.Getenv("XMDM_SERVER_PUBLIC_URL"); publicURL != "" {
+		cfg.Server.PublicURL = publicURL
 	}
 	if sessionTTL := os.Getenv("XMDM_SESSION_TTL"); sessionTTL != "" {
 		if dur, err := time.ParseDuration(sessionTTL); err == nil {
@@ -196,6 +203,9 @@ func loadFromEnv(cfg *Config) {
 		if dur, err := time.ParseDuration(configSyncInterval); err == nil {
 			cfg.Device.ConfigSyncInterval = dur
 		}
+	}
+	if agentAppPackage := os.Getenv("XMDM_DEVICE_AGENT_APP_PACKAGE"); agentAppPackage != "" {
+		cfg.Device.AgentAppPackage = agentAppPackage
 	}
 
 	// Object storage config
