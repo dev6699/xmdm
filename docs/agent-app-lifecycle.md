@@ -369,7 +369,7 @@ The signed config snapshot contains multiple buckets:
   - used by the launcher to write and remove sandbox files
 - `certificates`
   - signed and transported with the snapshot
-  - currently carried in the config envelope, but not yet applied by launcher code
+  - downloaded, checksum-verified, and installed through device-owner certificate APIs
 
 The launcher applies only the buckets it knows how to enforce today. Unknown or future fields remain part of the signed envelope so the contract can evolve without breaking verification.
 The policy snapshot can also name a kiosk app package. When kiosk is enabled, the launcher uses that package as the kiosk target; otherwise it falls back to the launcher package itself.
@@ -381,7 +381,7 @@ The policy snapshot can also name a kiosk app package. When kiosk is enabled, th
 | `policy` | Replace the cached signed snapshot and reapply policy controllers | Implicitly removed when the snapshot no longer carries the old policy state | Controls kiosk mode and package restrictions |
 | `apps` | Install or upgrade if the package is missing or the installed `versionCode` differs | Uninstall packages that were present in the previous snapshot but are absent from the new one | Uses package name and version code to detect changes |
 | `files` | Download and overwrite each declared file path | Delete files that were present in the previous snapshot but are absent from the new one, or marked `remove=true` | Empty file lists are treated as a real sync state and delete stale files |
-| `certificates` | Not yet applied by the launcher | Not yet applied by the launcher | Present in the signed envelope, but no device-side enforcement exists yet |
+| `certificates` | Download, checksum-verify, and install CA certificates when the certificate bucket changes | Clear cached certificate state when the snapshot no longer carries certificates; Android does not expose a direct remove path for previously installed CA certificates here | Requires device-owner mode; failed installs are logged and retried on later sync |
 | `device` | Not applicable | Not applicable | Identity-only; does not participate in config revision changes |
 
 Revision changes are coarse-grained: when the snapshot revision changes, the launcher re-evaluates all supported buckets, then each coordinator decides whether it needs to add, update, or remove anything inside its own bucket.
@@ -396,7 +396,7 @@ The enterprise surface is split between hard enforcement, reporting, and future 
 | Package Rules | Fully enforced | The launcher applies allow/block lists and package suspension from policy. |
 | Device Logs | Reporting only | Devices upload structured logs; the server stores and queries them. |
 | Device Info | Reporting only | Devices upload inventory/runtime snapshots; the server exports them. |
-| Messaging And Audit | API/admin workflow | Admins can create and list commands and audit events; a separate UI can be added later. |
+| Messaging And Audit | API and browser dashboard workflow | Admins can create and list commands and audit events through the API, CLI, and dashboard. |
 | Image Upload | Not planned | No implementation is planned for now. |
 | Foreground Enforcement | Not planned | The roadmap item exists only as a documented non-goal. |
 

@@ -429,7 +429,7 @@ Broadcast is disabled in the dashboard UI for safety, although the API still acc
 
 1. Open the command ID in the table.
 2. Review the command row, device link, payload JSON, result JSON, and ack timestamp.
-3. Use the status to confirm whether the command is queued, acked, failed, or expired.
+3. Use the status to confirm whether the command is queued, sent and awaiting acknowledgement, acked, failed, or expired.
 
 ## 6. Audit
 

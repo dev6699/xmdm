@@ -222,12 +222,12 @@ Owner roles used below:
 - Task: implement config fetch and retry logic.
 - Done when: temporary network failures do not strand the device.
 
-### M3-05 Recovery UI
+### M3-05 Recovery Diagnostics
 
 - Owner: `AE`
 - Depends on: M3-03
-- Task: implement bootstrap recovery UI and device-owner entry points.
-- Done when: setup failures surface an operator-visible recovery path.
+- Task: record bootstrap and enrollment failures for operator inspection.
+- Done when: setup failures are captured in launcher diagnostics and uploaded device logs when identity is available.
 
 ### M3-06 Reboot Survival
 

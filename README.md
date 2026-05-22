@@ -56,11 +56,11 @@ Note: `M2-07 Enrollment E2E` and `M2-08 Reconnect E2E` are complete on the enrol
 | M3-02 Local Persistence | ☑ |
 | M3-03 Bootstrap Parsing | ☑ |
 | M3-04 Retry Logic | ☑ |
-| M3-05 Recovery UI | ☑ |
+| M3-05 Recovery Diagnostics | ☑ |
 | M3-06 Reboot Survival | ☑ |
 | M3-07 Polling Fallback | ☑ |
 
-Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeeds, `M3-02 Local Persistence` has a DataStore-backed state store plus unit coverage and now survives a physical-device reboot check, `M3-03 Bootstrap Parsing` now accepts and persists canonical provisioning JSON via QR or ADB/manual `base64url:` launch data, the Android app now flows from bootstrap into enrollment so the device secret and initial signed config snapshot are fetched from the backend, `M3-04 Retry Logic` adds a contract-driven config sync engine with retry and signature verification and now refreshes the signed device config from `GET /api/v1/devices/{deviceId}/config` after provisioning, `M3-05 Recovery UI` surfaces bootstrap and enrollment failures with a device-owner entry point, `M3-06 Reboot Survival` now has a physical-device reboot verification with the persisted state file checksum unchanged and the launcher UI restoring bootstrap, identity, and policy cache after reboot, and `M3-07 Polling Fallback` is verified by the sync engine falling back from the primary polling path to the secondary server URL when the primary path is unavailable.
+Note: `M3-01 Kotlin Project` is complete in [app/](app), `assembleDebug` succeeds, `M3-02 Local Persistence` has a DataStore-backed state store plus unit coverage and now survives a physical-device reboot check, `M3-03 Bootstrap Parsing` now accepts and persists canonical provisioning JSON via QR or ADB/manual `base64url:` launch data, the Android app now flows from bootstrap into enrollment so the device secret and initial signed config snapshot are fetched from the backend, `M3-04 Retry Logic` adds a contract-driven config sync engine with retry and signature verification and now refreshes the signed device config from `GET /api/v1/devices/{deviceId}/config` after provisioning, `M3-05 Recovery Diagnostics` captures bootstrap and enrollment failures in launcher diagnostics and uploaded device logs when identity is available, `M3-06 Reboot Survival` now has a physical-device reboot verification with the persisted state file checksum unchanged and the launcher UI restoring bootstrap, identity, and policy cache after reboot, and `M3-07 Polling Fallback` is verified by the sync engine falling back from the primary polling path to the secondary server URL when the primary path is unavailable.
 
 ### M4 - Content Delivery
 

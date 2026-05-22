@@ -4,6 +4,11 @@ Android agent implementation lives here.
 
 This directory is reserved for the Kotlin device agent, its app modules, and related Android-specific build assets.
 
+For runtime behavior, keep this README as a developer workflow entry point and use:
+
+- [Agent App Lifecycle](../docs/agent-app-lifecycle.md) for enrollment, config sync, managed content, commands, logs, and device info.
+- [Enrollment Contract](../contracts/enrollment.md) for provisioning payloads and device enrollment API shapes.
+
 ## How To Work Here
 
 ### Build
@@ -16,6 +21,15 @@ cd app
 ```
 
 The wrapper is checked in, so you do not need a system `gradle` install.
+
+### Test
+
+Run the app unit tests from this directory:
+
+```sh
+cd app
+./gradlew testDebugUnitTest
+```
 
 ### Run On Device
 
@@ -35,12 +49,6 @@ Launch the main screen:
 
 ```sh
 adb -s "$ADB_SERIAL" shell am start -n com.xmdm.launcher/.MainActivity
-```
-
-Launch the recovery screen:
-
-```sh
-adb -s "$ADB_SERIAL" shell am start -n com.xmdm.launcher/.recovery.RecoveryActivity --es com.xmdm.launcher.recovery.EXTRA_STAGE bootstrap --es com.xmdm.launcher.recovery.EXTRA_MESSAGE test
 ```
 
 Launch the main screen with a bootstrap payload encoded as `base64url:<payload>`:
@@ -93,9 +101,9 @@ The store has unit coverage that verifies save, reload, and clear behavior.
 ### Bootstrap Parsing
 
 Bootstrap JSON is parsed in `app/src/main/java/com/xmdm/launcher/bootstrap/`.
-The parser accepts the Android provisioning payload shape from `contracts/enrollment.md`; manual and ADB intake should pass that JSON as `data:base64url:<payload>`.
+The parser accepts the Android provisioning payload shape from `contracts/enrollment.md`; manual and ADB intake should pass that JSON as `base64url:<payload>`.
 
-`MainActivity` accepts `data:base64url:<payload>` on the launch intent, parses it, and persists the normalized bootstrap state.
+`MainActivity` accepts `base64url:<payload>` on the launch intent, parses it, and persists the normalized bootstrap state.
 Unit tests cover the canonical Android provisioning JSON and reject bare bootstrap keys.
 
 ### Enrollment And First Config
@@ -113,14 +121,6 @@ The current runner provides a small exponential-backoff utility that future conf
 Config sync lives in `app/src/main/java/com/xmdm/launcher/sync/`.
 It fetches a signed config snapshot through an injectable source, verifies the snapshot signature, retries transient fetch failures, and stores the last successful policy cache locally.
 
-### Recovery UI
-
-The operator recovery screen lives in `app/src/main/java/com/xmdm/launcher/recovery/`.
-It surfaces bootstrap and enrollment failures, shows the latest failure message, and provides buttons to retry enrollment or reset enrollment state.
-`Retry enrollment` reuses the original bootstrap payload that triggered the failure, so resetting local state does not lose the retry input.
-`Reset enrollment state` only wipes enrollment identity and policy cache data; bootstrap input stays available for retry.
-The screen also shows whether the app is currently the device owner.
-
 ### Device Owner Test
 
 On a fresh, unprovisioned test device you can set the app as device owner with:
@@ -136,8 +136,3 @@ This only works on a device that has not already been provisioned. On a normally
 - Keep the launcher UI in XML with ViewBinding.
 - Keep Android-specific build outputs ignored by [app/.gitignore](app/.gitignore).
 - Keep package names aligned with the blueprint and contracts, currently `com.xmdm.launcher`.
-
-### Current State
-
-The scaffold already builds, local persistence is in place, bootstrap parsing now persists canonical provisioning payloads, bootstrap state can now flow into enrollment and the initial signed config snapshot, config sync now retries transient failures before caching a verified snapshot and falls back to the secondary server URL when the primary polling path is unavailable, the launcher now subscribes to MQTT when a broker address is provided in bootstrap extras and otherwise polls and acknowledges queued commands, the command executor now supports a lightweight `ping` plus `reboot` for device-side ACK testing, and kiosk mode now has a persistent admin menu with enter/exit/sync actions plus the existing `exit_kiosk` command path backed by the signed policy snapshot and a required kiosk exit passcode hash. The recovery UI can surface setup failures, and `M3-02 Local Persistence` has passed a physical-device reboot check.
-The main launcher screen also shows whether the app is currently device owner.

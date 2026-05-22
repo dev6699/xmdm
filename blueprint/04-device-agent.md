@@ -28,7 +28,7 @@ The agent owns device-side state. The server owns policy truth. The device never
 - Kiosk and device-owner control
 - Push and command handling
 - Telemetry and logs
-- Recovery UI and diagnostics
+- Recovery diagnostics
 
 ## Startup Flow
 
@@ -147,7 +147,7 @@ flowchart TD
 
 - If config fetch fails, preserve the last valid policy snapshot.
 - If artifact install fails, keep the device in a recoverable state and retry later.
-- If enrollment fails, surface a recovery screen rather than silently closing.
+- If enrollment fails, record diagnostic logs rather than silently closing.
 - If a command cannot execute, ack failure and keep the device usable.
 
 ## Observability
@@ -155,4 +155,4 @@ flowchart TD
 - Generate a local diagnostic trace for startup failures.
 - Upload logs on a schedule and on demand.
 - Preserve the last successful sync metadata locally.
-- Expose a clear operator recovery screen for enrollment and config failures.
+- Expose enrollment and config failure details through device logs and admin inspection surfaces.
