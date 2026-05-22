@@ -51,12 +51,6 @@ If a choice is not written here, it is not decided yet.
 - the phased implementation roadmap and completion gates
 - the numbered implementation backlog with owners and dependencies
 
-## Current Repo Relationship
-
-The existing `hmdm-android` and `hmdm-server` repositories are behavior and code references only.
-
-The XMDM docs do not inherit their architecture. They only borrow observed product behavior, feature grouping, and operational expectations.
-
 ## Delivery Standard
 
 Every major capability must eventually have:

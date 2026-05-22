@@ -16,14 +16,6 @@
 - Verify with the narrowest useful check.
 - Do not stop at a plan if the task can be completed safely now.
 
-## References
-
-- `hmdm-android/` and `hmdm-server/` are reference-only.
-- Do not edit those trees unless the user explicitly asks.
-- Use them for behavior, naming, and implementation hints when useful.
-- Treat them as guidance, not as a mandatory source to copy exactly.
-- Keep implementation work in the XMDM repo.
-
 ## Blueprint
 
 - The docs under `blueprint/` are the source of truth.
