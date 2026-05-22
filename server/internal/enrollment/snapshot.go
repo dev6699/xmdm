@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, runtime RuntimeSnapshot, policy PolicySnapshot, apps []AppSnapshot, files []ManagedFileSnapshot, certificates []CertificateSnapshot) ConfigSnapshot {
+func NewBootstrapConfigSnapshot(deviceID string, runtime RuntimeSnapshot, policy PolicySnapshot, apps []AppSnapshot, files []ManagedFileSnapshot, certificates []CertificateSnapshot) ConfigSnapshot {
 	if apps == nil {
 		apps = []AppSnapshot{}
 	}
@@ -25,8 +25,7 @@ func NewBootstrapConfigSnapshot(deviceID, deviceIDUse string, runtime RuntimeSna
 	snapshot := ConfigSnapshot{
 		Runtime: runtime,
 		Device: DeviceSnapshot{
-			DeviceID:    deviceID,
-			DeviceIDUse: deviceIDUse,
+			DeviceID: deviceID,
 		},
 		Policy:       policy,
 		Apps:         apps,

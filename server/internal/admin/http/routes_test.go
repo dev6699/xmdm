@@ -1452,7 +1452,7 @@ func TestRegisterDashboardDeviceDetailEnrollmentQRDefaults(t *testing.T) {
 	if getRR.Code != http.StatusOK {
 		t.Fatalf("device detail page status = %d, body=%s", getRR.Code, getRR.Body.String())
 	}
-	for _, field := range []string{`name="serverProject"`, `name="serverUrl"`, `name="ttl"`, `name="packageUrl"`, `name="packageChecksum"`, `name="deviceId"`, `name="deviceIdUse"`, `name="customer"`, `name="group"`, `name="enrollmentToken"`, `Issue token`, `Validate token`, `Revoke token`, `name="outputFormat"`} {
+	for _, field := range []string{`name="serverUrl"`, `name="ttl"`, `name="packageUrl"`, `name="packageChecksum"`, `name="deviceId"`, `name="enrollmentToken"`, `Issue token`, `Validate token`, `Revoke token`, `name="outputFormat"`} {
 		if strings.Contains(getRR.Body.String(), field) {
 			t.Fatalf("device detail page should not expose %q: %s", field, getRR.Body.String())
 		}
@@ -1474,9 +1474,6 @@ func TestRegisterDashboardDeviceDetailEnrollmentQRDefaults(t *testing.T) {
 	if !strings.Contains(postRR.Body.String(), "com.xmdm.DEVICE_ID") || !strings.Contains(postRR.Body.String(), "device-1") {
 		t.Fatalf("qr json should include device id: %s", postRR.Body.String())
 	}
-	if !strings.Contains(postRR.Body.String(), "com.xmdm.DEVICE_ID_USE") || !strings.Contains(postRR.Body.String(), "serial") {
-		t.Fatalf("qr json should default device id use to serial: %s", postRR.Body.String())
-	}
 	for _, field := range []string{"https://mdm.example.com", "https://mdm.example.com/api/v1/enrollment/agent.apk", agentChecksum, "com.xmdm.launcher/.AdminReceiver"} {
 		if !strings.Contains(postRR.Body.String(), field) {
 			t.Fatalf("qr json should include managed agent provisioning field %q: %s", field, postRR.Body.String())
@@ -1484,9 +1481,6 @@ func TestRegisterDashboardDeviceDetailEnrollmentQRDefaults(t *testing.T) {
 	}
 	if strings.Contains(postRR.Body.String(), "abc123") || strings.Contains(postRR.Body.String(), "https://mdm.example.com/agent.apk") {
 		t.Fatalf("qr json should not include placeholder provisioning defaults: %s", postRR.Body.String())
-	}
-	if strings.Contains(postRR.Body.String(), "SERVER_PROJECT") || strings.Contains(postRR.Body.String(), "CUSTOMER") || strings.Contains(postRR.Body.String(), "GROUP") {
-		t.Fatalf("qr json should not include removed optional bootstrap fields: %s", postRR.Body.String())
 	}
 
 	oldReq := httptest.NewRequest(http.MethodGet, "/admin/enrollment", nil)

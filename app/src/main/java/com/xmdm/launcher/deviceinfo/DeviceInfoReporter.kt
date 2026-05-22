@@ -59,9 +59,7 @@ class DeviceInfoReporter(
     ): Map<String, Any?> {
         val payload = linkedMapOf<String, Any?>()
         payload["deviceId"] = identity.deviceId
-        payload["deviceIdUse"] = identity.deviceIdUse
         payload["serverUrl"] = bootstrap.serverUrl
-        payload["serverProject"] = bootstrap.serverProject
         payload["appPackage"] = context.packageName
         payload["appVersionName"] = BuildConfig.VERSION_NAME
         payload["appVersionCode"] = BuildConfig.VERSION_CODE

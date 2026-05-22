@@ -92,10 +92,8 @@ class DeviceLogCoordinatorTest {
         return BootstrapState(
             serverUrl = "https://mdm.example",
             secondaryServerUrl = null,
-            serverProject = "rest",
             enrollmentToken = "enroll-token",
             deviceId = null,
-            deviceIdUse = null,
             bootstrapExtrasJson = "{}",
             rawJson = """{"serverUrl":"https://mdm.example"}""",
         )
@@ -104,7 +102,6 @@ class DeviceLogCoordinatorTest {
     private fun identity(): DeviceIdentityState {
         return DeviceIdentityState(
             deviceId = "device-123",
-            deviceIdUse = "serial",
             deviceSecret = "secret-abc",
         )
     }

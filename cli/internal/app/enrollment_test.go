@@ -69,12 +69,10 @@ func TestRunEnrollmentCommandsAgainstLiveServer(t *testing.T) {
 	qrJSONOut := runCLI(t, []string{
 		"--config", "../../config.yaml",
 		"enrollment", "qr", "json",
-		"--server-project", "rest",
 		"--enrollment-token", qrIssued.Secret,
 		"--package-url", "https://cdn.example/launcher.apk",
 		"--package-checksum", "abc123",
 		"--device-id", "device-123",
-		"--bootstrap-extras", `{"customer":"Acme","groups":["field"]}`,
 	}, "1.2.3").stdout
 	qrPayload := decodeJSONMap(t, qrJSONOut)
 	if got := qrPayload["android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME"]; got != "com.xmdm.launcher/.AdminReceiver" {
@@ -90,23 +88,11 @@ func TestRunEnrollmentCommandsAgainstLiveServer(t *testing.T) {
 	if got := extras["com.xmdm.BASE_URL"]; got != "http://127.0.0.1:8080/api/v1" {
 		t.Fatalf("unexpected base url: %#v", got)
 	}
-	if got := extras["com.xmdm.SERVER_PROJECT"]; got != "rest" {
-		t.Fatalf("unexpected server project: %#v", got)
-	}
 	if got := extras["com.xmdm.ENROLLMENT_TOKEN"]; got != qrIssued.Secret {
 		t.Fatalf("unexpected enrollment token: %#v", got)
 	}
 	if got := extras["com.xmdm.DEVICE_ID"]; got != "device-123" {
 		t.Fatalf("unexpected device id: %#v", got)
-	}
-	if got := extras["com.xmdm.DEVICE_ID_USE"]; got != "serial" {
-		t.Fatalf("unexpected device id use: %#v", got)
-	}
-	if got := extras["com.xmdm.CUSTOMER"]; got != "Acme" {
-		t.Fatalf("unexpected customer: %#v", got)
-	}
-	if got := extras["com.xmdm.GROUP"]; got != "field" {
-		t.Fatalf("unexpected group: %#v", got)
 	}
 
 	qrPNGPath := filepath.Join(t.TempDir(), "enrollment.png")
@@ -114,12 +100,10 @@ func TestRunEnrollmentCommandsAgainstLiveServer(t *testing.T) {
 		"--config", "../../config.yaml",
 		"enrollment", "qr", "png",
 		"--output", qrPNGPath,
-		"--server-project", "rest",
 		"--enrollment-token", qrIssued.Secret,
 		"--package-url", "https://cdn.example/launcher.apk",
 		"--package-checksum", "abc123",
 		"--device-id", "device-123",
-		"--bootstrap-extras", `{"customer":"Acme","groups":["field"]}`,
 	}, "1.2.3")
 	qrPNGBytes, err := os.ReadFile(qrPNGPath)
 	if err != nil {

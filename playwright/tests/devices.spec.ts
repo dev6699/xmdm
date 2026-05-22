@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+import { ensureAgentAppPublished } from '../support/apps';
 import { dashboardCredentials } from '../support/auth';
 import { dashboardPaths } from '../support/paths';
 import { dashboardServerConfig } from '../support/server';
@@ -24,6 +25,8 @@ async function findRowByText(page: Page, text: string) {
 }
 
 async function issueDeviceEnrollmentQR(page: Page, deviceName: string) {
+  await ensureAgentAppPublished(page);
+
   await page.goto(dashboardPaths.devices);
   const row = await findRowByText(page, deviceName);
   const deviceId = (await row.locator('td').nth(1).textContent() ?? '').trim();
@@ -33,7 +36,7 @@ async function issueDeviceEnrollmentQR(page: Page, deviceName: string) {
   await expect(page.getByRole('heading', { name: 'Active policy' })).toBeVisible();
   await expect(page.getByRole('radiogroup', { name: 'Output format' })).toHaveCount(0);
   const currentDevice = page.getByRole('heading', { name: 'Current device' }).locator('xpath=ancestor::section[1]');
-  const device = JSON.parse((await currentDevice.locator('pre').first().textContent()) ?? '{}') as { deviceId: string; name: string };
+  const device = JSON.parse((await currentDevice.locator('pre').first().textContent()) ?? '{}') as { id: string; name: string };
 
   await page.getByRole('button', { name: 'Generate QR' }).click();
 
@@ -44,15 +47,14 @@ async function issueDeviceEnrollmentQR(page: Page, deviceName: string) {
   };
   const token = payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.ENROLLMENT_TOKEN'];
   expect(token).toBeTruthy();
-  expect(device.deviceId).toBeTruthy();
+  expect(device.id).toBeTruthy();
   expect(device.name).toBe(deviceName);
-  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID']).toBe(device.deviceId);
-  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID_USE']).toBe('serial');
+  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID']).toBe(device.id);
 
   await expect(page.getByRole('heading', { name: 'QR preview' })).toBeVisible();
   await expect(page.locator('img[alt="Enrollment QR preview"]')).toHaveAttribute('src', /data:image\/png;base64,/);
 
-  return { deviceId: device.deviceId, token };
+  return { deviceId: device.id, token };
 }
 
 async function enrollDevice(page: Page, deviceId: string, token: string, bootstrapExtras: Record<string, unknown>) {
@@ -62,7 +64,6 @@ async function enrollDevice(page: Page, deviceId: string, token: string, bootstr
       enrollmentToken: token,
       deviceIdentityPolicy: {
         deviceId,
-        deviceIdUse: 'serial',
       },
       bootstrapExtras,
     },
@@ -205,7 +206,8 @@ test('admin can edit and retire a device from the detail page', async ({ page })
 
     await page.goto(dashboardPaths.deviceDetail(deviceId));
     await expect(page.getByRole('heading', { name: 'Device Detail' })).toBeVisible();
-    await expect(page.getByText('"status": "retired"')).toBeVisible();
+    const retiredDevice = JSON.parse((await page.getByRole('heading', { name: 'Current device' }).locator('xpath=ancestor::section[1]').locator('pre').first().textContent()) ?? '{}') as { status: string };
+    expect(retiredDevice.status).toBe('retired');
     await expect(page.getByRole('button', { name: 'Update device' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Retire device' })).toHaveCount(0);
   } finally {
@@ -288,13 +290,17 @@ test('admin can simulate device enrollment and inspect device info', async ({ pa
     await expect(recentInfo).toContainText(`"serialNumber": "${serialNumber}"`);
     await expect(recentInfo).toContainText('"batteryLevel": 87');
 
-    await page.goto(dashboardPaths.deviceInfo);
-    await page.getByLabel('Device ID').fill(deviceId);
-    await page.getByRole('button', { name: 'Search' }).click();
-    await expect(page).toHaveURL(new RegExp(`/admin/device-info\\?deviceId=${deviceId}.*`));
-    await expect(page.locator('table tbody tr').first()).toContainText(deviceId);
-    await expect(page.locator('table tbody tr').first()).toContainText(deviceModel);
-    await expect(page.locator('table tbody tr').first()).toContainText(serialNumber);
+    const { baseURL } = dashboardServerConfig();
+    const response = await page.request.get(new URL(`/api/v1/device-info?deviceId=${deviceId}&limit=50`, baseURL).toString());
+    expect(response.ok()).toBeTruthy();
+    const body = await response.json() as { deviceInfo: Array<{ deviceId: string; payload: Record<string, unknown> }> };
+    expect(body.deviceInfo).toHaveLength(1);
+    expect(body.deviceInfo[0].deviceId).toBe(deviceId);
+    expect(body.deviceInfo[0].payload).toMatchObject({
+      model: deviceModel,
+      serialNumber,
+      batteryLevel: 87,
+    });
   } finally {
     if (deviceRowId) {
       await page.goto(dashboardPaths.deviceDetail(deviceRowId)).catch(() => undefined);

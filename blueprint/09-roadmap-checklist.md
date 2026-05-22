@@ -213,7 +213,7 @@ Owner roles used below:
 - Owner: `AE`
 - Depends on: M2-01, M2-02
 - Task: implement provisioning and bootstrap parsing.
-- Done when: QR and fallback bootstrap inputs are accepted and persisted.
+- Done when: QR payloads and ADB/manual `base64url:` provisioning payloads are accepted and persisted.
 
 ### M3-04 Retry Logic
 

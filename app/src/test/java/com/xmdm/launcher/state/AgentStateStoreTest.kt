@@ -9,7 +9,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -27,18 +26,15 @@ class AgentStateStoreTest {
             BootstrapState(
                 serverUrl = "https://mdm.example",
                 secondaryServerUrl = null,
-                serverProject = "rest",
                 enrollmentToken = "enroll-token",
                 deviceId = null,
-                deviceIdUse = null,
-                bootstrapExtrasJson = """{"customer":"Acme"}""",
-                rawJson = """{"BASE_URL":"https://mdm.example"}""",
+                bootstrapExtrasJson = """{"config":"prod"}""",
+                rawJson = """{"com.xmdm.BASE_URL":"https://mdm.example"}""",
             ),
         )
         store.saveDeviceIdentity(
             DeviceIdentityState(
                 deviceId = "device-123",
-                deviceIdUse = "serial",
                 deviceSecret = "secret-abc",
             ),
         )
@@ -85,12 +81,10 @@ class AgentStateStoreTest {
         assertTrue(state.hasManagedFiles)
         assertTrue(state.hasCertificates)
         assertEquals("https://mdm.example", state.bootstrap?.serverUrl)
-        assertEquals("rest", state.bootstrap?.serverProject)
         assertEquals("enroll-token", state.bootstrap?.enrollmentToken)
-        assertEquals("""{"customer":"Acme"}""", state.bootstrap?.bootstrapExtrasJson)
-        assertEquals("""{"BASE_URL":"https://mdm.example"}""", state.bootstrap?.rawJson)
+        assertEquals("""{"config":"prod"}""", state.bootstrap?.bootstrapExtrasJson)
+        assertEquals("""{"com.xmdm.BASE_URL":"https://mdm.example"}""", state.bootstrap?.rawJson)
         assertEquals("device-123", state.identity?.deviceId)
-        assertEquals("serial", state.identity?.deviceIdUse)
         assertEquals("secret-abc", state.identity?.deviceSecret)
         assertEquals("""{"version":"1"}""", state.policyCache?.snapshotJson)
         assertEquals(7L, state.policyCache?.version)

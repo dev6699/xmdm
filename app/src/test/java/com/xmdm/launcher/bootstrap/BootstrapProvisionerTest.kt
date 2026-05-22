@@ -32,11 +32,8 @@ class BootstrapProvisionerTest {
             {
               "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
                 "com.xmdm.BASE_URL": "https://mdm.example",
-                "com.xmdm.SERVER_PROJECT": "rest",
                 "com.xmdm.ENROLLMENT_TOKEN": "token",
-                "com.xmdm.DEVICE_ID": "serial-123",
-                "com.xmdm.DEVICE_ID_USE": "serial",
-                "com.xmdm.CUSTOMER": "Acme"
+                "com.xmdm.DEVICE_ID": "serial-123"
               }
             }
             """.trimIndent(),
@@ -45,11 +42,9 @@ class BootstrapProvisionerTest {
         val state = store.state.first()
         assertTrue(state.isBootstrapped)
         assertEquals("https://mdm.example", state.bootstrap?.serverUrl)
-        assertEquals("rest", state.bootstrap?.serverProject)
         assertEquals("token", state.bootstrap?.enrollmentToken)
         assertEquals("serial-123", state.bootstrap?.deviceId)
-        assertEquals("serial", state.bootstrap?.deviceIdUse)
-        assertTrue(state.bootstrap?.bootstrapExtrasJson?.contains("\"com.xmdm.CUSTOMER\":\"Acme\"") == true)
+        assertEquals("{}", state.bootstrap?.bootstrapExtrasJson)
 
         scope.cancel()
     }

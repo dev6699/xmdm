@@ -13,7 +13,6 @@ import java.time.Clock
 
 data class ConfigFetchRequest(
     val serverUrl: String,
-    val serverProject: String,
     val deviceId: String,
     val deviceSecret: String,
 )
@@ -61,7 +60,6 @@ class ConfigSyncEngine(
                 return fetcher.fetch(
                     ConfigFetchRequest(
                         serverUrl = serverUrl,
-                        serverProject = bootstrap.serverProject,
                         deviceId = identity.deviceId,
                         deviceSecret = identity.deviceSecret,
                     ),

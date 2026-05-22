@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+import { ensureAgentAppPublished } from '../support/apps';
 import { dashboardCredentials } from '../support/auth';
 import { dashboardPaths } from '../support/paths';
 import { dashboardServerConfig } from '../support/server';
@@ -59,6 +60,8 @@ async function createGroup(page: Page, name: string) {
 }
 
 async function issueDeviceEnrollmentQR(page: Page, deviceName: string) {
+  await ensureAgentAppPublished(page);
+
   await page.goto(dashboardPaths.devices);
   const row = await findRowByText(page, deviceName);
   const deviceRecordId = (await row.locator('td').nth(1).textContent() ?? '').trim();
@@ -67,7 +70,7 @@ async function issueDeviceEnrollmentQR(page: Page, deviceName: string) {
   await expect(page.getByRole('heading', { name: 'Current device' })).toBeVisible();
 
   const currentDevice = page.getByRole('heading', { name: 'Current device' }).locator('xpath=ancestor::section[1]');
-  const device = JSON.parse((await currentDevice.locator('pre').first().textContent()) ?? '{}') as { deviceId: string; name: string };
+  const device = JSON.parse((await currentDevice.locator('pre').first().textContent()) ?? '{}') as { id: string; name: string };
   await page.getByRole('button', { name: 'Generate QR' }).click();
 
   await expect(page.getByText('QR generated')).toBeVisible();
@@ -77,12 +80,11 @@ async function issueDeviceEnrollmentQR(page: Page, deviceName: string) {
   };
   const token = payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.ENROLLMENT_TOKEN'];
   expect(token).toBeTruthy();
-  expect(device.deviceId).toBeTruthy();
+  expect(device.id).toBeTruthy();
   expect(device.name).toBe(deviceName);
-  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID']).toBe(device.deviceId);
-  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID_USE']).toBe('serial');
+  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID']).toBe(device.id);
   await expect(page.locator('img[alt="Enrollment QR preview"]')).toHaveAttribute('src', /data:image\/png;base64,/);
-  return { deviceId: device.deviceId, token, deviceRecordId };
+  return { deviceId: device.id, token, deviceRecordId };
 }
 
 async function enrollDevice(page: Page, deviceId: string, token: string, bootstrapExtras: Record<string, unknown>) {
@@ -92,7 +94,6 @@ async function enrollDevice(page: Page, deviceId: string, token: string, bootstr
       enrollmentToken: token,
       deviceIdentityPolicy: {
         deviceId,
-        deviceIdUse: 'serial',
       },
       bootstrapExtras,
     },
@@ -234,7 +235,7 @@ test('admin can create commands for every target type and observe device ack and
   await expect(page).toHaveURL(new RegExp(`/admin/commands/${deviceCommandId}$`));
   await expect(page.getByRole('heading', { name: 'Current command' })).toBeVisible();
   await expect(page.getByText('Payload', { exact: true })).toBeVisible();
-  await expect(page.getByText('device-target')).toBeVisible();
+  await expect(page.getByText('device-target', { exact: true })).toBeVisible();
   await acknowledgeDeviceCommand(page, deviceOne.deviceId, deviceOne.deviceSecret, deviceCommandId, 'acked', 'pong');
   await page.goto(dashboardPaths.commands);
   await expect(await findRowByText(page, deviceCommandId)).toContainText('acked');

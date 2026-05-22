@@ -6955,7 +6955,6 @@ func buildEnrollmentQRPayload(state enrollmentQRFormState, token string) (map[st
 		"com.xmdm.BASE_URL":         parsed.String(),
 		"com.xmdm.ENROLLMENT_TOKEN": token,
 		"com.xmdm.DEVICE_ID":        deviceID,
-		"com.xmdm.DEVICE_ID_USE":    "serial",
 	}
 	return map[string]any{
 		"android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME":            firstNonEmpty(strings.TrimSpace(state.ComponentName), "com.xmdm.launcher/.AdminReceiver"),

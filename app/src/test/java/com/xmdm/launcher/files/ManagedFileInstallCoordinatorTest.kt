@@ -16,12 +16,12 @@ class ManagedFileInstallCoordinatorTest {
     fun downloadsFilesAndRemovesMissingFiles() = runTest {
         val verifier = ConfigSnapshotVerifier()
         val checksumVerifier = ArtifactChecksumVerifier()
-        val templateBytes = "hello DEVICE_NUMBER from CUSTOMER in GROUP".toByteArray()
+        val templateBytes = "hello DEVICE_NUMBER".toByteArray()
         val checksum = checksumVerifier.sha256Base64Url(templateBytes)
         val unsignedCurrent = """
             {
               "version":"9",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[],
               "files":[
@@ -43,7 +43,7 @@ class ManagedFileInstallCoordinatorTest {
         val unsignedPrevious = """
             {
               "version":"8",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[],
               "files":[
@@ -65,7 +65,7 @@ class ManagedFileInstallCoordinatorTest {
         val current = """
             {
               "version":"9",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[],
               "files":[
@@ -88,7 +88,7 @@ class ManagedFileInstallCoordinatorTest {
         val previous = """
             {
               "version":"8",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[],
               "files":[
@@ -142,7 +142,7 @@ class ManagedFileInstallCoordinatorTest {
 
         val writtenFile = File(rootDir, "configs/device-config.txt")
         assertTrue(writtenFile.exists())
-        assertEquals("hello DEVICE_NUMBER from CUSTOMER in GROUP", writtenFile.readText())
+        assertEquals("hello DEVICE_NUMBER", writtenFile.readText())
         assertFalse(File(rootDir, "configs/old.txt").exists())
     }
 
@@ -154,7 +154,7 @@ class ManagedFileInstallCoordinatorTest {
         val unsignedPrevious = """
             {
               "version":"8",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[],
               "files":[
@@ -176,7 +176,7 @@ class ManagedFileInstallCoordinatorTest {
         val previous = """
             {
               "version":"8",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[],
               "files":[
@@ -199,7 +199,7 @@ class ManagedFileInstallCoordinatorTest {
         val unsignedCurrent = """
             {
               "version":"9",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[],
               "files":[],
@@ -209,7 +209,7 @@ class ManagedFileInstallCoordinatorTest {
         val current = """
             {
               "version":"9",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[],
               "files":[],

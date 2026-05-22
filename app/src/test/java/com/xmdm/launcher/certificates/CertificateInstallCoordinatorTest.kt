@@ -25,7 +25,7 @@ class CertificateInstallCoordinatorTest {
                 "commandPollIntervalMs":1000,
                 "configSyncIntervalMs":1000
               },
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
@@ -48,7 +48,7 @@ class CertificateInstallCoordinatorTest {
                 "commandPollIntervalMs":1000,
                 "configSyncIntervalMs":1000
               },
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
@@ -112,7 +112,7 @@ class CertificateInstallCoordinatorTest {
             {
               "version":"13",
               "runtime":{"mqttAddress":"127.0.0.1:1883","commandPollIntervalMs":1000,"configSyncIntervalMs":1000},
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
@@ -125,7 +125,7 @@ class CertificateInstallCoordinatorTest {
             {
               "version":"13",
               "runtime":{"mqttAddress":"127.0.0.1:1883","commandPollIntervalMs":1000,"configSyncIntervalMs":1000},
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{"kioskMode":false},
               "apps":[],
               "files":[],

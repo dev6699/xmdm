@@ -261,13 +261,11 @@ func (a *app) doEnrollmentBinary(ctx context.Context, resolved config.Resolved, 
 
 type qrInput struct {
 	serverURL                 string
-	serverProject             string
 	enrollmentToken           string
 	componentName             string
 	packageURL                string
 	packageChecksum           string
 	deviceID                  string
-	deviceIDUse               string
 	bootstrapExtras           string
 	leaveAllSystemAppsEnabled bool
 	skipEncryption            bool
@@ -276,13 +274,11 @@ type qrInput struct {
 
 func (q *qrInput) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&q.serverURL, "server-url", "", "server URL embedded in the payload")
-	cmd.Flags().StringVar(&q.serverProject, "server-project", "", "server project name")
 	cmd.Flags().StringVar(&q.enrollmentToken, "enrollment-token", "", "enrollment token")
 	cmd.Flags().StringVar(&q.componentName, "component-name", "", "device admin component name")
 	cmd.Flags().StringVar(&q.packageURL, "package-url", "", "device admin package download URL")
 	cmd.Flags().StringVar(&q.packageChecksum, "package-checksum", "", "device admin package checksum")
 	cmd.Flags().StringVar(&q.deviceID, "device-id", "", "device id to embed")
-	cmd.Flags().StringVar(&q.deviceIDUse, "device-id-use", "serial", "device id use strategy")
 	cmd.Flags().StringVar(&q.bootstrapExtras, "bootstrap-extras", "", "inline JSON bootstrap extras object")
 	cmd.Flags().BoolVar(&q.leaveAllSystemAppsEnabled, "leave-all-system-apps-enabled", false, "leave all system apps enabled")
 	cmd.Flags().BoolVar(&q.skipEncryption, "skip-encryption", false, "skip device encryption")
@@ -307,7 +303,6 @@ func (q qrInput) body(resolved config.Resolved) ([]byte, error) {
 	}
 	payload := map[string]any{
 		"serverUrl":                          serverURL,
-		"serverProject":                      strings.TrimSpace(q.serverProject),
 		"enrollmentToken":                    strings.TrimSpace(q.enrollmentToken),
 		"deviceAdminComponentName":           strings.TrimSpace(q.componentName),
 		"deviceAdminPackageDownloadLocation": strings.TrimSpace(q.packageURL),
@@ -316,22 +311,18 @@ func (q qrInput) body(resolved config.Resolved) ([]byte, error) {
 		"skipEncryption":                     q.skipEncryption,
 		"useMobileData":                      q.useMobileData,
 		"deviceIdentityPolicy": map[string]any{
-			"deviceId":    strings.TrimSpace(q.deviceID),
-			"deviceIdUse": strings.TrimSpace(q.deviceIDUse),
+			"deviceId": strings.TrimSpace(q.deviceID),
 		},
 		"bootstrapExtras": extras,
 	}
 	if payload["deviceAdminComponentName"] == "" {
 		delete(payload, "deviceAdminComponentName")
 	}
-	if payload["serverProject"] == "" {
-		delete(payload, "serverProject")
-	}
 	if payload["enrollmentToken"] == "" {
 		delete(payload, "enrollmentToken")
 	}
-	if strings.TrimSpace(q.deviceID) == "" && strings.TrimSpace(q.deviceIDUse) == "" {
-		return nil, fmt.Errorf("either device-id or device-id-use is required")
+	if strings.TrimSpace(q.deviceID) == "" {
+		return nil, fmt.Errorf("device-id is required")
 	}
 	return json.Marshal(payload)
 }

@@ -52,7 +52,7 @@ adb -s "$ADB_SERIAL" shell am start -n com.xmdm.launcher/.MainActivity -d 'base6
 If you have the QR JSON from the server, you can turn it into the payload like this:
 
 ```sh
-json='{"android.app.extra.PROVISIONING_SERVER_URL":"http://192.168.0.168:8080","android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME":"com.xmdm.launcher/.AdminReceiver","android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE":{"com.xmdm.BASE_URL":"http://192.168.0.168:8080","com.xmdm.SERVER_PROJECT":"rest","com.xmdm.ENROLLMENT_TOKEN":"<token>","com.xmdm.DEVICE_ID":"device-999","com.xmdm.DEVICE_ID_USE":"serial","CUSTOMER":"Acme"}}'
+json='{"android.app.extra.PROVISIONING_SERVER_URL":"http://192.168.0.168:8080","android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME":"com.xmdm.launcher/.AdminReceiver","android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE":{"com.xmdm.BASE_URL":"http://192.168.0.168:8080","com.xmdm.ENROLLMENT_TOKEN":"<token>","com.xmdm.DEVICE_ID":"device-999"}}'
 payload="$(printf '%s' "$json" | base64 -w0 | tr '+/' '-_' | tr -d '=')"
 adb -s "$ADB_SERIAL" shell am start -n com.xmdm.launcher/.MainActivity -d "base64url:$payload"
 ```
@@ -93,12 +93,10 @@ The store has unit coverage that verifies save, reload, and clear behavior.
 ### Bootstrap Parsing
 
 Bootstrap JSON is parsed in `app/src/main/java/com/xmdm/launcher/bootstrap/`.
-The parser accepts the Android provisioning payload shape from `contracts/enrollment.md` and the flat fallback form used for manual or ADB intake.
+The parser accepts the Android provisioning payload shape from `contracts/enrollment.md`; manual and ADB intake should pass that JSON as `data:base64url:<payload>`.
 
-`MainActivity` accepts raw bootstrap JSON from `com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON` or `Intent.EXTRA_TEXT`, parses it, and persists the normalized bootstrap state.
-For adb-driven checks, `com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64` accepts the same JSON encoded with base64 so shell quoting does not mangle the payload.
-`MainActivity` also accepts `data:base64url:<payload>` on the launch intent, which is the most reliable adb path for device-side validation.
-Unit tests cover both the canonical Android provisioning JSON and the flat fallback JSON form.
+`MainActivity` accepts `data:base64url:<payload>` on the launch intent, parses it, and persists the normalized bootstrap state.
+Unit tests cover the canonical Android provisioning JSON and reject bare bootstrap keys.
 
 ### Enrollment And First Config
 
@@ -141,5 +139,5 @@ This only works on a device that has not already been provisioned. On a normally
 
 ### Current State
 
-The scaffold already builds, local persistence is in place, bootstrap parsing now persists canonical or fallback payloads, bootstrap state can now flow into enrollment and the initial signed config snapshot, config sync now retries transient failures before caching a verified snapshot and falls back to the secondary server URL when the primary polling path is unavailable, the launcher now subscribes to MQTT when a broker address is provided in bootstrap extras and otherwise polls and acknowledges queued commands, the command executor now supports a lightweight `ping` plus `reboot` for device-side ACK testing, and kiosk mode now has a persistent admin menu with enter/exit/sync actions plus the existing `exit_kiosk` command path backed by the signed policy snapshot and a required kiosk exit passcode hash. The recovery UI can surface setup failures, and `M3-02 Local Persistence` has passed a physical-device reboot check.
+The scaffold already builds, local persistence is in place, bootstrap parsing now persists canonical provisioning payloads, bootstrap state can now flow into enrollment and the initial signed config snapshot, config sync now retries transient failures before caching a verified snapshot and falls back to the secondary server URL when the primary polling path is unavailable, the launcher now subscribes to MQTT when a broker address is provided in bootstrap extras and otherwise polls and acknowledges queued commands, the command executor now supports a lightweight `ping` plus `reboot` for device-side ACK testing, and kiosk mode now has a persistent admin menu with enter/exit/sync actions plus the existing `exit_kiosk` command path backed by the signed policy snapshot and a required kiosk exit passcode hash. The recovery UI can surface setup failures, and `M3-02 Local Persistence` has passed a physical-device reboot check.
 The main launcher screen also shows whether the app is currently device owner.

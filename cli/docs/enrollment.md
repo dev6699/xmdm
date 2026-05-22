@@ -143,7 +143,6 @@ Inputs:
 - `--package-url` required
 - `--package-checksum` required
 - `--device-id` optional
-- `--device-id-use` optional, default `serial`
 - `--bootstrap-extras` optional JSON object
 - `--leave-all-system-apps-enabled` optional boolean
 - `--skip-encryption` optional boolean

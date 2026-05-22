@@ -17,7 +17,7 @@ class ConfigSnapshotVerifierTest {
                 "commandPollIntervalMs":1000,
                 "configSyncIntervalMs":1000
               },
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
@@ -33,7 +33,7 @@ class ConfigSnapshotVerifierTest {
                 "commandPollIntervalMs":1000,
                 "configSyncIntervalMs":1000
               },
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
@@ -58,7 +58,7 @@ class ConfigSnapshotVerifierTest {
                 "commandPollIntervalMs":1000,
                 "configSyncIntervalMs":1000
               },
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[],
               "files":[],

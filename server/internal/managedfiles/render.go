@@ -33,9 +33,6 @@ func TemplateValues(deviceID string, bootstrapExtras map[string]any) map[string]
 			values[candidate] = rendered
 		}
 	}
-	if deviceUse := values["DEVICE_ID_USE"]; strings.EqualFold(deviceUse, "imei") {
-		values["IMEI"] = deviceID
-	}
 	return values
 }
 
@@ -66,14 +63,6 @@ func normalizedTemplateKeys(key string) []string {
 		lower = strings.ToLower(stripped)
 	}
 	switch lower {
-	case "customer":
-		add("CUSTOMER")
-	case "configuration", "config":
-		add("CONFIG")
-	case "group", "groups":
-		add("GROUP")
-	case "cert", "certs":
-		add("CERTS")
 	case "secondarybaseurl", "secondary_base_url":
 		add("SECONDARY_BASE_URL")
 	}

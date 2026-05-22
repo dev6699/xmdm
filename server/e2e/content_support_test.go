@@ -1070,13 +1070,11 @@ func mustBuildBootstrapURI(t *testing.T, client *http.Client, baseURL, launcherC
 	}
 	qrJSON := postJSON(t, client, baseURL+"/api/v1/enrollment/qr/json", fmt.Sprintf(`{
 		"serverUrl":"%s",
-		"serverProject":"rest",
 		"enrollmentToken":"%s",
 		"deviceAdminPackageDownloadLocation":"%s/launcher.apk",
 		"deviceAdminPackageChecksum":"%s",
 		"deviceIdentityPolicy":{
-			"deviceId":"%s",
-			"deviceIdUse":"serial"
+			"deviceId":"%s"
 		},
 		"bootstrapExtras":%s
 	}`, baseURL, token, baseURL, launcherChecksum, deviceID, string(extrasJSON)))

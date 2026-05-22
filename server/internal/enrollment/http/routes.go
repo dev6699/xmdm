@@ -26,7 +26,6 @@ import (
 
 type QRRequest struct {
 	ServerURL                  string               `json:"serverUrl"`
-	ServerProject              string               `json:"serverProject"`
 	EnrollmentToken            string               `json:"enrollmentToken"`
 	DeviceAdminComponentName   string               `json:"deviceAdminComponentName"`
 	DeviceAdminPackageURL      string               `json:"deviceAdminPackageDownloadLocation"`
@@ -39,8 +38,7 @@ type QRRequest struct {
 }
 
 type DeviceIdentityPolicy struct {
-	DeviceID    string `json:"deviceId,omitempty"`
-	DeviceIDUse string `json:"deviceIdUse"`
+	DeviceID string `json:"deviceId,omitempty"`
 }
 
 type AndroidQRPayload struct {
@@ -317,7 +315,6 @@ func BuildConfigSnapshot(ctx context.Context, policyStore policy.Repository, app
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
 	}
-	deviceIDUse := managedfiles.TemplateValues(deviceID, bootstrapExtras)["DEVICE_ID_USE"]
 	filesSnapshot, err := listPolicyManagedFiles(ctx, policyStore, managedFileStore, artifactStore, deviceID, tenantID, policyID, bootstrapExtras)
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
@@ -330,7 +327,7 @@ func BuildConfigSnapshot(ctx context.Context, policyStore policy.Repository, app
 	if err != nil {
 		return enrollment.ConfigSnapshot{}, err
 	}
-	config := enrollment.NewBootstrapConfigSnapshot(deviceID, deviceIDUse, runtime, policySnapshot, appsSnapshot, filesSnapshot, certs)
+	config := enrollment.NewBootstrapConfigSnapshot(deviceID, runtime, policySnapshot, appsSnapshot, filesSnapshot, certs)
 	return config, nil
 }
 
@@ -504,7 +501,6 @@ func decodeEnrollmentRequest(r *http.Request) (EnrollmentRequest, error) {
 	}
 	payload.EnrollmentToken = strings.TrimSpace(payload.EnrollmentToken)
 	payload.DeviceIdentityPolicy.DeviceID = strings.TrimSpace(payload.DeviceIdentityPolicy.DeviceID)
-	payload.DeviceIdentityPolicy.DeviceIDUse = strings.TrimSpace(payload.DeviceIdentityPolicy.DeviceIDUse)
 	if payload.EnrollmentToken == "" || payload.DeviceIdentityPolicy.DeviceID == "" {
 		return EnrollmentRequest{}, httpx.ErrInvalidInput
 	}
@@ -530,18 +526,16 @@ func decodeQRRequest(r *http.Request) (QRRequest, error) {
 	}
 
 	payload.ServerURL = strings.TrimSpace(payload.ServerURL)
-	payload.ServerProject = strings.TrimSpace(payload.ServerProject)
 	payload.EnrollmentToken = strings.TrimSpace(payload.EnrollmentToken)
 	payload.DeviceAdminComponentName = strings.TrimSpace(payload.DeviceAdminComponentName)
 	payload.DeviceAdminPackageURL = strings.TrimSpace(payload.DeviceAdminPackageURL)
 	payload.DeviceAdminPackageChecksum = strings.TrimSpace(payload.DeviceAdminPackageChecksum)
 	payload.DeviceIdentityPolicy.DeviceID = strings.TrimSpace(payload.DeviceIdentityPolicy.DeviceID)
-	payload.DeviceIdentityPolicy.DeviceIDUse = strings.TrimSpace(payload.DeviceIdentityPolicy.DeviceIDUse)
 
 	if payload.ServerURL == "" || payload.DeviceAdminPackageURL == "" || payload.DeviceAdminPackageChecksum == "" {
 		return QRRequest{}, httpx.ErrInvalidInput
 	}
-	if payload.DeviceIdentityPolicy.DeviceID == "" && payload.DeviceIdentityPolicy.DeviceIDUse == "" {
+	if payload.DeviceIdentityPolicy.DeviceID == "" {
 		return QRRequest{}, httpx.ErrInvalidInput
 	}
 	parsedURL, err := parseServerURL(payload.ServerURL)
@@ -560,10 +554,8 @@ func decodeQRRequest(r *http.Request) (QRRequest, error) {
 
 func buildAdminExtrasBundle(req QRRequest) map[string]any {
 	bundle := map[string]any{
-		"com.xmdm.BASE_URL": req.ServerURL,
-	}
-	if req.ServerProject != "" {
-		bundle["com.xmdm.SERVER_PROJECT"] = req.ServerProject
+		"com.xmdm.BASE_URL":           req.ServerURL,
+		"com.xmdm.SECONDARY_BASE_URL": req.ServerURL,
 	}
 	if req.EnrollmentToken != "" {
 		bundle["com.xmdm.ENROLLMENT_TOKEN"] = req.EnrollmentToken
@@ -571,24 +563,11 @@ func buildAdminExtrasBundle(req QRRequest) map[string]any {
 	if req.DeviceIdentityPolicy.DeviceID != "" {
 		bundle["com.xmdm.DEVICE_ID"] = req.DeviceIdentityPolicy.DeviceID
 	}
-	if req.DeviceIdentityPolicy.DeviceIDUse != "" {
-		bundle["com.xmdm.DEVICE_ID_USE"] = req.DeviceIdentityPolicy.DeviceIDUse
-	}
 	for key, value := range req.BootstrapExtras {
-		switch key {
-		case "customer":
-			putString(bundle, "com.xmdm.CUSTOMER", value)
-		case "configuration", "config":
-			putString(bundle, "com.xmdm.CONFIG", value)
-		case "groups":
-			putGroups(bundle, value)
-		case "certs":
-			putString(bundle, "com.xmdm.CERTS", value)
-		case "secondaryBaseUrl":
-			putString(bundle, "com.xmdm.SECONDARY_BASE_URL", value)
-		default:
-			bundle[key] = value
+		if key == "secondaryBaseUrl" {
+			continue
 		}
+		bundle[key] = value
 	}
 	return bundle
 }
@@ -610,25 +589,6 @@ func putString(dst map[string]any, key string, value any) {
 			if len(parts) > 0 {
 				dst[key] = strings.Join(parts, ",")
 			}
-		}
-	}
-}
-
-func putGroups(dst map[string]any, value any) {
-	switch v := value.(type) {
-	case string:
-		if strings.TrimSpace(v) != "" {
-			dst["com.xmdm.GROUP"] = strings.TrimSpace(v)
-		}
-	case []any:
-		parts := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
-				parts = append(parts, strings.TrimSpace(s))
-			}
-		}
-		if len(parts) > 0 {
-			dst["com.xmdm.GROUP"] = strings.Join(parts, ",")
 		}
 	}
 }

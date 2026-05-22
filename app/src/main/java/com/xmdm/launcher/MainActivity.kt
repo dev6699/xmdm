@@ -67,6 +67,7 @@ import com.xmdm.launcher.state.ManagedFilesState
 import com.xmdm.launcher.sync.ConfigSyncEngine
 import com.xmdm.launcher.sync.HttpConfigSnapshotFetcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.collectLatest
@@ -165,6 +166,10 @@ class MainActivity : AppCompatActivity() {
     private var configSyncTargetKey: String? = null
     private var deviceLogUploadJob: Job? = null
     private var deviceLogUploadTargetKey: String? = null
+    private val deviceLogUploadRequestLock = Any()
+    private var deviceLogUploadRequestJob: Job? = null
+    private var deviceLogUploadRequestTargetKey: String? = null
+    private var deviceLogUploadRequestPending = false
     private var startedFromBoot = false
     private var launcherRuntimeStarted = false
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
@@ -1491,6 +1496,7 @@ class MainActivity : AppCompatActivity() {
             lastCertificatesSnapshotVersion = null
             lastManagedAppsSnapshotVersion = null
             certInstallInFlight = false
+            cancelDeviceLogUploadRequests()
             lastEnrollmentAttemptBootstrapJson = null
             cachedPrettySnapshotJson = null
             cachedPrettySnapshotText = ""
@@ -1541,10 +1547,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resolveBootstrapJson(): String? {
-        intent.getStringExtra(EXTRA_BOOTSTRAP_JSON)?.let { return it }
-        intent.getStringExtra(EXTRA_BOOTSTRAP_JSON_B64)?.let { encoded ->
-            return String(Base64.decode(encoded, Base64.DEFAULT), Charsets.UTF_8)
-        }
         intent.dataString?.let { data ->
             if (data.startsWith(BOOTSTRAP_DATA_PREFIX)) {
                 val encoded = data.removePrefix(BOOTSTRAP_DATA_PREFIX)
@@ -1554,7 +1556,7 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         }
-        return intent.getStringExtra(android.content.Intent.EXTRA_TEXT)
+        return null
     }
 
     private fun runtimeConfig(snapshotJson: String?): RuntimeSnapshotConfig {
@@ -1592,6 +1594,7 @@ class MainActivity : AppCompatActivity() {
             deviceLogUploadJob?.cancel()
             deviceLogUploadJob = null
             deviceLogUploadTargetKey = null
+            cancelDeviceLogUploadRequests()
             return
         }
         val targetKey = "${bootstrap.serverUrl}|${bootstrap.secondaryServerUrl}|${identity.deviceId}|${identity.deviceSecret}"
@@ -1671,19 +1674,73 @@ class MainActivity : AppCompatActivity() {
         bootstrap: com.xmdm.launcher.state.BootstrapState,
         identity: com.xmdm.launcher.state.DeviceIdentityState,
     ) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val uploaded = deviceLogCoordinator.upload(bootstrap, identity)
-                if (uploaded > 0) {
-                    Log.w(TAG, "device logs uploaded count=$uploaded instance=$instanceId")
+        val targetKey = "${bootstrap.serverUrl}|${bootstrap.secondaryServerUrl}|${identity.deviceId}|${identity.deviceSecret}"
+        val jobToCancel = synchronized(deviceLogUploadRequestLock) {
+            if (deviceLogUploadRequestJob != null && deviceLogUploadRequestTargetKey == targetKey) {
+                deviceLogUploadRequestPending = true
+                return
+            }
+            val currentJob = deviceLogUploadRequestJob
+            deviceLogUploadRequestJob = null
+            deviceLogUploadRequestTargetKey = targetKey
+            deviceLogUploadRequestPending = false
+            currentJob
+        }
+        jobToCancel?.cancel()
+        val job = lifecycleScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+            delay(DEVICE_LOG_UPLOAD_REQUEST_DEBOUNCE_MS)
+            while (isActive) {
+                try {
+                    val uploaded = deviceLogCoordinator.upload(bootstrap, identity)
+                    if (uploaded > 0) {
+                        Log.w(TAG, "device logs uploaded count=$uploaded instance=$instanceId")
+                    }
+                } catch (t: Throwable) {
+                    if (t is kotlinx.coroutines.CancellationException) {
+                        throw t
+                    }
+                    Log.w(TAG, "device logs upload failed", t)
                 }
-            } catch (t: Throwable) {
-                if (t is kotlinx.coroutines.CancellationException) {
-                    throw t
+                val shouldRepeat = synchronized(deviceLogUploadRequestLock) {
+                    if (deviceLogUploadRequestTargetKey != targetKey) {
+                        false
+                    } else if (!deviceLogUploadRequestPending) {
+                        false
+                    } else {
+                        deviceLogUploadRequestPending = false
+                        true
+                    }
                 }
-                Log.w(TAG, "device logs upload failed", t)
+                if (!shouldRepeat) {
+                    break
+                }
+                delay(DEVICE_LOG_UPLOAD_REQUEST_DEBOUNCE_MS)
             }
         }
+        job.invokeOnCompletion {
+            synchronized(deviceLogUploadRequestLock) {
+                if (deviceLogUploadRequestJob === job) {
+                    deviceLogUploadRequestJob = null
+                    deviceLogUploadRequestTargetKey = null
+                    deviceLogUploadRequestPending = false
+                }
+            }
+        }
+        synchronized(deviceLogUploadRequestLock) {
+            deviceLogUploadRequestJob = job
+        }
+        job.start()
+    }
+
+    private fun cancelDeviceLogUploadRequests() {
+        val jobToCancel = synchronized(deviceLogUploadRequestLock) {
+            val currentJob = deviceLogUploadRequestJob
+            deviceLogUploadRequestJob = null
+            deviceLogUploadRequestTargetKey = null
+            deviceLogUploadRequestPending = false
+            currentJob
+        }
+        jobToCancel?.cancel()
     }
 
     private fun requestDeviceInfoUpload() {
@@ -1703,27 +1760,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
-        const val EXTRA_BOOTSTRAP_JSON = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON"
-        const val EXTRA_BOOTSTRAP_JSON_B64 = "com.xmdm.launcher.EXTRA_BOOTSTRAP_JSON_B64"
         const val EXTRA_STARTED_FROM_BOOT = "com.xmdm.launcher.EXTRA_STARTED_FROM_BOOT"
         const val EXTRA_OPEN_KIOSK_ADMIN_MENU = "com.xmdm.launcher.EXTRA_OPEN_KIOSK_ADMIN_MENU"
         const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
         private const val DEVICE_LOG_UPLOAD_INITIAL_DELAY_MS = 5_000L
         private const val DEVICE_LOG_UPLOAD_INTERVAL_MS = 30_000L
+        private const val DEVICE_LOG_UPLOAD_REQUEST_DEBOUNCE_MS = 1_000L
         private const val DEFAULT_COMMAND_POLL_INTERVAL_MS = 30_000L
         private const val DEFAULT_CONFIG_SYNC_INTERVAL_MS = 15 * 60 * 1000L
         private val SAVED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
 
-        fun intent(
-            context: android.content.Context,
-            bootstrapJson: String? = null,
-        ): android.content.Intent {
-            return android.content.Intent(context, MainActivity::class.java).apply {
-                if (bootstrapJson != null) {
-                    putExtra(EXTRA_BOOTSTRAP_JSON, bootstrapJson)
-                }
-            }
+        fun intent(context: android.content.Context): android.content.Intent {
+            return android.content.Intent(context, MainActivity::class.java)
         }
     }
 }

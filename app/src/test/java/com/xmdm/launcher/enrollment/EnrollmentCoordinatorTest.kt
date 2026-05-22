@@ -50,16 +50,13 @@ class EnrollmentCoordinatorTest {
             BootstrapState(
                 serverUrl = "https://mdm.example",
                 secondaryServerUrl = null,
-                serverProject = "rest",
                 enrollmentToken = "enroll-token",
                 deviceId = "device-123",
-                deviceIdUse = "serial",
-                bootstrapExtrasJson = """{"customer":"Acme"}""",
+                bootstrapExtrasJson = "{}",
             ),
         )
 
         assertEquals("device-123", result.identity.deviceId)
-        assertEquals("serial", result.identity.deviceIdUse)
         assertEquals("secret-abc", result.identity.deviceSecret)
         assertTrue(store.state.first().isEnrolled)
         scope.cancel()
@@ -91,10 +88,8 @@ class EnrollmentCoordinatorTest {
                 BootstrapState(
                     serverUrl = "https://mdm.example",
                     secondaryServerUrl = null,
-                    serverProject = "rest",
                     enrollmentToken = "enroll-token",
                     deviceId = "device-123",
-                    deviceIdUse = "serial",
                     bootstrapExtrasJson = "{}",
                 ),
             )

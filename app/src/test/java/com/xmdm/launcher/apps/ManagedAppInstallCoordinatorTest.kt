@@ -20,7 +20,7 @@ class ManagedAppInstallCoordinatorTest {
         val unsignedCurrent = """
             {
               "version":"7",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[
                 {
@@ -40,7 +40,7 @@ class ManagedAppInstallCoordinatorTest {
         val unsignedPrevious = """
             {
               "version":"6",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[
                 {
@@ -60,7 +60,7 @@ class ManagedAppInstallCoordinatorTest {
         val current = """
             {
               "version":"7",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[
                 {
@@ -81,7 +81,7 @@ class ManagedAppInstallCoordinatorTest {
         val previous = """
             {
               "version":"6",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[
                 {
@@ -162,7 +162,7 @@ class ManagedAppInstallCoordinatorTest {
         val unsigned = """
             {
               "version":"7",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[
                 {
@@ -182,7 +182,7 @@ class ManagedAppInstallCoordinatorTest {
         val signed = """
             {
               "version":"7",
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{},
               "apps":[
                 {

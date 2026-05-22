@@ -178,11 +178,8 @@
   "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
   "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
     "com.xmdm.BASE_URL": "https://mdm.example",
-    "com.xmdm.SERVER_PROJECT": "rest",
     "com.xmdm.ENROLLMENT_TOKEN": "token",
-    "com.xmdm.DEVICE_ID_USE": "serial",
-    "com.xmdm.CUSTOMER": "Acme",
-    "com.xmdm.GROUP": "field"
+    "com.xmdm.DEVICE_ID": "device-123"
   }
 }
 ```

@@ -44,7 +44,7 @@ class ConfigSyncEngineTest {
                 "commandPollIntervalMs":1000,
                 "configSyncIntervalMs":1000
               },
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
@@ -59,7 +59,7 @@ class ConfigSyncEngineTest {
                 "commandPollIntervalMs":1000,
                 "configSyncIntervalMs":1000
               },
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
@@ -79,7 +79,6 @@ class ConfigSyncEngineTest {
                         error("temporary network failure")
                     }
                     assertEquals("https://mdm.example", request.serverUrl)
-                    assertEquals("rest", request.serverProject)
                     assertEquals("device-123", request.deviceId)
                     assertEquals("secret-abc", request.deviceSecret)
                     return signed
@@ -99,15 +98,12 @@ class ConfigSyncEngineTest {
             BootstrapState(
                 serverUrl = "https://mdm.example",
                 secondaryServerUrl = null,
-                serverProject = "rest",
                 enrollmentToken = "enroll-token",
                 deviceId = null,
-                deviceIdUse = null,
-                bootstrapExtrasJson = """{"customer":"Acme"}""",
+                bootstrapExtrasJson = """{"config":"prod"}""",
             ),
             DeviceIdentityState(
                 deviceId = "device-123",
-                deviceIdUse = "serial",
                 deviceSecret = "secret-abc",
             ),
         )
@@ -139,7 +135,7 @@ class ConfigSyncEngineTest {
                 "commandPollIntervalMs":1000,
                 "configSyncIntervalMs":1000
               },
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
@@ -154,7 +150,7 @@ class ConfigSyncEngineTest {
                 "commandPollIntervalMs":1000,
                 "configSyncIntervalMs":1000
               },
-              "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+              "device":{"deviceId":"device-123"},
               "policy":{"kioskMode":false},
               "apps":[],
               "files":[],
@@ -190,15 +186,12 @@ class ConfigSyncEngineTest {
             BootstrapState(
                 serverUrl = "https://mdm-primary.example",
                 secondaryServerUrl = "https://mdm-secondary.example",
-                serverProject = "rest",
                 enrollmentToken = "enroll-token",
                 deviceId = null,
-                deviceIdUse = null,
-                bootstrapExtrasJson = """{"customer":"Acme"}""",
+                bootstrapExtrasJson = """{"config":"prod"}""",
             ),
             DeviceIdentityState(
                 deviceId = "device-123",
-                deviceIdUse = "serial",
                 deviceSecret = "secret-abc",
             ),
         )
@@ -233,7 +226,7 @@ class ConfigSyncEngineTest {
                             "commandPollIntervalMs":1000,
                             "configSyncIntervalMs":1000
                           },
-                          "device":{"deviceId":"device-123","deviceIdUse":"serial"},
+                          "device":{"deviceId":"device-123"},
                           "policy":{},
                           "apps":[],
                           "files":[],
@@ -250,18 +243,15 @@ class ConfigSyncEngineTest {
 
         try {
             engine.sync(
-                BootstrapState(
-                    serverUrl = "https://mdm.example",
-                    secondaryServerUrl = null,
-                    serverProject = "rest",
-                    enrollmentToken = "enroll-token",
-                    deviceId = null,
-                    deviceIdUse = null,
-                    bootstrapExtrasJson = "{}",
+            BootstrapState(
+                serverUrl = "https://mdm.example",
+                secondaryServerUrl = null,
+                enrollmentToken = "enroll-token",
+                deviceId = null,
+                bootstrapExtrasJson = "{}",
                 ),
                 DeviceIdentityState(
                     deviceId = "device-123",
-                    deviceIdUse = "serial",
                     deviceSecret = "secret-abc",
                 ),
             )

@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+import { ensureAgentAppPublished } from '../support/apps';
 import { dashboardCredentials } from '../support/auth';
 import { dashboardPaths } from '../support/paths';
+import { dashboardServerConfig } from '../support/server';
 
 function uniqueSuffix() {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -47,11 +49,13 @@ async function createPendingDevice(page: Page, name: string, policyId: string) {
 }
 
 async function generateDeviceEnrollmentQR(page: Page, deviceRowId: string, deviceName: string) {
+  await ensureAgentAppPublished(page);
+
   await page.goto(dashboardPaths.deviceDetail(deviceRowId));
   await expect(page.getByRole('heading', { name: 'Device Detail' })).toBeVisible();
   await expect(page.getByRole('radiogroup', { name: 'Output format' })).toHaveCount(0);
   const currentDevice = page.getByRole('heading', { name: 'Current device' }).locator('xpath=ancestor::section[1]');
-  const device = JSON.parse((await currentDevice.locator('pre').first().textContent()) ?? '{}') as { deviceId: string; name: string };
+  const device = JSON.parse((await currentDevice.locator('pre').first().textContent()) ?? '{}') as { id: string; name: string };
   await page.getByRole('button', { name: 'Generate QR' }).click();
 
   await expect(page.getByText('QR generated')).toBeVisible();
@@ -62,15 +66,15 @@ async function generateDeviceEnrollmentQR(page: Page, deviceRowId: string, devic
     ['android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM']: string;
     ['android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION']: string;
   };
+  const { baseURL } = dashboardServerConfig();
   expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.ENROLLMENT_TOKEN']).toBeTruthy();
-  expect(device.deviceId).toBeTruthy();
+  expect(device.id).toBeTruthy();
   expect(device.name).toBe(deviceName);
-  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID']).toBe(device.deviceId);
-  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID_USE']).toBe('serial');
-  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.BASE_URL']).toBe('https://mdm.example.com');
+  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID']).toBe(device.id);
+  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.BASE_URL']).toBe(baseURL);
   expect(payload['android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME']).toBe('com.xmdm.launcher/.AdminReceiver');
-  expect(payload['android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION']).toBe('https://mdm.example.com/agent.apk');
-  expect(payload['android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM']).toBe('abc123');
+  expect(payload['android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION']).toBe(new URL('/api/v1/enrollment/agent.apk', baseURL).toString());
+  expect(payload['android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM']).toBeTruthy();
   await expect(page.getByRole('heading', { name: 'QR preview' })).toBeVisible();
   await expect(page.locator('img[alt="Enrollment QR preview"]')).toHaveAttribute('src', /data:image\/png;base64,/);
   return { payload };

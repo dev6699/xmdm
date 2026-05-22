@@ -3,17 +3,14 @@ package com.xmdm.launcher.state
 data class BootstrapState(
     val serverUrl: String,
     val secondaryServerUrl: String?,
-    val serverProject: String,
     val enrollmentToken: String,
     val deviceId: String?,
-    val deviceIdUse: String?,
     val bootstrapExtrasJson: String,
     val rawJson: String? = null,
 )
 
 data class DeviceIdentityState(
     val deviceId: String,
-    val deviceIdUse: String,
     val deviceSecret: String,
 )
 

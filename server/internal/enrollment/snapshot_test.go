@@ -5,7 +5,6 @@ import "testing"
 func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 	base := NewBootstrapConfigSnapshot(
 		"device-123",
-		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		nil,
@@ -18,7 +17,6 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 
 	same := NewBootstrapConfigSnapshot(
 		"device-abc",
-		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		nil,
@@ -31,7 +29,6 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 
 	changedPolicy := NewBootstrapConfigSnapshot(
 		"device-123",
-		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{
 			Name:            "policy",
@@ -52,7 +49,6 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 
 	changedKioskPackage := NewBootstrapConfigSnapshot(
 		"device-123",
-		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false, KioskAppPackage: "com.example.kiosk"},
 		nil,
@@ -65,7 +61,6 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 
 	changedKioskExitPasscode := NewBootstrapConfigSnapshot(
 		"device-123",
-		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{
 			KioskMode: false,
@@ -83,7 +78,6 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 
 	changedRuntime := NewBootstrapConfigSnapshot(
 		"device-123",
-		"serial",
 		RuntimeSnapshot{MqttAddress: "10.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		nil,
@@ -96,7 +90,6 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 
 	changedApps := NewBootstrapConfigSnapshot(
 		"device-123",
-		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		[]AppSnapshot{{AppID: "app-1", PackageName: "com.example.app", VersionID: "v1", VersionName: "1", VersionCode: 1, ArtifactID: "artifact-1", Checksum: "abc", DownloadPath: "/artifact"}},
@@ -109,7 +102,6 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 
 	changedFiles := NewBootstrapConfigSnapshot(
 		"device-123",
-		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		nil,
@@ -122,7 +114,6 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 
 	changedCertificates := NewBootstrapConfigSnapshot(
 		"device-123",
-		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		nil,
@@ -137,7 +128,6 @@ func TestSnapshotRevisionChangesWithContent(t *testing.T) {
 func TestVerifyConfigSnapshotRejectsMissingOrInvalidSignature(t *testing.T) {
 	snapshot := NewBootstrapConfigSnapshot(
 		"device-123",
-		"serial",
 		RuntimeSnapshot{MqttAddress: "127.0.0.1:1883", CommandPollIntervalMs: 1000, ConfigSyncIntervalMs: 1000},
 		PolicySnapshot{KioskMode: false},
 		nil,

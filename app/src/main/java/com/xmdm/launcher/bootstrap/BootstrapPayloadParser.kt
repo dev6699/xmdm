@@ -21,21 +21,17 @@ class BootstrapPayloadParser(
         val serverUrl = stringValue(source, SERVER_URL_KEYS)
             ?: error("bootstrap payload is missing a server URL")
         val secondaryServerUrl = stringValue(source, SECONDARY_SERVER_URL_KEYS)
-        val serverProject = stringValue(source, SERVER_PROJECT_KEYS).orEmpty()
         val enrollmentToken = stringValue(source, ENROLLMENT_TOKEN_KEYS)
             ?: error("bootstrap payload is missing an enrollment token")
         val deviceId = stringValue(source, DEVICE_ID_KEYS)
-        val deviceIdUse = stringValue(source, DEVICE_ID_USE_KEYS)
         val extras = provisioningExtras(source)
 
         return ParsedBootstrapPayload(
             bootstrap = BootstrapState(
                 serverUrl = serverUrl,
                 secondaryServerUrl = secondaryServerUrl,
-                serverProject = serverProject,
                 enrollmentToken = enrollmentToken,
                 deviceId = deviceId,
-                deviceIdUse = deviceIdUse,
                 bootstrapExtrasJson = gson.toJson(extras),
                 rawJson = rawJson,
             ),
@@ -86,27 +82,15 @@ class BootstrapPayloadParser(
         private val SERVER_URL_KEYS = setOf(
             "android.app.extra.PROVISIONING_SERVER_URL",
             "com.xmdm.BASE_URL",
-            "BASE_URL",
         )
         private val SECONDARY_SERVER_URL_KEYS = setOf(
             "com.xmdm.SECONDARY_BASE_URL",
-            "SECONDARY_BASE_URL",
-        )
-        private val SERVER_PROJECT_KEYS = setOf(
-            "com.xmdm.SERVER_PROJECT",
-            "SERVER_PROJECT",
         )
         private val ENROLLMENT_TOKEN_KEYS = setOf(
             "com.xmdm.ENROLLMENT_TOKEN",
-            "ENROLLMENT_TOKEN",
         )
         private val DEVICE_ID_KEYS = setOf(
             "com.xmdm.DEVICE_ID",
-            "DEVICE_ID",
-        )
-        private val DEVICE_ID_USE_KEYS = setOf(
-            "com.xmdm.DEVICE_ID_USE",
-            "DEVICE_ID_USE",
         )
         private val EXTRACTED_KEYS = setOf(
             PROVISIONING_ADMIN_EXTRAS_BUNDLE,
@@ -115,17 +99,9 @@ class BootstrapPayloadParser(
             "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM",
             "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED",
             "com.xmdm.BASE_URL",
-            "BASE_URL",
             "com.xmdm.SECONDARY_BASE_URL",
-            "SECONDARY_BASE_URL",
-            "com.xmdm.SERVER_PROJECT",
-            "SERVER_PROJECT",
             "com.xmdm.ENROLLMENT_TOKEN",
-            "ENROLLMENT_TOKEN",
             "com.xmdm.DEVICE_ID",
-            "DEVICE_ID",
-            "com.xmdm.DEVICE_ID_USE",
-            "DEVICE_ID_USE",
         )
     }
 }

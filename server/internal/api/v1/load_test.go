@@ -250,7 +250,7 @@ func newLoadFixture(tb testing.TB) *loadFixture {
 		},
 		Name:            loadDeviceID,
 		PolicyID:        &policyID,
-		BootstrapExtras: map[string]any{"deviceIdUse": "serial"},
+		BootstrapExtras: map[string]any{},
 	}
 	appsStore := &loadAppStore{
 		apps: []apps.App{

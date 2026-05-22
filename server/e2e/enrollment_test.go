@@ -53,7 +53,7 @@ func TestEnrollmentE2E(t *testing.T) {
 
 	bound := postJSON(t, client, baseURL+"/api/v1/enrollment", `{
 		"enrollmentToken":"`+token+`",
-		"deviceIdentityPolicy":{"deviceId":"`+deviceID+`","deviceIdUse":"serial"},
+		"deviceIdentityPolicy":{"deviceId":"`+deviceID+`"},
 		"bootstrapExtras":{"customer":"Acme"}
 	}`)
 	deviceSecret, _ := bound["deviceSecret"].(string)
@@ -132,6 +132,6 @@ func TestEnrollmentE2E(t *testing.T) {
 	}
 	assertStatus(t, client, http.MethodPost, baseURL+"/api/v1/enrollment", `{
 		"enrollmentToken":"`+dupSecret+`",
-		"deviceIdentityPolicy":{"deviceId":"`+deviceID+`","deviceIdUse":"serial"}
+		"deviceIdentityPolicy":{"deviceId":"`+deviceID+`"}
 	}`, http.StatusConflict)
 }

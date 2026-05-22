@@ -61,15 +61,14 @@ flowchart TD
 
 - Manual setup exists only as a fallback for devices that cannot scan QR.
 - The fallback path must still end in the same enrollment API contract as QR.
-- Bootstrap files may seed base URL, device ID policy, customer fields, and cert lists.
+- Manual and ADB setup use the same Android provisioning JSON shape as QR, carried as a `base64url:` launch data URI.
 
 ### Required Setup Data
 
-- `BASE_URL`
-- `SECONDARY_BASE_URL`
-- `SERVER_PROJECT`
-- `DEVICE_ID` and `DEVICE_ID_USE`
-- optional customer, config, group, kiosk-app, and cert fields
+- `com.xmdm.BASE_URL`
+- `com.xmdm.ENROLLMENT_TOKEN`
+- `com.xmdm.DEVICE_ID`
+- the server currently emits `com.xmdm.SECONDARY_BASE_URL` with the same value as `com.xmdm.BASE_URL`
 - device runtime settings such as MQTT address and polling intervals are delivered in the signed config snapshot after enrollment
 
 ## Runtime State Machine

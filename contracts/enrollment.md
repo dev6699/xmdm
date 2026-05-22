@@ -18,11 +18,10 @@ Path prefix:
 {
   "enrollmentToken": "base64url-secret",
   "deviceIdentityPolicy": {
-    "deviceId": "serial-123",
-    "deviceIdUse": "serial"
+    "deviceId": "serial-123"
   },
   "bootstrapExtras": {
-    "customer": "Acme"
+    "secondaryBaseUrl": "https://backup.example"
   }
 }
 ```
@@ -38,12 +37,11 @@ Path prefix:
   "config": {
     "version": "1",
     "device": {
-      "deviceId": "serial-123",
-      "deviceIdUse": "serial"
+      "deviceId": "serial-123"
     },
     "policy": {
       "bootstrapExtras": {
-        "customer": "Acme"
+        "secondaryBaseUrl": "https://backup.example"
       }
     },
     "apps": [
@@ -195,17 +193,14 @@ Path prefix:
 ```json
 {
   "serverUrl": "https://mdm.example",
-  "serverProject": "rest",
   "enrollmentToken": "token",
   "deviceAdminPackageDownloadLocation": "https://cdn.example/launcher.apk",
   "deviceAdminPackageChecksum": "base64sha256",
   "deviceIdentityPolicy": {
-    "deviceId": "serial-optional",
-    "deviceIdUse": "serial"
+    "deviceId": "serial-optional"
   },
   "bootstrapExtras": {
-    "customer": "Acme",
-    "groups": ["field"]
+    "secondaryBaseUrl": "https://backup.example"
   }
 }
 ```
@@ -214,6 +209,8 @@ Path prefix:
 - Body:
 
 - QR code PNG encoding the Android provisioning JSON payload below.
+- The server currently emits `com.xmdm.SECONDARY_BASE_URL` with the same value as `com.xmdm.BASE_URL`.
+- `bootstrapExtras.secondaryBaseUrl` is still accepted and preserved in enrollment data, but it does not change the QR payload.
 
 ### `POST /api/v1/enrollment/qr/json`
 
@@ -223,17 +220,14 @@ Path prefix:
 ```json
 {
   "serverUrl": "https://mdm.example",
-  "serverProject": "rest",
   "enrollmentToken": "token",
   "deviceAdminPackageDownloadLocation": "https://cdn.example/launcher.apk",
   "deviceAdminPackageChecksum": "base64sha256",
   "deviceIdentityPolicy": {
-    "deviceId": "serial-optional",
-    "deviceIdUse": "serial"
+    "deviceId": "serial-optional"
   },
   "bootstrapExtras": {
-    "customer": "Acme",
-    "groups": ["field"]
+    "secondaryBaseUrl": "https://backup.example"
   }
 }
 ```
@@ -249,14 +243,15 @@ Path prefix:
   "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
   "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
     "com.xmdm.BASE_URL": "https://mdm.example",
-    "com.xmdm.SERVER_PROJECT": "rest",
+    "com.xmdm.SECONDARY_BASE_URL": "https://mdm.example",
     "com.xmdm.ENROLLMENT_TOKEN": "token",
-    "com.xmdm.DEVICE_ID_USE": "serial",
-    "com.xmdm.CUSTOMER": "Acme",
-    "com.xmdm.GROUP": "field"
+    "com.xmdm.DEVICE_ID": "serial-optional"
   }
 }
 ```
+
+- The server currently emits `com.xmdm.SECONDARY_BASE_URL` with the same value as `com.xmdm.BASE_URL`.
+- `bootstrapExtras.secondaryBaseUrl` is still accepted and preserved in enrollment data, but it does not change the QR payload.
 
 - Errors:
   - `400` invalid input or malformed JSON

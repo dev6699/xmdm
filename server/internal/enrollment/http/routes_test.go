@@ -35,12 +35,11 @@ func TestRegisterQRPng(t *testing.T) {
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
-		"serverProject":"rest",
 		"enrollmentToken":"token-123",
 		"deviceAdminPackageDownloadLocation":"https://cdn.example/launcher.apk",
 		"deviceAdminPackageChecksum":"abc123",
-		"deviceIdentityPolicy":{"deviceIdUse":"serial"},
-		"bootstrapExtras":{"customer":"Acme","groups":["field"]}
+		"deviceIdentityPolicy":{"deviceId":"device-123"},
+		"bootstrapExtras":{"secondaryBaseUrl":"https://mdm-backup.example"}
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/qr", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -72,12 +71,11 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 
 	body := `{
 		"serverUrl":"https://mdm.example/base/",
-		"serverProject":"rest",
 		"enrollmentToken":"token-123",
 		"deviceAdminPackageDownloadLocation":"https://cdn.example/launcher.apk",
 		"deviceAdminPackageChecksum":"abc123",
-		"deviceIdentityPolicy":{"deviceIdUse":"serial"},
-		"bootstrapExtras":{"customer":"Acme","groups":["field"]}
+		"deviceIdentityPolicy":{"deviceId":"device-123"},
+		"bootstrapExtras":{"secondaryBaseUrl":"https://mdm-backup.example"}
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment/qr/json", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -111,20 +109,11 @@ func TestRegisterQRJSONPayload(t *testing.T) {
 	if extras["com.xmdm.BASE_URL"] != "https://mdm.example/base" {
 		t.Fatalf("unexpected base url: %#v", extras["com.xmdm.BASE_URL"])
 	}
-	if extras["com.xmdm.SERVER_PROJECT"] != "rest" {
-		t.Fatalf("unexpected server project: %#v", extras["com.xmdm.SERVER_PROJECT"])
-	}
 	if extras["com.xmdm.ENROLLMENT_TOKEN"] != "token-123" {
 		t.Fatalf("unexpected enrollment token: %#v", extras["com.xmdm.ENROLLMENT_TOKEN"])
 	}
-	if extras["com.xmdm.DEVICE_ID_USE"] != "serial" {
-		t.Fatalf("unexpected device id use: %#v", extras["com.xmdm.DEVICE_ID_USE"])
-	}
-	if extras["com.xmdm.CUSTOMER"] != "Acme" {
-		t.Fatalf("unexpected customer: %#v", extras["com.xmdm.CUSTOMER"])
-	}
-	if extras["com.xmdm.GROUP"] != "field" {
-		t.Fatalf("unexpected group: %#v", extras["com.xmdm.GROUP"])
+	if extras["com.xmdm.SECONDARY_BASE_URL"] != "https://mdm.example/base" {
+		t.Fatalf("unexpected secondary base url: %#v", extras["com.xmdm.SECONDARY_BASE_URL"])
 	}
 }
 
@@ -178,8 +167,8 @@ func TestRegisterEnrollmentBindRouteReturnsIdentityOnly(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
-		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"},
-		"bootstrapExtras":{"customer":"Acme"}
+		"deviceIdentityPolicy":{"deviceId":"device-123"},
+		"bootstrapExtras":{"secondaryBaseUrl":"https://mdm-backup.example"}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
@@ -223,7 +212,7 @@ func TestRegisterEnrollmentConfigRequiresPolicyLink(t *testing.T) {
 			},
 			Name: "device-123",
 			// Leave PolicyID unset to verify the config path no longer falls back to the latest policy.
-			BootstrapExtras: map[string]any{"customer": "Acme"},
+			BootstrapExtras: map[string]any{},
 		},
 		secret: "device-secret",
 	}
@@ -437,7 +426,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 			},
 			Name:            "device-123",
 			PolicyID:        strPtr("policy-old"),
-			BootstrapExtras: map[string]any{"customer": "Acme"},
+			BootstrapExtras: map[string]any{},
 		},
 		secret: "device-secret",
 	}
@@ -551,7 +540,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
-	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER CUSTOMER")}
+	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER")}
 	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, store, appStore, fileStore, artifactStore, &fakeCertificateStore{
 		active: []certificates.Certificate{
 			{
@@ -569,7 +558,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
-		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"}
+		"deviceIdentityPolicy":{"deviceId":"device-123"}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
@@ -651,7 +640,7 @@ func TestRegisterEnrollmentBindRoute(t *testing.T) {
 	if len(config.Files) != 1 {
 		t.Fatalf("expected one file in config, got %d", len(config.Files))
 	}
-	if got := config.Files[0].Checksum; got != checksum.SHA256Base64URL([]byte("managed-file-on-device device-123 Acme")) {
+	if got := config.Files[0].Checksum; got != checksum.SHA256Base64URL([]byte("managed-file-on-device device-123")) {
 		t.Fatalf("unexpected rendered file checksum: %#v", got)
 	}
 	if config.Apps[0].DownloadPath != "/api/v1/devices/device-123/apps/app-1/versions/version-2/artifact" {
@@ -679,7 +668,7 @@ func TestRegisterEnrollmentBindRouteRejectsDuplicateDeviceConflict(t *testing.T)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
-		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"}
+		"deviceIdentityPolicy":{"deviceId":"device-123"}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
@@ -705,7 +694,7 @@ func TestRegisterEnrollmentConfigRejectsWrongDeviceCredentials(t *testing.T) {
 				Status:   device.StatusEnrolled,
 			},
 			Name:            "device-123",
-			BootstrapExtras: map[string]any{"customer": "Acme"},
+			BootstrapExtras: map[string]any{},
 		},
 		secret: "device-secret",
 	}
@@ -714,13 +703,17 @@ func TestRegisterEnrollmentConfigRejectsWrongDeviceCredentials(t *testing.T) {
 
 	bindReq := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
-		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"}
+		"deviceIdentityPolicy":{"deviceId":"device-123"},
+		"bootstrapExtras":{"secondaryBaseUrl":"https://mdm-backup.example"}
 	}`))
 	bindReq.Header.Set("Content-Type", "application/json")
 	bindRes := httptest.NewRecorder()
 	mux.ServeHTTP(bindRes, bindReq)
 	if bindRes.Code != http.StatusOK {
 		t.Fatalf("expected bind ok, got %d", bindRes.Code)
+	}
+	if store.bindBootstrapExtras["secondaryBaseUrl"] != "https://mdm-backup.example" {
+		t.Fatalf("non-removed bootstrap extras should be preserved: %#v", store.bindBootstrapExtras)
 	}
 
 	wrongSecretReq := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/config", nil)
@@ -757,7 +750,7 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 			},
 			Name:            "device-123",
 			PolicyID:        strPtr("policy-1"),
-			BootstrapExtras: map[string]any{"customer": "Acme"},
+			BootstrapExtras: map[string]any{},
 		},
 	}
 	appStore := &fakeAppStore{
@@ -851,12 +844,12 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 	}
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
-	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER CUSTOMER")}
+	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER")}
 	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, store, appStore, fileStore, artifactStore, nil, policyStore, enrollment.RuntimeSnapshot{}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollment", bytes.NewBufferString(`{
 		"enrollmentToken":"secret-token",
-		"deviceIdentityPolicy":{"deviceId":"device-123","deviceIdUse":"serial"}
+		"deviceIdentityPolicy":{"deviceId":"device-123"}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
@@ -886,7 +879,7 @@ func TestRegisterEnrollmentBindRouteUsesLatestPublishedVersion(t *testing.T) {
 	if len(typedConfig.Files) != 1 {
 		t.Fatalf("expected one file in config, got %d", len(typedConfig.Files))
 	}
-	if got := typedConfig.Files[0].Checksum; got != checksum.SHA256Base64URL([]byte("managed-file-on-device device-123 Acme")) {
+	if got := typedConfig.Files[0].Checksum; got != checksum.SHA256Base64URL([]byte("managed-file-on-device device-123")) {
 		t.Fatalf("unexpected rendered file checksum: %#v", got)
 	}
 }
@@ -901,7 +894,7 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 			},
 			Name:            "device-123",
 			PolicyID:        strPtr("policy-1"),
-			BootstrapExtras: map[string]any{"CUSTOMER": "Acme"},
+			BootstrapExtras: map[string]any{},
 		},
 	}
 	appStore := &fakeAppStore{
@@ -1011,7 +1004,7 @@ func TestRegisterDeviceConfigSyncRouteReturnsLatestSnapshot(t *testing.T) {
 
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionDevicesWrite})
 	mux := http.NewServeMux()
-	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER CUSTOMER")}
+	artifactStore := &fakeArtifactStore{content: []byte("managed-file-on-device DEVICE_NUMBER")}
 	Register(httpx.WithPrefix(mux, "/api/v1"), svc, deviceStore, nil, appStore, fileStore, artifactStore, &fakeCertificateStore{
 		active: []certificates.Certificate{
 			{
@@ -1154,17 +1147,18 @@ type fakeEnrollmentStore struct {
 	consumeErr  error
 	bindErr     error
 
-	issueTenant    string
-	issueExpiresAt time.Time
-	validateTenant string
-	validateToken  string
-	consumeTenant  string
-	consumeToken   string
-	revokeTenant   string
-	revokeID       string
-	bindTenant     string
-	bindToken      string
-	bindDeviceID   string
+	issueTenant         string
+	issueExpiresAt      time.Time
+	validateTenant      string
+	validateToken       string
+	consumeTenant       string
+	consumeToken        string
+	revokeTenant        string
+	revokeID            string
+	bindTenant          string
+	bindToken           string
+	bindDeviceID        string
+	bindBootstrapExtras map[string]any
 }
 
 type fakeCertificateStore struct {
@@ -1220,10 +1214,11 @@ func (s *fakeEnrollmentStore) ConsumeToken(_ context.Context, tenantID, token st
 	return s.consumed, nil
 }
 
-func (s *fakeEnrollmentStore) BindDevice(_ context.Context, tenantID, token, deviceID string, _ map[string]any) (enrollment.BoundDevice, error) {
+func (s *fakeEnrollmentStore) BindDevice(_ context.Context, tenantID, token, deviceID string, extras map[string]any) (enrollment.BoundDevice, error) {
 	s.bindTenant = tenantID
 	s.bindToken = token
 	s.bindDeviceID = deviceID
+	s.bindBootstrapExtras = extras
 	if s.bindErr != nil {
 		return enrollment.BoundDevice{}, s.bindErr
 	}

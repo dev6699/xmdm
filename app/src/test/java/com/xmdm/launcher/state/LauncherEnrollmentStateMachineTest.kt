@@ -33,7 +33,6 @@ class LauncherEnrollmentStateMachineTest {
             bootstrap = bootstrap,
             identity = DeviceIdentityState(
                 deviceId = "device-1",
-                deviceIdUse = "serial",
                 deviceSecret = "secret",
             ),
         )
@@ -54,10 +53,8 @@ class LauncherEnrollmentStateMachineTest {
         return BootstrapState(
             serverUrl = "https://mdm.example",
             secondaryServerUrl = null,
-            serverProject = "rest",
             enrollmentToken = "token",
             deviceId = "device-1",
-            deviceIdUse = "serial",
             bootstrapExtrasJson = "{}",
             rawJson = rawJson,
         )

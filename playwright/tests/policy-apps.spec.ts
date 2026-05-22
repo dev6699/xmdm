@@ -3,6 +3,7 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+import { ensureAgentAppPublished } from '../support/apps';
 import { dashboardCredentials } from '../support/auth';
 import { dashboardPaths } from '../support/paths';
 import { dashboardServerConfig } from '../support/server';
@@ -84,14 +85,16 @@ async function createPendingDevice(page: Page, name: string, policyId: string) {
 }
 
 async function issueEnrollmentToken(page: Page, deviceRowId: string, deviceName: string) {
+  await ensureAgentAppPublished(page);
+
   await page.goto(dashboardPaths.deviceDetail(deviceRowId));
   await expect(page.getByRole('heading', { name: 'Device Detail' })).toBeVisible();
   const currentDevice = page.getByRole('heading', { name: 'Current device' }).locator('xpath=ancestor::section[1]');
   const device = JSON.parse((await currentDevice.locator('pre').first().textContent()) ?? '{}') as {
-    deviceId: string;
+    id: string;
     name: string;
   };
-  expect(device.deviceId).toBeTruthy();
+  expect(device.id).toBeTruthy();
   expect(device.name).toBe(deviceName);
 
   await page.getByRole('button', { name: 'Generate QR' }).click();
@@ -103,10 +106,8 @@ async function issueEnrollmentToken(page: Page, deviceRowId: string, deviceName:
   };
   const token = payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.ENROLLMENT_TOKEN'];
   expect(token).toBeTruthy();
-  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID']).toBe(device.deviceId);
-  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID_USE']).toBe('serial');
-
-  return { deviceId: device.deviceId, token };
+  expect(payload['android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE']['com.xmdm.DEVICE_ID']).toBe(device.id);
+  return { deviceId: device.id, token };
 }
 
 async function enrollDevice(page: Page, deviceId: string, token: string) {
@@ -116,7 +117,6 @@ async function enrollDevice(page: Page, deviceId: string, token: string) {
       enrollmentToken: token,
       deviceIdentityPolicy: {
         deviceId,
-        deviceIdUse: 'serial',
       },
     },
   });

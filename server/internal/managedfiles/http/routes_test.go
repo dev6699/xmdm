@@ -53,7 +53,7 @@ func TestRegisterDeviceManagedFileArtifactRoute(t *testing.T) {
 			},
 			ReplaceVariables: true,
 		},
-	}, &fakeDeviceStore{}, &fakeArtifactStore{content: []byte("device-config-bytes DEVICE_NUMBER CUSTOMER")}, "tenant-1")
+	}, &fakeDeviceStore{}, &fakeArtifactStore{content: []byte("device-config-bytes DEVICE_NUMBER")}, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/managed-files/managed-file-1/artifact", nil)
 	req.Header.Set(deviceSecretHeader, "device-secret")
@@ -67,13 +67,13 @@ func TestRegisterDeviceManagedFileArtifactRoute(t *testing.T) {
 	if got := res.Header().Get("Content-Type"); got != "text/plain" {
 		t.Fatalf("unexpected content type: %q", got)
 	}
-	if got := res.Header().Get("X-XMDM-Artifact-Checksum"); got != checksum.SHA256Base64URL([]byte("device-config-bytes device-123 Acme")) {
+	if got := res.Header().Get("X-XMDM-Artifact-Checksum"); got != checksum.SHA256Base64URL([]byte("device-config-bytes device-123")) {
 		t.Fatalf("unexpected checksum header: %q", got)
 	}
 	if got := res.Header().Get("Content-Disposition"); got != `attachment; filename="device-config.txt"` {
 		t.Fatalf("unexpected disposition: %q", got)
 	}
-	if !bytes.Equal(res.Body.Bytes(), []byte("device-config-bytes device-123 Acme")) {
+	if !bytes.Equal(res.Body.Bytes(), []byte("device-config-bytes device-123")) {
 		t.Fatalf("unexpected body: %q", res.Body.Bytes())
 	}
 }
@@ -123,7 +123,7 @@ func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, se
 	return device.Device{
 		RecordBase:      device.RecordBase{ID: "device-123"},
 		Name:            "device-123",
-		BootstrapExtras: map[string]any{"CUSTOMER": "Acme"},
+		BootstrapExtras: map[string]any{},
 	}, nil
 }
 

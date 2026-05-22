@@ -8,7 +8,6 @@ import com.xmdm.launcher.state.DeviceIdentityState
 
 data class DeviceIdentityPolicy(
     val deviceId: String,
-    val deviceIdUse: String,
 )
 
 data class EnrollmentRequest(
@@ -38,8 +37,6 @@ class EnrollmentCoordinator(
     suspend fun enroll(bootstrap: BootstrapState): EnrollmentResult {
         val deviceId = bootstrap.deviceId?.takeIf { it.isNotBlank() }
             ?: error("bootstrap is missing a device id")
-        val deviceIdUse = bootstrap.deviceIdUse?.takeIf { it.isNotBlank() }
-            ?: error("bootstrap is missing a device id use")
 
         val response = gateway.enroll(
             bootstrap.serverUrl,
@@ -47,7 +44,6 @@ class EnrollmentCoordinator(
                 enrollmentToken = bootstrap.enrollmentToken,
                 deviceIdentityPolicy = DeviceIdentityPolicy(
                     deviceId = deviceId,
-                    deviceIdUse = deviceIdUse,
                 ),
                 bootstrapExtras = JsonParser.parseString(bootstrap.bootstrapExtrasJson).asJsonObject,
             ),
@@ -62,7 +58,6 @@ class EnrollmentCoordinator(
 
         val identity = DeviceIdentityState(
             deviceId = response.deviceId,
-            deviceIdUse = deviceIdUse,
             deviceSecret = response.deviceSecret,
         )
 

@@ -32,8 +32,7 @@ type BoundDevice struct {
 }
 
 type DeviceSnapshot struct {
-	DeviceID    string `json:"deviceId"`
-	DeviceIDUse string `json:"deviceIdUse"`
+	DeviceID string `json:"deviceId"`
 }
 
 type PolicySnapshot struct {
