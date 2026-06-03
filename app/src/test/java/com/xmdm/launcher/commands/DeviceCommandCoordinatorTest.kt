@@ -161,6 +161,50 @@ class DeviceCommandCoordinatorTest {
     }
 
     @Test
+    fun executesAndAcksCompanionLaunchCommands() = runTest {
+        val command = DeviceCommandRecord(
+            id = "cmd-launch",
+            type = "launch_companion_app",
+            status = "queued",
+            payload = JsonParser.parseString(
+                """{"packageName":"com.example.companion","signatureSha256":"deadbeef"}""",
+            ).asJsonObject,
+            expiresAt = null,
+        )
+        val gateway = RecordingGateway(commands = listOf(command))
+        var launchRequested = false
+        val coordinator = DeviceCommandCoordinator(
+            gateway = gateway,
+            executor = DeviceCommandExecutor(
+                rebootAction = object : DeviceRebooter {
+                    override fun reboot() = error("not expected")
+                },
+                companionAppLaunchAction = { incoming ->
+                    launchRequested = incoming.id == "cmd-launch"
+                    DeviceCommandExecutionResult(
+                        status = "acked",
+                        message = "companion app launch requested",
+                        details = mapOf("packageName" to "com.example.companion"),
+                    )
+                },
+            ),
+        )
+
+        val handled = coordinator.pollAndExecute(
+            serverUrl = "https://mdm.example",
+            deviceId = "device-123",
+            deviceSecret = "secret-abc",
+        )
+
+        assertTrue(launchRequested)
+        assertEquals(listOf("cmd-launch"), handled.map { it.id })
+        assertEquals(1, gateway.acks.size)
+        assertEquals("acked", gateway.acks[0].request.status)
+        assertEquals("companion app launch requested", gateway.acks[0].request.message)
+        assertEquals("com.example.companion", gateway.acks[0].request.details?.get("packageName"))
+    }
+
+    @Test
     fun acksExecutionFailures() = runTest {
         val command = DeviceCommandRecord(
             id = "cmd-2",

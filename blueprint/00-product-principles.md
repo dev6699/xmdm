@@ -25,6 +25,7 @@ The product is a control plane, not a general-purpose endpoint management suite.
 - Object storage for artifacts
 - MQTT plus HTTP polling for push delivery
 - Plugin architecture for optional modules
+- Extension points for premium modules that live outside the open-core repo
 - Single-tenant deployment in the first release
 - Tenant-aware schema for future expansion
 
@@ -89,6 +90,21 @@ The product is a control plane, not a general-purpose endpoint management suite.
 - Audit trail
 - Messaging and commands
 - Plugin-based extensions
+
+## Premium Extension Boundary
+
+Open-core XMDM owns the generic extension surface only. The repository defines the contracts, validation rules, and failure behavior for:
+
+- static plugin registration
+- plugin metadata
+- plugin-provided admin actions
+- plugin command type registration
+- managed secondary package delivery
+- safe disabled-plugin behavior
+
+Premium repos own premium feature implementation, release assets, operator workflows, and the premium feature roadmap. Premium code must live outside the open-core repo and must not require arbitrary runtime binary loading inside the open-core server.
+
+Core enrollment, sync, command delivery, and dashboard operation must continue when every premium plugin is absent or disabled. The open-core repo may expose only generic extension points; it must not ship premium-specific business logic, UI flows, or device command implementations.
 
 ## Priority Model
 

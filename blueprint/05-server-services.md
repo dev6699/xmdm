@@ -86,9 +86,12 @@ The server must be able to start, serve admin requests, and accept device sync e
 
 ### Plugin Service
 
-- Plugin discovery
+- Static plugin registration
+- Plugin metadata catalog
 - Plugin enable/disable state
 - Plugin-specific REST settings
+- Plugin-provided admin device actions
+- Plugin command type registration
 - Plugin task registration
 
 ### Audit Service
@@ -150,11 +153,17 @@ The server must be able to start, serve admin requests, and accept device sync e
 
 ## Plugin Design
 
-- Plugins are discovered at startup.
+- Plugins are statically registered at startup by code linked into the server build.
 - Plugins may contribute REST resources, persistence, and worker modules.
+- Plugins may contribute server-rendered admin routes under `/admin/plugins/{pluginId}/...`.
+- Plugins may contribute admin API routes under `/api/v1/admin/plugins/{pluginId}/...`.
+- Plugins may contribute device-detail actions that link to plugin-owned routes.
+- Plugins may register command types for validation and display while the core command queue remains authoritative for delivery, expiry, and acknowledgement.
 - Plugin settings live in tenant-scoped storage.
 - The plugin manager must be able to disable a plugin without breaking core sync.
 - Core server functions must not depend on a plugin for basic enrollment or device sync.
+- Core must not load arbitrary third-party binaries at runtime.
+- Premium plugin implementation lives outside the open-core repo and uses the same static extension contracts; core only exposes the generic extension points defined in the product principles.
 
 ## Update Design
 
@@ -175,6 +184,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 ## Server Failure Modes
 
 - If a plugin fails, core enrollment and sync must continue.
+- If a plugin is disabled, plugin routes, command types, and device actions must be unavailable while core routes continue.
 - If MQTT fails, polling must still deliver commands.
 - If object storage is slow, metadata reads should still work.
 - If a job crashes mid-run, the next run must be able to continue from persisted state.

@@ -62,6 +62,7 @@ type Dependencies struct {
 	ServerPublicURL string
 	AgentAppPackage string
 	PluginManager   *plugins.Manager
+	ExtraRootMounts []func(*http.ServeMux)
 	TenantID        string
 }
 
@@ -86,6 +87,7 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 		Runtime:         deps.Runtime,
 		ServerPublicURL: deps.ServerPublicURL,
 		AgentAppPackage: deps.AgentAppPackage,
+		PluginManager:   deps.PluginManager,
 		Audit:           deps.Audit,
 		TenantID:        deps.TenantID,
 	})
@@ -103,6 +105,11 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	grouphttp.Register(apiMux, svc, deps.Groups, deps.Audit, deps.TenantID)
 	policyhttp.Register(apiMux, svc, deps.Policies, deps.Audit, deps.TenantID)
 	devicehttp.Register(apiMux, svc, deps.Devices, deps.Audit, deps.TenantID)
+	for _, mount := range deps.ExtraRootMounts {
+		if mount != nil {
+			mount(mux)
+		}
+	}
 	return observability.NewHandler(httpx.WithRateLimits(mux, defaultRateLimitRules()...), observability.Config{Logger: log.Default()})
 }
 

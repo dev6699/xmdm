@@ -77,6 +77,9 @@ func (a *app) commandSendCmd(opts *config.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := a.validateCommandTypeBody(cmd.Context(), resolved, state, body); err != nil {
+				return err
+			}
 			item, err := a.mutateResource(cmd.Context(), resolved, state, http.MethodPost, "/admin/commands", body)
 			if err != nil {
 				return err

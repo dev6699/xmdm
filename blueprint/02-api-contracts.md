@@ -30,6 +30,7 @@
 
 - Plugins inherit the auth context of the calling user or device.
 - Sensitive plugin settings require an admin session or scoped token.
+- Disabled plugins must deny plugin calls even when the caller is otherwise authenticated.
 
 ## Public Device APIs
 
@@ -104,6 +105,31 @@
 - The live versioned admin resource surface uses `/api/v1/...`.
 - The console wrapper can still mount the same contract under `/admin/...` when needed.
 - All `/api/v1/admin/...` and `/api/v1/...` admin endpoints should follow the versioning and error rules below.
+
+### Plugin APIs
+
+- Plugin metadata is exposed through admin-authenticated plugin routes.
+- Plugin API routes live under `/api/v1/admin/plugins/{pluginId}/...`.
+- Server-rendered plugin admin routes live under `/admin/plugins/{pluginId}/...`.
+- Plugin routes inherit the caller's admin auth context and must enforce the plugin's declared permission requirements.
+- The core server must return `404` or `403` for disabled plugin routes without invoking plugin handlers.
+- Plugin settings are tenant-scoped and must not use device authentication headers.
+
+### Admin Device Actions
+
+- Plugins may contribute device-detail actions for the admin console.
+- Device action metadata includes `pluginId`, `actionId`, `label`, `href`, required permission, enabled state, and optional disabled reason.
+- Core renders only enabled actions that the current admin is authorized to use.
+- Device actions must target plugin-owned routes; core does not embed premium feature behavior.
+
+### Plugin Command Types
+
+- Plugins may register command type metadata for admin API, dashboard, and CLI validation.
+- Command type metadata includes `type`, `label`, target scope, payload schema description, and required permission.
+- Unregistered plugin command types are rejected by admin command creation.
+- Registered plugin command types still use the core command queue, delivery, expiry, and acknowledgement contracts.
+- Device execution remains controlled by the signed config snapshot and launcher command validation.
+- The built-in `launch_companion_app` command targets a declared managed app, requires a package signature digest in the payload, and fails safely when the package declaration, signature, or launchable activity is missing.
 
 ## Canonical Payload Shapes
 
@@ -191,6 +217,7 @@ The dashboard-generated QR payload derives `com.xmdm.BASE_URL` from `server.publ
 - Enrollment returns the initial device secret, not a long-lived admin token.
 - Config snapshots are immutable records with version numbers.
 - Commands are append-only until acked or expired.
+- Plugin command types extend the command catalog, but not the command lifecycle.
 - File and app artifacts are referenced by checksum and version, not by mutable URLs alone.
 - Admin APIs never reuse device authentication headers.
 - Device sync must tolerate empty command lists without treating that as an error.

@@ -5,7 +5,7 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-05-22
+Snapshot last updated: 2026-05-23
 
 ### M0 - Foundation
 
@@ -175,6 +175,23 @@ Note: `M8-10 Packaging And Release Documentation` is complete as of 2026-05-09 w
 | M9-10 Dashboard E2E And Docs | ☑ |
 
 Note: `M9-01` through `M9-10` are implemented as of 2026-05-15 with server-rendered `/admin` pages for dashboard overview, session auth, users, roles, groups, scan-first policy list/detail pages with generated restriction inputs, policy-managed app, managed-file, and certificate toggles, identity-style device list and detail pages, device-level enrollment QR generation, scan-first app list/detail pages, scan-first managed-files and certificates pages with detail views, commands list/detail pages, audit visibility, and a root-level `playwright/` workspace that covers the real-server login, identity, device, device-detail QR, group-detail, content, command, and audit flows with inline QR JSON and PNG preview output below the generate button. Device enrollment now uses an immutable device ID separate from the operator-facing display name, managed files now upload in one dashboard step from the managed-files page, and groups now have a scan-first list with a detail page that shows member devices.
+
+### M10 - Premium Add-on Extension Points
+
+| Item | State |
+| --- | --- |
+| M10-01 Premium Boundary And Blueprint | ☑ |
+| M10-02 Plugin Registry Contract | ☑ |
+| M10-03 Admin Device Action Hooks | ☑ |
+| M10-04 Plugin Command Type Registry | ☑ |
+| M10-05 Launcher Companion-App Command Boundary | ☑ |
+
+Note: `M10-01 Premium Boundary And Blueprint` is complete as of 2026-05-23 with the explicit open-core boundary in [blueprint/00-product-principles.md](blueprint/00-product-principles.md), [blueprint/05-server-services.md](blueprint/05-server-services.md), and [blueprint/06-security-and-compliance.md](blueprint/06-security-and-compliance.md).
+Note: `M10-02 Plugin Registry Contract` is complete as of 2026-05-23 with the authenticated static plugin registry in [server/internal/plugins/manager.go](server/internal/plugins/manager.go), the admin router wiring in [server/internal/admin/http/routes.go](server/internal/admin/http/routes.go), and the dashboard wiring in [server/internal/admin/http/dashboard.go](server/internal/admin/http/dashboard.go).
+Note: `M10-03 Admin Device Action Hooks` is complete as of 2026-05-23 with plugin-provided device actions rendered on the dashboard device detail page in [server/internal/admin/http/dashboard.go](server/internal/admin/http/dashboard.go), filtered by enablement and admin permissions through [server/internal/plugins/manager.go](server/internal/plugins/manager.go), and covered by [server/internal/admin/http/routes_test.go](server/internal/admin/http/routes_test.go) and [server/internal/plugins/manager_test.go](server/internal/plugins/manager_test.go).
+Note: `M10-04 Plugin Command Type Registry` is complete as of 2026-05-23 with built-in and plugin command type validation in [server/internal/admin/http/routes.go](server/internal/admin/http/routes.go) and [server/internal/admin/http/dashboard.go](server/internal/admin/http/dashboard.go), the builtin command catalog in [server/internal/commands/catalog.go](server/internal/commands/catalog.go), the plugin registry command-type metadata in [server/internal/plugins/manager.go](server/internal/plugins/manager.go), and CLI preflight validation in [cli/internal/app/command_types.go](cli/internal/app/command_types.go).
+Note: `M10-05 Launcher Companion-App Command Boundary` is complete as of 2026-05-23 with the signed companion-app launch command path in [app/src/main/java/com/xmdm/launcher/commands/CompanionAppLaunchCoordinator.kt](app/src/main/java/com/xmdm/launcher/commands/CompanionAppLaunchCoordinator.kt), the launcher command wiring in [app/src/main/java/com/xmdm/launcher/MainActivity.kt](app/src/main/java/com/xmdm/launcher/MainActivity.kt), the built-in command catalog entry in [server/internal/commands/catalog.go](server/internal/commands/catalog.go), and CLI/server command-type validation updates in [cli/internal/app/command_types.go](cli/internal/app/command_types.go) and [server/internal/admin/http/routes_test.go](server/internal/admin/http/routes_test.go).
+Note: premium feature implementations and feature-specific roadmap items live outside the open-core repo. This repo tracks only the generic extension points required for those add-ons.
 
 ## Blueprint Index
 

@@ -36,6 +36,7 @@ import (
 	"xmdm/server/internal/identity"
 	"xmdm/server/internal/logs"
 	managedfiles "xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
 
 	"github.com/google/uuid"
@@ -59,6 +60,7 @@ type DashboardDependencies struct {
 	Runtime         enrollment.RuntimeSnapshot
 	ServerPublicURL string
 	AgentAppPackage string
+	PluginManager   *plugins.Manager
 	Audit           audit.Store
 	TenantID        string
 }
@@ -2060,6 +2062,9 @@ func RegisterDashboard(mux httpx.Router, svc *auth.Service, deps DashboardDepend
 	mux.HandleFunc("/admin/commands/create", d.createCommand)
 	mux.HandleFunc("/admin/logs", d.logs)
 	mux.HandleFunc("/admin/audit", d.audit)
+	if d.deps.PluginManager != nil {
+		d.deps.PluginManager.Register(httpx.WithPrefix(mux, "/admin"), d.svc)
+	}
 }
 
 func (d *dashboard) login(w http.ResponseWriter, r *http.Request) {
@@ -4228,6 +4233,12 @@ func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session,
 		rows, _ := d.deps.Commands.ListPending(r.Context(), d.deps.TenantID, deviceRowID)
 		body += "<section class=\"panel\"><h2>Pending commands</h2>" + pre(rows) + "</section>"
 	}
+	if d.deps.PluginManager != nil {
+		actions := d.deps.PluginManager.DeviceActionsFor(session, found.ID)
+		if len(actions) > 0 {
+			body += string(pluginDeviceActionsSection(actions))
+		}
+	}
 	data := pageData{
 		Title:    "Device Detail",
 		Subtitle: "Edit the device label or retire it from active use.",
@@ -5084,7 +5095,7 @@ func (d *dashboard) commands(w http.ResponseWriter, r *http.Request) {
 	d.renderForSession(w, r, session, pageData{
 		Title:    "Commands",
 		Subtitle: "Send commands to individual devices or device groups. Broadcast is disabled from the dashboard.",
-		Forms:    []formData{{Title: "Send command", Action: "/admin/commands/create", Fields: commandFields(devices, groups), Submit: "Send command"}},
+		Forms:    []formData{{Title: "Send command", Action: "/admin/commands/create", Fields: commandFields(session, d.deps.PluginManager, devices, groups), Submit: "Send command"}},
 		Items:    commandsTable(items, deviceMap),
 	})
 }
@@ -5132,7 +5143,14 @@ func (d *dashboard) createCommand(w http.ResponseWriter, r *http.Request) {
 	if !d.requirePostWrite(w, r, "Commands") {
 		return
 	}
-	req, err := commandUpsertFromForm(r)
+	session, ok := sessionFromRequest(r, d.svc)
+	if !ok {
+		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+		return
+	}
+	req, err := commandUpsertFromForm(r, func(commandType string) bool {
+		return isAllowedCommandType(session, d.deps.PluginManager, commandType)
+	})
 	if err != nil {
 		d.redirectError(w, r, "/admin/commands", err.Error())
 		return
@@ -5356,9 +5374,16 @@ func splitFormValues(values []string) []string {
 	return out
 }
 
-func commandUpsertFromForm(r *http.Request) (commands.Upsert, error) {
+func commandUpsertFromForm(r *http.Request, allowType func(string) bool) (commands.Upsert, error) {
 	if err := r.ParseForm(); err != nil {
 		return commands.Upsert{}, err
+	}
+	commandType := strings.TrimSpace(r.FormValue("type"))
+	if commandType == "" {
+		return commands.Upsert{}, fmt.Errorf("command type is required")
+	}
+	if allowType != nil && !allowType(commandType) {
+		return commands.Upsert{}, fmt.Errorf("unsupported command type")
 	}
 	var payload map[string]any
 	rawPayload := strings.TrimSpace(r.FormValue("payload"))
@@ -5390,7 +5415,7 @@ func commandUpsertFromForm(r *http.Request) (commands.Upsert, error) {
 	default:
 		return commands.Upsert{}, fmt.Errorf("broadcast commands are disabled")
 	}
-	return commands.Upsert{Type: strings.TrimSpace(r.FormValue("type")), Payload: payload, ExpiresAt: expiresAt, Target: commands.Target{Type: targetType, DeviceID: strings.TrimSpace(r.FormValue("targetDeviceId")), GroupID: strings.TrimSpace(r.FormValue("targetGroupId"))}}, nil
+	return commands.Upsert{Type: commandType, Payload: payload, ExpiresAt: expiresAt, Target: commands.Target{Type: targetType, DeviceID: strings.TrimSpace(r.FormValue("targetDeviceId")), GroupID: strings.TrimSpace(r.FormValue("targetGroupId"))}}, nil
 }
 
 func managedFileUpsertFromMultipart(r *http.Request) (files.FileUpsert, managedfiles.ManagedFileUpsert, []byte, error) {
@@ -6263,9 +6288,9 @@ func commandsTable(items []commands.Command, devices map[string]device.Device) t
 	return template.HTML(b.String())
 }
 
-func commandFields(devices []device.Device, groups []group.Group) []fieldData {
+func commandFields(session *auth.Session, pluginManager *plugins.Manager, devices []device.Device, groups []group.Group) []fieldData {
 	return []fieldData{
-		{Name: "type", Label: "Command", Type: "select", Value: "ping", Required: true, Options: commandTypeOptions()},
+		{Name: "type", Label: "Command", Type: "select", Value: "ping", Required: true, Options: commandTypeOptions(session, pluginManager)},
 		{Name: "targetType", Label: "Target type", Type: "select", Value: commands.TargetDevice, Required: true, Options: []optionData{{Value: commands.TargetDevice, Label: "Device"}, {Value: commands.TargetGroup, Label: "Group"}}},
 		{Name: "targetDeviceId", Label: "Device", Type: "select", Placeholder: "Select device", Options: commandDeviceOptions(devices)},
 		{Name: "targetGroupId", Label: "Group", Type: "select", Placeholder: "Select group", Options: commandGroupOptions(groups)},
@@ -6274,13 +6299,30 @@ func commandFields(devices []device.Device, groups []group.Group) []fieldData {
 	}
 }
 
-func commandTypeOptions() []optionData {
-	return []optionData{
-		{Value: "ping", Label: "ping"},
-		{Value: "reboot", Label: "reboot"},
-		{Value: "sync_config", Label: "sync_config"},
-		{Value: "exit_kiosk", Label: "exit_kiosk"},
+func commandTypeOptions(session *auth.Session, pluginManager *plugins.Manager) []optionData {
+	options := make([]optionData, 0, len(commands.BuiltinTypes())+4)
+	seen := map[string]struct{}{}
+	for _, spec := range commands.BuiltinTypes() {
+		if _, ok := seen[spec.Type]; ok {
+			continue
+		}
+		seen[spec.Type] = struct{}{}
+		options = append(options, optionData{Value: spec.Type, Label: spec.Label})
 	}
+	if pluginManager != nil && session != nil {
+		for _, spec := range pluginManager.CommandTypesFor(session) {
+			if _, ok := seen[spec.Type]; ok {
+				continue
+			}
+			seen[spec.Type] = struct{}{}
+			label := spec.Label
+			if strings.TrimSpace(label) == "" {
+				label = spec.Type
+			}
+			options = append(options, optionData{Value: spec.Type, Label: label})
+		}
+	}
+	return options
 }
 
 func commandDeviceOptions(items []device.Device) []optionData {
@@ -6650,6 +6692,24 @@ func summaryTextItem(label, value string) string {
 
 func summaryHTMLItem(label string, value template.HTML) string {
 	return `<div class="policy-summary-item"><div class="policy-summary-label">` + esc(label) + `</div><div class="policy-summary-value">` + string(value) + `</div></div>`
+}
+
+func pluginDeviceActionsSection(actions []plugins.DeviceAction) template.HTML {
+	if len(actions) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<section class="panel"><h2>Plugin actions</h2><div class="policy-summary">`)
+	for _, action := range actions {
+		title := action.ActionID
+		if strings.TrimSpace(action.PluginID) != "" {
+			title = action.PluginID + " / " + action.ActionID
+		}
+		button := `<a class="button btn-primary" href="` + escAttr(action.Href) + `" title="` + escAttr(title) + `">` + esc(action.Label) + `</a>`
+		b.WriteString(summaryHTMLItem("Action", template.HTML(button)))
+	}
+	b.WriteString(`</div></section>`)
+	return template.HTML(b.String())
 }
 
 func appAssignmentStatusByID(assignments []policy.PolicyApp) map[string]bool {

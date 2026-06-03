@@ -620,6 +620,43 @@ Owner roles used below:
 - Task: verify the dashboard workflow and document browser operation.
 - Done when: dashboard handler coverage, admin e2e coverage, and operator documentation prove login, resource management, content, enrollment, commands, inspection, and logout.
 
+## Milestone M10 - Premium Add-on Extension Points
+
+### M10-01 Premium Boundary And Blueprint
+
+- Owner: `PM/Arch`
+- Depends on: M9-10
+- Task: document the open-core versus premium boundary for premium features such as remote control.
+- Done when: the blueprint states that premium implementation lives outside the open-core repo and core only exposes generic extension points.
+
+### M10-02 Plugin Registry Contract
+
+- Owner: `BE`
+- Depends on: M10-01, M1-08
+- Task: replace the demo plugin stub with static plugin registration for metadata, routes, device actions, command types, and enablement state.
+- Done when: core starts and operates with plugins disabled, and tests prove a registered plugin can expose metadata without breaking core routes.
+
+### M10-03 Admin Device Action Hooks
+
+- Owner: `BE`
+- Depends on: M10-02, M9-04
+- Task: let registered plugins contribute device-detail actions.
+- Done when: the dashboard can render plugin-provided device actions only when enabled and permitted, without hardcoding premium feature behavior.
+
+### M10-04 Plugin Command Type Registry
+
+- Owner: `BE`
+- Depends on: M10-02, M5-05, M9-08
+- Task: let plugins register allowed command types and payload validation metadata.
+- Done when: admin API, dashboard, and CLI reject unregistered command types and accept registered plugin command types through the existing command queue.
+
+### M10-05 Launcher Companion-App Command Boundary
+
+- Owner: `AE`
+- Depends on: M10-04, M4-05, M5-04
+- Task: add a signed-command path for starting an installed companion package or activity.
+- Done when: the launcher can start a declared companion app from a valid command and fails safely when the app, signature, or package declaration is missing.
+
 ## Backlog Rules
 
 - An item may only move forward if every dependency is complete.

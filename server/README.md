@@ -119,6 +119,6 @@ It exercises the same entrypoints that the roadmap uses for the clean-install ve
 
 ### Plugin Isolation
 
-Optional plugin routes are registered through an explicit manager object.
+Optional plugin routes are registered through an explicit manager object. The manager exposes admin-authenticated plugin metadata, including enablement state and static route/device-action/command-type declarations, without forcing core routes to depend on any plugin.
 
 The default server wiring keeps that manager disabled, so core admin routes continue to work even when no plugins are enabled.

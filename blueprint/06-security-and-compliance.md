@@ -17,6 +17,7 @@
 - A managed device may be stolen, rooted, offline, or partially compromised.
 - MQTT, object storage, and database infrastructure are trusted only when authenticated and authorized by the server.
 - Optional plugins are part of the trusted computing base only after explicit enablement and review.
+- Premium plugin code is reviewed and deployed separately from open-core XMDM, but it still runs inside the XMDM trust boundary once enabled.
 
 ### Trust Boundaries
 
@@ -24,6 +25,7 @@
 - Public enrollment and device sync endpoints.
 - Device credential boundary after enrollment.
 - Plugin execution boundary inside the Go server.
+- Premium service boundary for plugin-owned services outside the core server and outside the open-core repository.
 - Object storage access boundary for downloadable artifacts.
 - MQTT broker boundary for command delivery and polling fallback.
 
@@ -35,6 +37,7 @@
 - Artifact tampering or checksum bypass causing malicious installs.
 - Command forgery or stale command replay against a device.
 - Plugin overreach into data or actions outside its intended scope.
+- Plugin-created support sessions with stale or overbroad access.
 - Stale config application after policy changes or device reconnect.
 
 ### Risk Priorities
@@ -63,6 +66,7 @@
 
 - Plugin settings are access-controlled.
 - Sensitive plugin operations respect the calling identity.
+- Premium plugin sessions use short-lived, auditable tokens scoped to one device and one operator action.
 
 ## Authorization Model
 
@@ -70,6 +74,7 @@
 - Fine-grained permissions for device commands, push, audit, files, and plugins.
 - Group and tenant scoping for all admin queries.
 - Device identity is always resolved before allowing a device-side mutation.
+- Plugin-provided routes, device actions, and command types must declare required permissions.
 
 ## Content Integrity
 
@@ -92,6 +97,7 @@
 - Immutable audit log.
 - Admin-visible history for critical changes.
 - Device command history.
+- Premium plugin session history when a plugin creates operator-to-device sessions.
 - Retention policies for logs and push messages.
 - Exportable records for device and admin activity.
 
@@ -104,6 +110,7 @@
 - Device impersonation
 - Stale sync snapshots after policy changes
 - Privilege creep in admin workflows
+- Premium plugin session misuse
 
 ## Required Controls
 
@@ -112,7 +119,9 @@
 - CSRF protection for browser forms
 - Per-route permission checks
 - Audit logging for all privileged mutations
+- Audit logging for plugin session create, connect, cancel, timeout, and command dispatch actions
 - Token expiry for enrollment and command links
+- Token expiry for plugin-created support sessions
 - Server-side validation of device ownership before command delivery
 
 ## Failure Mode Rules

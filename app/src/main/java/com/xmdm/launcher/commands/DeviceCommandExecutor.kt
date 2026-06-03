@@ -14,36 +14,42 @@ class DeviceCommandExecutor(
     private val rebootAction: DeviceRebooter,
     private val configSyncAction: (suspend () -> DeviceCommandExecutionResult)? = null,
     private val kioskExitAction: (suspend () -> DeviceCommandExecutionResult)? = null,
+    private val companionAppLaunchAction: (suspend (DeviceCommandRecord) -> DeviceCommandExecutionResult)? = null,
 ) : DeviceCommandActionExecutor {
     override suspend fun execute(command: DeviceCommandRecord): DeviceCommandExecutionResult {
         return when (command.type.lowercase()) {
             "ping" -> DeviceCommandExecutionResult(
                 status = "acked",
                 message = "pong",
-                details = command.details("command" to "ping"),
+                details = command.commandDetails("command" to "ping"),
             )
             "reboot" -> {
                 rebootAction.reboot()
                 DeviceCommandExecutionResult(
                     status = "acked",
                     message = "device reboot requested",
-                    details = command.details("command" to "reboot"),
+                    details = command.commandDetails("command" to "reboot"),
                 )
             }
-            "sync_config", "refresh_config" -> configSyncAction?.invoke() ?: DeviceCommandExecutionResult(
+            "sync_config" -> configSyncAction?.invoke() ?: DeviceCommandExecutionResult(
                 status = "failed",
                 message = "config sync unavailable",
-                details = command.details("command" to command.type),
+                details = command.commandDetails("command" to command.type),
             )
-            "exit_kiosk", "exitkiosk" -> kioskExitAction?.invoke() ?: DeviceCommandExecutionResult(
+            "exit_kiosk" -> kioskExitAction?.invoke() ?: DeviceCommandExecutionResult(
                 status = "failed",
                 message = "kiosk exit unavailable",
-                details = command.details("command" to command.type),
+                details = command.commandDetails("command" to command.type),
+            )
+            "launch_companion_app" -> companionAppLaunchAction?.invoke(command) ?: DeviceCommandExecutionResult(
+                status = "failed",
+                message = "companion app launch unavailable",
+                details = command.commandDetails("command" to command.type),
             )
             else -> DeviceCommandExecutionResult(
                 status = "failed",
                 message = "unsupported command type: ${command.type}",
-                details = command.details("command" to command.type),
+                details = command.commandDetails("command" to command.type),
             )
         }
     }
@@ -76,21 +82,4 @@ class AndroidDeviceRebooter(
             }
         }.getOrElse { throw IllegalStateException("failed to request reboot", it) }
     }
-}
-
-
-private fun DeviceCommandRecord.details(vararg values: Pair<String, Any?>): Map<String, Any> {
-    val result = linkedMapOf<String, Any>()
-    result["commandId"] = id
-    result["commandType"] = type
-    for ((key, value) in values) {
-        if (value != null) {
-            result[key] = value
-        }
-    }
-    payload?.let { payloadJson ->
-        result["payload"] = payloadJson
-    }
-    expiresAt?.let { result["expiresAt"] = it }
-    return result
 }

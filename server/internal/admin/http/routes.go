@@ -25,10 +25,10 @@ const (
 func Register(mux httpx.Router, svc *auth.Service, pluginManager *plugins.Manager, auditStore audit.Store, commandStore commands.Repository, tenantID string) {
 	adminMux := httpx.WithPrefix(mux, "/admin")
 	registerSessionRoutes(adminMux, svc)
-	registerCommandRoutes(adminMux, svc, auditStore, commandStore, tenantID)
+	registerCommandRoutes(adminMux, svc, pluginManager, auditStore, commandStore, tenantID)
 	registerAuditRoutes(adminMux, svc, auditStore, tenantID)
 	if pluginManager != nil {
-		pluginManager.Register(adminMux)
+		pluginManager.Register(adminMux, svc)
 	}
 }
 
@@ -117,7 +117,7 @@ func registerSessionRoutes(mux httpx.Router, svc *auth.Service) {
 	})
 }
 
-func registerCommandRoutes(mux httpx.Router, svc *auth.Service, auditStore audit.Store, commandStore commands.Repository, tenantID string) {
+func registerCommandRoutes(mux httpx.Router, svc *auth.Service, pluginManager *plugins.Manager, auditStore audit.Store, commandStore commands.Repository, tenantID string) {
 	mux.HandleFunc("/commands", func(w http.ResponseWriter, r *http.Request) {
 		session, ok := sessionFromRequest(r, svc)
 		if !ok {
@@ -163,6 +163,10 @@ func registerCommandRoutes(mux httpx.Router, svc *auth.Service, auditStore audit
 				return
 			}
 			if req.Type == "" {
+				http.Error(w, "invalid input", http.StatusBadRequest)
+				return
+			}
+			if !isAllowedCommandType(session, pluginManager, req.Type) {
 				http.Error(w, "invalid input", http.StatusBadRequest)
 				return
 			}
@@ -338,6 +342,21 @@ func parseCommandExpiresAt(raw string) (*time.Time, error) {
 		return nil, httpx.ErrInvalidInput
 	}
 	return &parsed, nil
+}
+
+func isAllowedCommandType(session *auth.Session, pluginManager *plugins.Manager, commandType string) bool {
+	commandType = strings.TrimSpace(commandType)
+	if commandType == "" {
+		return false
+	}
+	if commands.IsBuiltinType(commandType) {
+		return true
+	}
+	if pluginManager == nil || session == nil {
+		return false
+	}
+	_, ok := pluginManager.SupportsCommandType(session, commandType)
+	return ok
 }
 
 func sessionFromRequest(r *http.Request, svc *auth.Service) (*auth.Session, bool) {

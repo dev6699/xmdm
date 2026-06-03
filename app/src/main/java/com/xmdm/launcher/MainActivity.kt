@@ -30,6 +30,8 @@ import com.xmdm.launcher.certificates.AndroidCertificateInstaller
 import com.xmdm.launcher.certificates.CertificateInstallCoordinator
 import com.xmdm.launcher.certificates.certificateBucketVersion
 import com.xmdm.launcher.commands.AndroidDeviceRebooter
+import com.xmdm.launcher.commands.AndroidCompanionAppLaunchHost
+import com.xmdm.launcher.commands.CompanionAppLaunchCoordinator
 import com.xmdm.launcher.commands.DeviceCommandCoordinator
 import com.xmdm.launcher.commands.DeviceCommandExecutor
 import com.xmdm.launcher.commands.DeviceCommandExecutionResult
@@ -140,8 +142,14 @@ class MainActivity : AppCompatActivity() {
                 kioskExitAction = {
                     requestExitKioskFromCommand()
                 },
+                companionAppLaunchAction = { command ->
+                    requestCompanionAppLaunchFromCommand(command)
+                },
             ),
         )
+    }
+    private val companionAppLaunchCoordinator by lazy {
+        CompanionAppLaunchCoordinator(AndroidCompanionAppLaunchHost(this))
     }
     private val kioskModeController by lazy {
         KioskModeController(AndroidKioskModeHost(this))
@@ -1209,6 +1217,11 @@ class MainActivity : AppCompatActivity() {
                 "policyVersion" to policyVersion,
             ),
         )
+    }
+
+    private suspend fun requestCompanionAppLaunchFromCommand(command: com.xmdm.launcher.commands.DeviceCommandRecord): DeviceCommandExecutionResult {
+        val state = stateStore.state.first()
+        return companionAppLaunchCoordinator.execute(state, command)
     }
 
     private fun maybeApplyManagedFiles(state: AgentState) {

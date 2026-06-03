@@ -29,6 +29,7 @@ import (
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/identity"
 	"xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
 )
 
@@ -206,6 +207,39 @@ func TestRegisterRejectsTextPlainCommandSubmissionWithoutCSRF(t *testing.T) {
 	}
 }
 
+func TestRegisterIncludesPluginMetadataWithoutBreakingLogin(t *testing.T) {
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Hour, []auth.Permission{auth.PermissionAdminRead})
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	mgr := plugins.New(plugins.Plugin{
+		ID:      "remote-control",
+		Name:    "Remote Control",
+		Enabled: true,
+	})
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, mgr, nil, &fakeAdminCommandStore{}, "tenant-1")
+
+	loginReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/login", nil)
+	loginRes := httptest.NewRecorder()
+	mux.ServeHTTP(loginRes, loginReq)
+	if loginRes.Code != http.StatusOK {
+		t.Fatalf("login form status = %d, want %d", loginRes.Code, http.StatusOK)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/plugins", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected plugin metadata route to work, got %d body=%s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"remote-control"`) {
+		t.Fatalf("expected plugin metadata response, got %s", res.Body.String())
+	}
+}
+
 func TestRegisterListsCommands(t *testing.T) {
 	svc := auth.NewService("admin", "secret", time.Hour)
 	session, err := svc.Login("admin", "secret")
@@ -234,6 +268,27 @@ func TestRegisterListsCommands(t *testing.T) {
 	}
 	if len(payload.Commands) != 1 || payload.Commands[0].ID != "cmd-1" {
 		t.Fatalf("unexpected commands: %#v", payload.Commands)
+	}
+}
+
+func TestRegisterRejectsUnknownCommandTypeOnAdminApi(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Hour)
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	store := &fakeAdminCommandStore{}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, nil, nil, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/commands", strings.NewReader(`{"type":"remote-lock","target":{"type":"device","deviceId":"device-1"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected bad request, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -270,6 +325,7 @@ func TestRegisterCommandsPageUsesSelectorsAndShowsAllCommandTypes(t *testing.T) 
 		`value="reboot"`,
 		`value="sync_config"`,
 		`value="exit_kiosk"`,
+		`value="launch_companion_app"`,
 		`value="device"`,
 		`value="group"`,
 		`device-1`,
@@ -285,6 +341,46 @@ func TestRegisterCommandsPageUsesSelectorsAndShowsAllCommandTypes(t *testing.T) 
 	}
 	if strings.Contains(body, `device-2`) || strings.Contains(body, `Tablet Two`) {
 		t.Fatalf("commands page should not show suspended device in selector: %s", body)
+	}
+}
+
+func TestRegisterCommandsPageIncludesRegisteredPluginCommandTypes(t *testing.T) {
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Hour, []auth.Permission{auth.PermissionAdminRead, auth.PermissionAdminWrite})
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	pluginManager := plugins.New(plugins.Plugin{
+		ID:      "remote-control",
+		Name:    "Remote Control",
+		Enabled: true,
+		CommandTypes: []plugins.CommandType{
+			{
+				Type:               "remote-lock",
+				Label:              "Remote Lock",
+				TargetScope:        "device",
+				RequiredPermission: string(auth.PermissionAdminWrite),
+			},
+		},
+	})
+	mux := http.NewServeMux()
+	RegisterDashboard(mux, svc, DashboardDependencies{
+		Commands:      &fakeAdminCommandStore{items: []commands.Command{{ID: "cmd-1", Type: "ping", Status: commands.StatusQueued, DeviceID: "device-1"}}},
+		PluginManager: pluginManager,
+		TenantID:      "tenant-1",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/commands", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `value="remote-lock"`) {
+		t.Fatalf("commands page missing plugin command type: %s", body)
 	}
 }
 
@@ -328,6 +424,71 @@ func TestRegisterCreatesCommandFromFormWithLocalExpiryAndTargetSelects(t *testin
 	}
 	if got := reqUpsert.Payload["force"]; got != true {
 		t.Fatalf("unexpected payload: %#v", reqUpsert.Payload)
+	}
+}
+
+func TestRegisterCreatesRegisteredPluginCommandFromForm(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Hour)
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	store := &fakeAdminCommandStore{}
+	pluginManager := plugins.New(plugins.Plugin{
+		ID:      "remote-control",
+		Name:    "Remote Control",
+		Enabled: true,
+		CommandTypes: []plugins.CommandType{
+			{Type: "remote-lock", Label: "Remote Lock", TargetScope: "device", RequiredPermission: string(auth.PermissionAdminWrite)},
+		},
+	})
+	mux := http.NewServeMux()
+	RegisterDashboard(mux, svc, DashboardDependencies{Commands: store, PluginManager: pluginManager, TenantID: "tenant-1"})
+
+	csrfToken := mustGetCSRFCookieFromDashboardLogin(t, mux)
+	form := strings.NewReader("csrfToken=" + csrfToken + "&type=remote-lock&targetType=device&targetDeviceId=device-1&payload=%7B%22force%22%3Atrue%7D")
+	req := httptest.NewRequest(http.MethodPost, "/admin/commands/create", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrfToken})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(store.enqueues) != 1 || store.enqueues[0].Type != "remote-lock" {
+		t.Fatalf("expected registered plugin command to enqueue, got %#v", store.enqueues)
+	}
+}
+
+func TestRegisterRejectsUnregisteredPluginCommandFromForm(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Hour)
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	store := &fakeAdminCommandStore{}
+	mux := http.NewServeMux()
+	RegisterDashboard(mux, svc, DashboardDependencies{Commands: store, TenantID: "tenant-1"})
+
+	csrfToken := mustGetCSRFCookieFromDashboardLogin(t, mux)
+	form := strings.NewReader("csrfToken=" + csrfToken + "&type=remote-lock&targetType=device&targetDeviceId=device-1&payload=%7B%7D")
+	req := httptest.NewRequest(http.MethodPost, "/admin/commands/create", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrfToken})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Header().Get("Location"), "unsupported+command+type") {
+		t.Fatalf("expected unsupported command rejection, got location=%q", rr.Header().Get("Location"))
+	}
+	if len(store.enqueues) != 0 {
+		t.Fatalf("expected no enqueue for unknown command type, got %#v", store.enqueues)
 	}
 }
 
@@ -1948,8 +2109,21 @@ func TestRegisterDashboardDeviceDetailShowsUpdateAndRetire(t *testing.T) {
 	policyStore := &fakeDashboardPolicyStore{
 		policies: []policy.Policy{{RecordBase: policy.RecordBase{ID: "policy-1", TenantID: "tenant-1", Status: "active"}, Name: "Default policy"}},
 	}
+	pluginManager := plugins.New(plugins.Plugin{
+		ID:      "remote-control",
+		Name:    "Remote Control",
+		Enabled: true,
+		DeviceActions: []plugins.DeviceAction{
+			{
+				ActionID: "launch-session",
+				Label:    "Launch session",
+				Href:     "/admin/plugins/remote-control/devices/{{deviceId}}/launch",
+				Enabled:  true,
+			},
+		},
+	})
 	mux := http.NewServeMux()
-	RegisterDashboard(mux, svc, DashboardDependencies{Devices: deviceStore, Policies: policyStore, TenantID: "tenant-1"})
+	RegisterDashboard(mux, svc, DashboardDependencies{Devices: deviceStore, Policies: policyStore, PluginManager: pluginManager, TenantID: "tenant-1"})
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/devices/device-1", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
@@ -1969,6 +2143,9 @@ func TestRegisterDashboardDeviceDetailShowsUpdateAndRetire(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), `href="/admin/policies/policy-1"`) {
 		t.Fatalf("device detail should link to active policy: %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Plugin actions") || !strings.Contains(rr.Body.String(), "Launch session") || !strings.Contains(rr.Body.String(), `href="/admin/plugins/remote-control/devices/device-1/launch"`) {
+		t.Fatalf("device detail should render plugin actions: %s", rr.Body.String())
 	}
 	unescaped := html.UnescapeString(rr.Body.String())
 	if !strings.Contains(unescaped, "Config preview") || !strings.Contains(unescaped, `"deviceId": "device-1"`) || !strings.Contains(unescaped, `"name": "Default policy"`) {
