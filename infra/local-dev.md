@@ -14,7 +14,7 @@ Bring up the supporting services first:
 ```sh
 cd infra
 docker compose up -d
-./migrate.sh
+sh ./migrate.sh
 ```
 
 The local stack provides:

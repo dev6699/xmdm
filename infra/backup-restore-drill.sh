@@ -25,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-XMDM_POSTGRES_DB="$source_db" ./migrate.sh >/dev/null
+XMDM_POSTGRES_DB="$source_db" sh ./migrate.sh >/dev/null
 
 docker compose exec -T -e PGPASSWORD="$source_password" postgres \
   pg_dump -h "$source_host" -p "$source_port" -U "$source_user" -d "$source_db" \

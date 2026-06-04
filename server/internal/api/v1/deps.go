@@ -56,6 +56,7 @@ func NewDeps(cfg *config.Config) Dependencies {
 	devicesStore.SetProvisioner(provisioner)
 	enrollmentStore.SetProvisioner(provisioner)
 	return Dependencies{
+		Database:     pool,
 		Identity:     identitypg.New(pool),
 		Apps:         appspg.New(pool),
 		Files:        filespg.New(pool),

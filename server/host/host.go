@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	coremigrate "xmdm/server"
 	internalv1 "xmdm/server/internal/api/v1"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/config"
@@ -20,9 +22,21 @@ type HostedPlugin interface {
 	CorePlugin() Plugin
 }
 
+type DatabaseAware interface {
+	SetDatabase(*pgxpool.Pool) error
+}
+
+type Migratable interface {
+	Migrate() error
+}
+
 func Run(configPath string, plugins ...HostedPlugin) error {
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
+		return err
+	}
+
+	if err := coremigrate.MigrateDSN(cfg.Postgres.DSN); err != nil {
 		return err
 	}
 
@@ -33,6 +47,16 @@ func Run(configPath string, plugins ...HostedPlugin) error {
 		for _, plugin := range plugins {
 			if plugin == nil {
 				continue
+			}
+			if dbAware, ok := plugin.(DatabaseAware); ok && deps.Database != nil {
+				if err := dbAware.SetDatabase(deps.Database); err != nil {
+					return err
+				}
+			}
+			if migratable, ok := plugin.(Migratable); ok {
+				if err := migratable.Migrate(); err != nil {
+					return err
+				}
 			}
 			defs = append(defs, plugin.CorePlugin())
 			mounts = append(mounts, plugin.Mount)

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	adminhttp "xmdm/server/internal/admin/http"
 	apps "xmdm/server/internal/apps"
 	apphttp "xmdm/server/internal/apps/http"
@@ -42,6 +43,7 @@ import (
 )
 
 type Dependencies struct {
+	Database        *pgxpool.Pool
 	Identity        identity.Repository
 	Apps            apps.Repository
 	Files           files.Repository

@@ -102,10 +102,11 @@ The messaging and audit surface is API-first for now; a separate admin UI can be
 
 ### Migration Tooling
 
-The local bootstrap migrator lives in [../infra/migrate.sh](../infra/migrate.sh).
+The server applies embedded Goose migrations at startup. The migration helper lives in [migrate.go](migrate.go), and the `server` command also supports `-migrate-only` for bootstrap scripts.
 
-It applies the SQL files in [migrations/](migrations/) once, records applied files in `schema_migrations`, and seeds the single active tenant row required by the single-tenant v1 model.
-The bootstrap set now also creates the `audit_events` table used by the database-backed audit store.
+It applies the SQL files in [migrations/](migrations/) once and records applied files in `schema_migrations`.
+
+The local bootstrap script in [../infra/migrate.sh](../infra/migrate.sh) now delegates to the embedded Go migrator for the initial database setup.
 
 ### Audit Capture
 
