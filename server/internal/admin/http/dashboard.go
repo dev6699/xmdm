@@ -2068,6 +2068,7 @@ func RegisterDashboard(mux httpx.Router, svc *auth.Service, deps DashboardDepend
 }
 
 func (d *dashboard) login(w http.ResponseWriter, r *http.Request) {
+	nextPath := safeAdminRedirectPath(r.URL.Query().Get("next"))
 	switch r.Method {
 	case http.MethodGet:
 		token := issueCSRFCookie(w, r)
@@ -2078,6 +2079,7 @@ func (d *dashboard) login(w http.ResponseWriter, r *http.Request) {
 				Title:  "Enter the control plane",
 				Action: "/admin/login",
 				Fields: []fieldData{
+					{Name: "next", Type: "hidden", Value: nextPath},
 					{Name: "username", Label: "Username", Type: "text", Required: true},
 					{Name: "password", Label: "Password", Type: "password", Required: true},
 				},
@@ -2096,6 +2098,10 @@ func (d *dashboard) login(w http.ResponseWriter, r *http.Request) {
 		session, err := d.svc.Login(r.FormValue("username"), r.FormValue("password"))
 		if err == nil {
 			http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: session.ID, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: session.ExpiresAt})
+			if next := safeAdminRedirectPath(r.FormValue("next")); next != "" {
+				http.Redirect(w, r, next, http.StatusSeeOther)
+				return
+			}
 			http.Redirect(w, r, "/admin", http.StatusSeeOther)
 			return
 		}
@@ -2114,6 +2120,20 @@ func (d *dashboard) login(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func safeAdminRedirectPath(next string) string {
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return ""
+	}
+	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
+		return ""
+	}
+	if !strings.HasPrefix(next, "/admin/") && next != "/admin" {
+		return ""
+	}
+	return next
 }
 
 func (d *dashboard) logout(w http.ResponseWriter, r *http.Request) {
@@ -3485,11 +3505,15 @@ func (d *dashboard) roles(w http.ResponseWriter, r *http.Request) {
 		Subtitle: "Define the permission bundles available to operators.",
 		Items:    rolesTable(items, d.csrfToken(r), d.canWrite(session)),
 	}
+	catalog := d.permissionCatalog()
 	if d.canWrite(session) {
 		data.Forms = []formData{{
 			Title: "Create role", Action: "/admin/roles/create",
-			Fields: []fieldData{{Name: "name", Label: "Name", Type: "text", Placeholder: "operators", Required: true}, {Name: "permissions", Label: "Permissions JSON array", Type: "textarea", Value: `["admin.read"]`, Placeholder: `["admin.read"]`, Required: true}},
-			Help:   permissionsHelp(),
+			Fields: []fieldData{
+				{Name: "name", Label: "Name", Type: "text", Placeholder: "operators", Required: true},
+				{Name: "permissions", Label: "Permissions", Type: "multiselect", Options: allPermissionOptions(catalog)},
+			},
+			Help:   permissionsHelp(catalog),
 			Submit: "Create role",
 		}}
 	}
@@ -3522,7 +3546,7 @@ func (d *dashboard) roleDetail(w http.ResponseWriter, r *http.Request) {
 		d.renderPageError(w, r, session, "Role Detail", httpx.ErrNotFound)
 		return
 	}
-	perms, _ := json.Marshal(found.Permissions)
+	catalog := d.permissionCatalog()
 	data := pageData{
 		Title:    "Role Detail",
 		Subtitle: "Edit the permission bundle or retire it from active use.",
@@ -3535,9 +3559,9 @@ func (d *dashboard) roleDetail(w http.ResponseWriter, r *http.Request) {
 				Action: "/admin/roles/" + id + "/update",
 				Fields: []fieldData{
 					{Name: "name", Label: "Name", Type: "text", Value: found.Name, Placeholder: "operators", Required: true},
-					{Name: "permissions", Label: "Permissions JSON array", Type: "textarea", Value: string(perms), Placeholder: `["admin.read"]`, Required: true},
+					{Name: "permissions", Label: "Permissions", Type: "multiselect", Values: found.Permissions, Options: allPermissionOptions(catalog)},
 				},
-				Help:   permissionsHelp(),
+				Help:   permissionsHelp(catalog),
 				Submit: "Update role",
 			}, {
 				Title:  "Retire role",
@@ -5295,8 +5319,19 @@ func roleUpsertFromForm(r *http.Request) (identity.RoleUpsert, error) {
 		return identity.RoleUpsert{}, err
 	}
 	var permissions []string
-	if err := json.Unmarshal([]byte(strings.TrimSpace(r.FormValue("permissions"))), &permissions); err != nil {
-		return identity.RoleUpsert{}, fmt.Errorf("invalid permissions json")
+	if values := r.Form["permissions"]; len(values) > 1 {
+		permissions = append(permissions, values...)
+	} else {
+		raw := strings.TrimSpace(r.FormValue("permissions"))
+		if raw == "" {
+			permissions = nil
+		} else if strings.HasPrefix(raw, "[") {
+			if err := json.Unmarshal([]byte(raw), &permissions); err != nil {
+				return identity.RoleUpsert{}, fmt.Errorf("invalid permissions json")
+			}
+		} else {
+			permissions = append(permissions, raw)
+		}
 	}
 	return identity.RoleUpsert{Name: strings.TrimSpace(r.FormValue("name")), Permissions: permissions}, nil
 }
@@ -5925,14 +5960,13 @@ func formatDashboardTime(t time.Time) string {
 	return t.Local().Format("Jan 2, 2006 15:04 MST")
 }
 
-func permissionsHelp() template.HTML {
-	perms := auth.AllPermissions()
+func permissionsHelp(perms []auth.Permission) template.HTML {
 	var b strings.Builder
 	b.WriteString(`<div class="field-help">Available permissions:<div class="permission-catalog">`)
 	for _, perm := range perms {
 		b.WriteString(`<code>` + esc(string(perm)) + `</code>`)
 	}
-	b.WriteString(`</div><div class="muted">Use a JSON array such as <code>["admin.read","admin.write"]</code>.</div></div>`)
+	b.WriteString(`</div><div class="muted">Select the permissions this role should grant. The seeded admin role uses the full set.</div></div>`)
 	return template.HTML(b.String())
 }
 
@@ -5952,6 +5986,23 @@ func dashboardPermissions(values []string) []auth.Permission {
 		perms = append(perms, auth.Permission(value))
 	}
 	return perms
+}
+
+func (d *dashboard) permissionCatalog() []auth.Permission {
+	if d.deps.PluginManager != nil {
+		if perms := d.deps.PluginManager.PermissionCatalog(); len(perms) > 0 {
+			return perms
+		}
+	}
+	return auth.AllPermissions()
+}
+
+func allPermissionOptions(perms []auth.Permission) []optionData {
+	options := make([]optionData, 0, len(perms))
+	for _, perm := range perms {
+		options = append(options, optionData{Value: string(perm), Label: string(perm)})
+	}
+	return options
 }
 
 func allRoleOptions(items []identity.Role) []optionData {

@@ -34,6 +34,7 @@ func TestManagerExposesRegisteredMetadata(t *testing.T) {
 		Name:        "Remote Control",
 		Description: "Premium device access",
 		Enabled:     true,
+		Permissions: []string{"admin:remote-control"},
 		Routes: []RouteSpec{
 			{Method: http.MethodGet, Path: "/settings"},
 		},
@@ -87,6 +88,10 @@ func TestManagerExposesRegisteredMetadata(t *testing.T) {
 	}
 	if len(got.CommandTypes) != 1 || got.CommandTypes[0].Type != "remote-lock" {
 		t.Fatalf("unexpected command types: %#v", got.CommandTypes)
+	}
+	perms := mgr.PermissionCatalog()
+	if !containsPermission(perms, auth.PermissionDevicesWrite) || !containsPermission(perms, auth.Permission("admin:remote-control")) {
+		t.Fatalf("unexpected permission catalog: %#v", perms)
 	}
 }
 
@@ -148,4 +153,13 @@ func TestManagerFiltersDeviceActionsByPermissionAndEnablement(t *testing.T) {
 	if got.Href != "/admin/plugins/remote-control/devices/device-1/launch" {
 		t.Fatalf("unexpected action href: %#v", got.Href)
 	}
+}
+
+func containsPermission(perms []auth.Permission, target auth.Permission) bool {
+	for _, perm := range perms {
+		if perm == target {
+			return true
+		}
+	}
+	return false
 }

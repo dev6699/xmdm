@@ -39,6 +39,7 @@ type Plugin struct {
 	Name          string         `json:"name"`
 	Description   string         `json:"description,omitempty"`
 	Enabled       bool           `json:"enabled"`
+	Permissions   []string       `json:"permissions,omitempty"`
 	Routes        []RouteSpec    `json:"routes,omitempty"`
 	DeviceActions []DeviceAction `json:"deviceActions,omitempty"`
 	CommandTypes  []CommandType  `json:"commandTypes,omitempty"`
@@ -143,6 +144,13 @@ func (m *Manager) CommandTypesFor(session *auth.Session) []CommandType {
 	return types
 }
 
+func (m *Manager) PermissionCatalog() []auth.Permission {
+	if m == nil {
+		return append([]auth.Permission(nil), auth.AllPermissions()...)
+	}
+	return permissionCatalog(m.plugins)
+}
+
 func (m *Manager) SupportsCommandType(session *auth.Session, commandType string) (CommandType, bool) {
 	commandType = strings.TrimSpace(commandType)
 	if commandType == "" || m == nil || !m.enabled || session == nil {
@@ -181,7 +189,48 @@ func normalizePlugins(defs []Plugin) []Plugin {
 	return plugins
 }
 
+func permissionCatalog(plugins []Plugin) []auth.Permission {
+	catalog := make(map[auth.Permission]struct{})
+	for _, perm := range auth.AllPermissions() {
+		catalog[perm] = struct{}{}
+	}
+	for _, plugin := range plugins {
+		for _, perm := range plugin.Permissions {
+			perm = strings.TrimSpace(perm)
+			if perm != "" {
+				catalog[auth.Permission(perm)] = struct{}{}
+			}
+		}
+		for _, action := range plugin.DeviceActions {
+			if perm := strings.TrimSpace(action.RequiredPermission); perm != "" {
+				catalog[auth.Permission(perm)] = struct{}{}
+			}
+		}
+		for _, commandType := range plugin.CommandTypes {
+			if perm := strings.TrimSpace(commandType.RequiredPermission); perm != "" {
+				catalog[auth.Permission(perm)] = struct{}{}
+			}
+		}
+	}
+	perms := make([]auth.Permission, 0, len(catalog))
+	for perm := range catalog {
+		perms = append(perms, perm)
+	}
+	slices.SortFunc(perms, func(a, b auth.Permission) int {
+		switch {
+		case a < b:
+			return -1
+		case a > b:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return perms
+}
+
 func clonePlugin(def Plugin) Plugin {
+	def.Permissions = append([]string(nil), def.Permissions...)
 	for i := range def.DeviceActions {
 		if strings.TrimSpace(def.DeviceActions[i].PluginID) == "" {
 			def.DeviceActions[i].PluginID = def.ID
@@ -197,7 +246,10 @@ func resolveDeviceActionHref(href, deviceID string) string {
 	if strings.TrimSpace(href) == "" {
 		return ""
 	}
-	return strings.ReplaceAll(href, "{{deviceId}}", url.PathEscape(deviceID))
+	escaped := url.PathEscape(deviceID)
+	href = strings.ReplaceAll(href, "{{deviceId}}", escaped)
+	href = strings.ReplaceAll(href, "{deviceId}", escaped)
+	return href
 }
 
 func sessionFromRequest(r *http.Request, svc *auth.Service) (*auth.Session, bool) {

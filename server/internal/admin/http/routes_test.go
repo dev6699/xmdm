@@ -666,6 +666,48 @@ func TestRegisterDashboardRedirectsAnonymousUsersToLogin(t *testing.T) {
 	}
 }
 
+func TestRegisterDashboardLoginRespectsNextRedirect(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Hour)
+	mux := http.NewServeMux()
+	RegisterDashboard(mux, svc, DashboardDependencies{})
+
+	loginReq := httptest.NewRequest(http.MethodGet, "/admin/login?next=/admin/plugins/remote-control/viewer", nil)
+	loginRes := httptest.NewRecorder()
+	mux.ServeHTTP(loginRes, loginReq)
+	if loginRes.Code != http.StatusOK {
+		t.Fatalf("login form status = %d, want %d", loginRes.Code, http.StatusOK)
+	}
+	csrfToken := mustGetCSRFCookie(t, loginRes.Result())
+
+	postReq := httptest.NewRequest(http.MethodPost, "/admin/login", strings.NewReader("csrfToken="+csrfToken+"&next=/admin/plugins/remote-control/viewer&username=admin&password=secret"))
+	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	postReq.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrfToken})
+	postRes := httptest.NewRecorder()
+	mux.ServeHTTP(postRes, postReq)
+
+	if postRes.Code != http.StatusSeeOther {
+		t.Fatalf("login redirect status = %d, want %d", postRes.Code, http.StatusSeeOther)
+	}
+	if got := postRes.Header().Get("Location"); got != "/admin/plugins/remote-control/viewer" {
+		t.Fatalf("login redirect location = %q, want /admin/plugins/remote-control/viewer", got)
+	}
+}
+
+func TestRoleUpsertFromFormAllowsEmptyPermissions(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/admin/roles/create", strings.NewReader("name=operators"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	upsert, err := roleUpsertFromForm(req)
+	if err != nil {
+		t.Fatalf("role upsert parse failed: %v", err)
+	}
+	if upsert.Name != "operators" {
+		t.Fatalf("unexpected role name: %q", upsert.Name)
+	}
+	if len(upsert.Permissions) != 0 {
+		t.Fatalf("expected empty permissions, got %#v", upsert.Permissions)
+	}
+}
+
 func TestRegisterDashboardListsUsers(t *testing.T) {
 	svc := auth.NewService("admin", "secret", time.Hour)
 	session, err := svc.Login("admin", "secret")
@@ -750,7 +792,8 @@ func TestRegisterDashboardListsRoles(t *testing.T) {
 		Identity: &fakeDashboardIdentityStore{
 			roles: []identity.Role{{RecordBase: identity.RecordBase{ID: "role-1", TenantID: "tenant-1", Status: "active", CreatedAt: time.Date(2026, 5, 13, 11, 31, 0, 0, time.UTC)}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}}},
 		},
-		TenantID: "tenant-1",
+		PluginManager: plugins.New(plugins.Plugin{ID: "remote-control", Name: "Remote Control", Enabled: true, Permissions: []string{"admin:remote-control"}}),
+		TenantID:      "tenant-1",
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/roles", nil)
@@ -764,6 +807,12 @@ func TestRegisterDashboardListsRoles(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "Available permissions:") {
 		t.Fatalf("dashboard roles page should show permissions catalog: %s", rr.Body.String())
 	}
+	if !strings.Contains(rr.Body.String(), `type="checkbox"`) || !strings.Contains(rr.Body.String(), `value="admin.read"`) {
+		t.Fatalf("dashboard roles page should render permission checkboxes: %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `value="admin:remote-control"`) {
+		t.Fatalf("dashboard roles page should include remote-control permission: %s", rr.Body.String())
+	}
 	if !strings.Contains(rr.Body.String(), "<th>Created</th><th>ID</th><th>Name</th><th>Permissions</th><th>Status</th>") {
 		t.Fatalf("dashboard roles page should show created column: %s", rr.Body.String())
 	}
@@ -772,6 +821,34 @@ func TestRegisterDashboardListsRoles(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "status-pill") {
 		t.Fatalf("dashboard roles page should use status pill styling: %s", rr.Body.String())
+	}
+}
+
+func TestRegisterDashboardRoleDetailShowsPermissionCheckboxes(t *testing.T) {
+	svc := auth.NewService("admin", "secret", time.Hour)
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	mux := http.NewServeMux()
+	RegisterDashboard(mux, svc, DashboardDependencies{
+		Identity: &fakeDashboardIdentityStore{
+			roles: []identity.Role{{RecordBase: identity.RecordBase{ID: "role-1", TenantID: "tenant-1", Status: "active", CreatedAt: time.Date(2026, 5, 13, 11, 31, 0, 0, time.UTC)}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}}},
+		},
+		PluginManager: plugins.New(plugins.Plugin{ID: "remote-control", Name: "Remote Control", Enabled: true, Permissions: []string{"admin:remote-control"}}),
+		TenantID:      "tenant-1",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/roles/role-1", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("dashboard role detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `type="checkbox"`) || !strings.Contains(rr.Body.String(), `value="admin.write" checked`) {
+		t.Fatalf("dashboard role detail should preselect role permissions: %s", rr.Body.String())
 	}
 }
 
@@ -1888,7 +1965,7 @@ func TestRegisterDashboardUpdatesRoleWithoutRedirectingToList(t *testing.T) {
 	RegisterDashboard(mux, svc, DashboardDependencies{Identity: store, TenantID: "tenant-1"})
 	csrfToken := mustGetCSRFCookieFromDashboardLogin(t, mux)
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/roles/role-1/update", strings.NewReader("csrfToken="+csrfToken+"&name=operators&permissions=%5B%22admin.read%22%5D"))
+	req := httptest.NewRequest(http.MethodPost, "/admin/roles/role-1/update", strings.NewReader("csrfToken="+csrfToken+"&name=operators&permissions=admin.read&permissions=admin.write"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrfToken})
@@ -2620,7 +2697,7 @@ func TestRegisterDashboardRejectsReadOnlySessionForRoleMutation(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterDashboard(mux, svc, DashboardDependencies{Identity: &fakeDashboardIdentityStore{}, TenantID: "tenant-1"})
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/roles/create", strings.NewReader("csrfToken=csrf&name=role-a&permissions=%5B%22admin.read%22%5D"))
+	req := httptest.NewRequest(http.MethodPost, "/admin/roles/create", strings.NewReader("csrfToken=csrf&name=role-a&permissions=admin.read&permissions=devices.write"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
 	rr := httptest.NewRecorder()
