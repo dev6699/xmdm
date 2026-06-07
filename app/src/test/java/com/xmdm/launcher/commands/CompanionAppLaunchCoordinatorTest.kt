@@ -41,6 +41,38 @@ class CompanionAppLaunchCoordinatorTest {
     }
 
     @Test
+    fun forwardsBootstrapPayloadToLaunchedPackage() = runTest {
+        val secret = "device-secret"
+        val packageName = "com.example.companion"
+        val snapshot = signedSnapshot(
+            deviceSecret = secret,
+            packageName = packageName,
+        )
+        val host = FakeCompanionAppLaunchHost(
+            installedSignatures = mapOf(packageName to setOf("deadbeef")),
+            launchablePackages = mutableSetOf(packageName),
+        )
+        val coordinator = CompanionAppLaunchCoordinator(
+            host = host,
+            logger = CompanionAppLaunchLogger { },
+            launchDispatcher = Dispatchers.Unconfined,
+        )
+        val command = command(
+            """{"packageName":"$packageName","signatureSha256":"deadbeef","bootstrapPayload":"base64url:eyJmZWF0dXJlSWQiOiJyZW1vdGUtY29udHJvbCIsInNlc3Npb25JZCI6InNlc3Npb24tMSIsImRldmljZUlkIjoiZGV2aWNlLTEiLCJyZWxheUVuZHBvaW50IjoiaHR0cDovL3JlbGF5IiwiYWRtaW5Ub2tlbiI6ImFkbWluLXRva2VuIiwiZGV2aWNlVG9rZW4iOiJkZXZpY2UtdG9rZW4iLCJleHBpcmVzQXQiOiIyMDMwLTAxLTAxVDAwOjAwOjAwWiJ9"}""",
+        )
+
+        val result = coordinator.execute(agentState(secret, snapshot), command)
+
+        assertEquals("acked", result.status)
+        assertEquals(listOf(packageName), host.packageLaunches)
+        assertEquals(1, host.packageBootstrapPayloads.size)
+        val bootstrap = host.packageBootstrapPayloads[0]
+        assertTrue(bootstrap.startsWith("base64url:"))
+        val decoded = String(java.util.Base64.getUrlDecoder().decode(bootstrap.removePrefix("base64url:")))
+        assertTrue(decoded.contains("\"sessionId\":\"session-1\""))
+    }
+
+    @Test
     fun launchesDeclaredActivityWhenSignatureMatches() = runTest {
         val secret = "device-secret"
         val packageName = "com.example.companion"
@@ -231,14 +263,23 @@ class CompanionAppLaunchCoordinatorTest {
             return "$packageName/$activityName" in launchableActivities || activityName in launchableActivities
         }
 
-        override fun launchPackage(packageName: String): Boolean {
+        override fun launchPackage(packageName: String, bootstrapPayload: String?): Boolean {
             packageLaunches += packageName
+            if (!bootstrapPayload.isNullOrBlank()) {
+                packageBootstrapPayloads += bootstrapPayload
+            }
             return packageName in launchablePackages
         }
 
-        override fun launchActivity(packageName: String, activityName: String): Boolean {
+        override fun launchActivity(packageName: String, activityName: String, bootstrapPayload: String?): Boolean {
             activityLaunches += activityName
+            if (!bootstrapPayload.isNullOrBlank()) {
+                activityBootstrapPayloads += bootstrapPayload
+            }
             return "$packageName/$activityName" in launchableActivities || activityName in launchableActivities
         }
+
+        val packageBootstrapPayloads = mutableListOf<String>()
+        val activityBootstrapPayloads = mutableListOf<String>()
     }
 }

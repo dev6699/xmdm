@@ -14,18 +14,19 @@ func main() {
 	migrateOnly := flag.Bool("migrate-only", false, "Apply core database migrations and exit")
 	flag.Parse()
 
+	cfg, err := config.LoadConfig(*configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	if *migrateOnly {
-		cfg, err := config.LoadConfig(*configPath)
-		if err != nil {
-			log.Fatal(err)
-		}
 		if err := coremigrate.MigrateDSN(cfg.Postgres.DSN); err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
 
-	if err := host.Run(*configPath); err != nil {
+	if err := host.Run(cfg); err != nil {
 		log.Fatal(err)
 	}
 }

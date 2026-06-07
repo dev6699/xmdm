@@ -21,8 +21,8 @@ interface CompanionAppLaunchHost {
     fun packageSignatureDigests(packageName: String): Set<String>?
     fun canLaunchPackage(packageName: String): Boolean
     fun canLaunchActivity(packageName: String, activityName: String): Boolean
-    fun launchPackage(packageName: String): Boolean
-    fun launchActivity(packageName: String, activityName: String): Boolean
+    fun launchPackage(packageName: String, bootstrapPayload: String? = null): Boolean
+    fun launchActivity(packageName: String, activityName: String, bootstrapPayload: String? = null): Boolean
 }
 
 fun interface CompanionAppLaunchLogger {
@@ -63,9 +63,10 @@ class AndroidCompanionAppLaunchHost(
         return intent.resolveActivity(packageManager) != null
     }
 
-    override fun launchPackage(packageName: String): Boolean {
+    override fun launchPackage(packageName: String, bootstrapPayload: String?): Boolean {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: return false
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        launchIntent.withBootstrapPayload(bootstrapPayload)
         return runCatching {
             context.startActivity(launchIntent)
         }.fold(
@@ -77,9 +78,10 @@ class AndroidCompanionAppLaunchHost(
         )
     }
 
-    override fun launchActivity(packageName: String, activityName: String): Boolean {
+    override fun launchActivity(packageName: String, activityName: String, bootstrapPayload: String?): Boolean {
         val launchIntent = explicitLaunchIntent(packageName, activityName)
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        launchIntent.withBootstrapPayload(bootstrapPayload)
         return runCatching {
             context.startActivity(launchIntent)
         }.fold(
@@ -97,6 +99,14 @@ class AndroidCompanionAppLaunchHost(
             addCategory(Intent.CATEGORY_LAUNCHER)
             component = componentName
         }
+    }
+
+    private fun Intent.withBootstrapPayload(bootstrapPayload: String?): Intent {
+        val payload = bootstrapPayload?.trim().orEmpty()
+        if (payload.isNotEmpty()) {
+            putExtra(Intent.EXTRA_TEXT, payload)
+        }
+        return this
     }
 
     private fun packageInfo(packageName: String): PackageInfo {
@@ -188,12 +198,12 @@ class CompanionAppLaunchCoordinator(
                 if (!host.canLaunchPackage(request.packageName)) {
                     return@withContext false
                 }
-                host.launchPackage(request.packageName)
+                host.launchPackage(request.packageName, request.bootstrapPayload)
             } else {
                 if (!host.canLaunchActivity(request.packageName, request.activityName)) {
                     return@withContext false
                 }
-                host.launchActivity(request.packageName, request.activityName)
+                host.launchActivity(request.packageName, request.activityName, request.bootstrapPayload)
             }
         }
         if (!launched) {
@@ -218,10 +228,12 @@ class CompanionAppLaunchCoordinator(
         val packageName = payload.string("packageName") ?: return null
         val activityName = payload.string("activityName")
         val signatureSha256 = payload.string("signatureSha256")
+        val bootstrapPayload = payload.string("bootstrapPayload")
         return CompanionAppLaunchRequest(
             packageName = packageName,
             activityName = activityName,
             signatureSha256 = signatureSha256,
+            bootstrapPayload = bootstrapPayload,
         )
     }
 
@@ -260,20 +272,25 @@ class CompanionAppLaunchCoordinator(
     }
 
     private fun signaturesMatch(expected: String, actual: Set<String>): Boolean {
-        return actual.any { normalizeSignatureDigest(it) == expected }
+        if (actual.isEmpty()) {
+            return false
+        }
+        val normalizedExpected = normalizeSignatureDigest(expected) ?: return false
+        return actual.any { normalizeSignatureDigest(it) == normalizedExpected }
     }
 }
-
-data class CompanionAppLaunchRequest(
-    val packageName: String,
-    val activityName: String?,
-    val signatureSha256: String?,
-)
 
 private fun JsonObject.string(name: String): String? {
     val value = get(name) ?: return null
     if (value.isJsonNull) {
         return null
     }
-    return value.asString.trim().takeIf { it.isNotEmpty() }
+    return value.asString.takeIf { it.isNotBlank() }
 }
+
+data class CompanionAppLaunchRequest(
+    val packageName: String,
+    val activityName: String?,
+    val signatureSha256: String?,
+    val bootstrapPayload: String?,
+)

@@ -21,6 +21,7 @@ type RouteSpec = internalplugins.RouteSpec
 type DeviceAction = internalplugins.DeviceAction
 type CommandType = internalplugins.CommandType
 type Plugin = internalplugins.Plugin
+type Config = config.Config
 
 type HostedPlugin interface {
 	Mount(*http.ServeMux)
@@ -35,10 +36,9 @@ type Migratable interface {
 	Migrate() error
 }
 
-func Run(configPath string, plugins ...HostedPlugin) error {
-	cfg, err := config.LoadConfig(configPath)
-	if err != nil {
-		return err
+func Run(cfg *config.Config, plugins ...HostedPlugin) error {
+	if cfg == nil {
+		return &configError{message: "config is nil"}
 	}
 
 	if err := coremigrate.MigrateDSN(cfg.Postgres.DSN); err != nil {
@@ -79,6 +79,20 @@ func Run(configPath string, plugins ...HostedPlugin) error {
 	handler := internalv1.NewMux(svc, deps)
 	log.Printf("xmdm server listening on %s", cfg.Server.Address)
 	return http.ListenAndServe(cfg.Server.Address, handler)
+}
+
+// LoadConfig loads the core server configuration using the same defaults and
+// environment overrides as the main server entrypoint.
+func LoadConfig(configPath string) (*config.Config, error) {
+	return config.LoadConfig(configPath)
+}
+
+type configError struct {
+	message string
+}
+
+func (e *configError) Error() string {
+	return e.message
 }
 
 func mergedAuthPermissions(pluginManager *internalplugins.Manager) []auth.Permission {
