@@ -8,6 +8,7 @@ Local development entry points:
 
 - [local-dev.md](local-dev.md)
 - [docker-compose.yml](docker-compose.yml)
+- [docker-compose.server.yml](docker-compose.server.yml)
 - [bootstrap-local.sh](bootstrap-local.sh)
 - [test-db-env.sh](test-db-env.sh)
 

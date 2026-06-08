@@ -1,0 +1,32 @@
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    image: ${XMDM_SERVER_IMAGE:-xmdm-server:local}
+    depends_on:
+      - postgres
+      - object-storage
+      - mqtt
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      XMDM_ADDR: ":8080"
+      XMDM_SERVER_PUBLIC_URL: ${XMDM_SERVER_PUBLIC_URL:-http://127.0.0.1:8080}
+      XMDM_POSTGRES_DSN: postgres://xmdm:xmdm@postgres:5432/xmdm?sslmode=disable
+      XMDM_MQTT_ADDRESS: mqtt:1883
+      XMDM_MQTT_CLIENT_ID: xmdm-server
+      XMDM_MQTT_USERNAME: xmdm-server
+      XMDM_MQTT_PASSWORD: xmdm-server-secret
+      XMDM_MQTT_DYNSEC_ADDRESS: mqtt:1883
+      XMDM_MQTT_DYNSEC_CLIENT_ID: xmdm-dynsec
+      XMDM_MQTT_DYNSEC_ADMIN_USER: admin
+      XMDM_MQTT_DYNSEC_PASSWORD: xmdm-admin
+      XMDM_OBJECT_STORAGE_ENDPOINT: http://object-storage:8333
+      XMDM_OBJECT_STORAGE_REGION: us-east-1
+      XMDM_OBJECT_STORAGE_ACCESS_KEY: xmdm
+      XMDM_OBJECT_STORAGE_SECRET_KEY: xmdm
+      XMDM_OBJECT_STORAGE_BUCKET: xmdm
+      XMDM_ADMIN_USERNAME: ${XMDM_ADMIN_USERNAME:-admin}
+      XMDM_ADMIN_PASSWORD: ${XMDM_ADMIN_PASSWORD:-admin}

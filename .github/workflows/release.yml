@@ -1,0 +1,190 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/xmdm-server
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.XMDM_ANDROID_RELEASE_KEYSTORE_B64 }}
+  ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.XMDM_ANDROID_RELEASE_STORE_PASSWORD }}
+  ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.XMDM_ANDROID_RELEASE_KEY_ALIAS }}
+  ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.XMDM_ANDROID_RELEASE_KEY_PASSWORD }}
+
+jobs:
+  server:
+    name: Build Server Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Build server binary package
+        run: |
+          set -euo pipefail
+          mkdir -p release/server
+          (cd server && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o ../release/server/xmdm-server ./cmd/server)
+          tar -C release/server -czf release/xmdm-server-linux-amd64.tar.gz xmdm-server
+          sha256sum release/xmdm-server-linux-amd64.tar.gz > release/xmdm-server-linux-amd64.tar.gz.sha256
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push server image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_TAG }}
+
+      - name: Record server image reference
+        run: |
+          set -euo pipefail
+          {
+            echo "server-image=${REGISTRY}/${IMAGE_NAME}:${RELEASE_TAG}"
+            echo "server-image-digest=${REGISTRY}/${IMAGE_NAME}@${{ steps.image.outputs.digest }}"
+          } > release/server-image.txt
+
+      - name: Package server release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          cp release/xmdm-server-linux-amd64.tar.gz release-artifacts/
+          cp release/xmdm-server-linux-amd64.tar.gz.sha256 release-artifacts/
+          cp release/server-image.txt release-artifacts/
+
+      - name: Upload server artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-artifacts
+          path: release-artifacts/*
+
+  android:
+    name: Build Android Artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Prepare Android release keystore
+        run: |
+          set -euo pipefail
+          test -n "${ANDROID_RELEASE_KEYSTORE_B64}"
+          test -n "${ANDROID_RELEASE_STORE_PASSWORD}"
+          test -n "${ANDROID_RELEASE_KEY_ALIAS}"
+          test -n "${ANDROID_RELEASE_KEY_PASSWORD}"
+          printf '%s' "${ANDROID_RELEASE_KEYSTORE_B64}" | base64 --decode > "$RUNNER_TEMP/xmdm-release.keystore"
+          chmod 600 "$RUNNER_TEMP/xmdm-release.keystore"
+
+      - name: Build installable APK
+        working-directory: app
+        run: |
+          ./gradlew assembleRelease \
+            -Pxmdm.release.keystore="$RUNNER_TEMP/xmdm-release.keystore" \
+            -Pxmdm.release.storePassword="${ANDROID_RELEASE_STORE_PASSWORD}" \
+            -Pxmdm.release.keyAlias="${ANDROID_RELEASE_KEY_ALIAS}" \
+            -Pxmdm.release.keyPassword="${ANDROID_RELEASE_KEY_PASSWORD}"
+
+      - name: Package APK
+        run: |
+          set -euo pipefail
+          mkdir -p release/android
+          apk_path=$(find app/build/outputs/apk/release -name '*.apk' -print -quit)
+          test -n "$apk_path"
+          cp "$apk_path" "release/android/xmdm-launcher-${RELEASE_TAG}.apk"
+          sha256sum "release/android/xmdm-launcher-${RELEASE_TAG}.apk" > "release/android/xmdm-launcher-${RELEASE_TAG}.apk.sha256"
+
+      - name: Package Android release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          cp release/android/xmdm-launcher-${RELEASE_TAG}.apk release-artifacts/
+          cp release/android/xmdm-launcher-${RELEASE_TAG}.apk.sha256 release-artifacts/
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-artifacts
+          path: release-artifacts/*
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - server
+      - android
+    steps:
+      - name: Download server artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: server-artifacts
+          path: release/server
+
+      - name: Download Android artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-artifacts
+          path: release/android
+
+      - name: Flatten release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp release/server/* release/
+          cp release/android/* release/
+          rm -rf release/server release/android
+          sha256sum release/*.tar.gz release/*.apk > release/checksums.txt
+          server_image=$(grep '^server-image=' release/server-image.txt | cut -d= -f2-)
+          server_image_digest=$(grep '^server-image-digest=' release/server-image.txt | cut -d= -f2-)
+          launcher_apk=$(basename release/*.apk)
+          printf 'release-tag=%s\nserver-image=%s\nserver-image-digest=%s\nlauncher-apk=%s\n' \
+            "$RELEASE_TAG" \
+            "$server_image" \
+            "$server_image_digest" \
+            "$launcher_apk" > release/release-manifest.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            release/*

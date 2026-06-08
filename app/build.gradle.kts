@@ -31,11 +31,27 @@ android {
         jvmTarget = "17"
     }
 
+    signingConfigs {
+        create("release") {
+            val releaseKeystorePath = providers.gradleProperty("xmdm.release.keystore").orNull
+            if (releaseKeystorePath != null) {
+                storeFile = file(releaseKeystorePath)
+                storePassword = providers.gradleProperty("xmdm.release.storePassword").orNull
+                keyAlias = providers.gradleProperty("xmdm.release.keyAlias").orNull
+                keyPassword = providers.gradleProperty("xmdm.release.keyPassword").orNull
+            } else {
+                // Keep CI and local release builds installable without secret material.
+                initWith(getByName("debug"))
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["testOnly"] = "true"
         }
         getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
             manifestPlaceholders["testOnly"] = "false"
         }
     }

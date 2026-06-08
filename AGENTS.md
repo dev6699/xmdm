@@ -25,7 +25,7 @@
 
 ## Snapshot
 
-- Update `README.md` when a roadmap item changes state, a milestone gains real progress, or the user asks for a status update.
+- Update `PROJECT_STATUS.md` when a roadmap item changes state, a milestone gains real progress, or the user asks for a status update.
 - Keep the snapshot aligned with [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md).
 - Use the same milestone names, item names, and ranges as the roadmap.
 - Only mark an item complete if the roadmap item itself is complete.
@@ -34,7 +34,7 @@
 ## Save Points
 
 - Suggest a save point at meaningful stages: roadmap item done, coherent refactor done, or verified behavior change landed.
-- Update the README snapshot with the current completion date before saving.
+- Update the project status snapshot with the current completion date before saving.
 - If the user asks for the next step or a similar follow-up at a meaningful checkpoint, suggest saving first.
 - Only give the next step after the save is confirmed or completed.
 - Use this save prompt pattern:
