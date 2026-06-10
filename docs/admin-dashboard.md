@@ -354,6 +354,16 @@ The device detail page also keeps the assigned groups editable, and the command 
 
 The QR is generated from the pending device detail page and carries the immutable device ID automatically. The device stays in the dashboard as pending until enrollment completes.
 
+#### Premium Remote Control
+
+![Premium remote control viewer](assets/admin-dashboard-device-remote-control.png)
+
+When the premium remote-control plugin is enabled and the operator has `admin:remote-control`, the device detail page exposes the `Remote Control` device action.
+
+1. Select `Remote Control` from the device actions area.
+2. The dashboard opens the premium remote-control viewer for that device and shows `connected` when the relay attaches.
+3. If a pending session is already active, the page first shows the blocked state and offers `Cancel session and retry`, `Refresh`, and `Back to device`.
+
 ## 5. Group And Command
 
 Groups are device cohorts for command targeting.

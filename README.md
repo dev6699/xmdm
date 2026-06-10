@@ -24,7 +24,7 @@ Premium features:
 
 These features are not included in the core version.
 
-- Remote control for supported devices
+- Remote control for supported devices, see [docs/admin-dashboard.md#premium-remote-control](docs/admin-dashboard.md#premium-remote-control)
 
 ## Built For Operators
 

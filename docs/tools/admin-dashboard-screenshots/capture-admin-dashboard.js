@@ -20,6 +20,7 @@ const shots = [
   ['admin-dashboard-policy-detail.png', '/admin/policies/policy-baseline', true],
   ['admin-dashboard-devices.png', '/admin/devices', true],
   ['admin-dashboard-device-detail.png', '/admin/devices/device-008', true],
+  ['admin-dashboard-device-remote-control.png', '/admin/devices/5dcd5e7a-0642-4718-924f-c9bf904ea194', true],
   ['admin-dashboard-device-qr.png', '/admin/devices/device-008', true],
   ['admin-dashboard-apps.png', '/admin/apps', true],
   ['admin-dashboard-app-detail.png', '/admin/apps/app-chrome', true],
@@ -55,6 +56,17 @@ const shots = [
     if (name === 'admin-dashboard-device-qr.png') {
       await page.getByRole('button', { name: 'Generate QR' }).click();
       await page.getByAltText('Enrollment QR preview').waitFor({ state: 'visible' });
+    }
+    if (name === 'admin-dashboard-device-remote-control.png') {
+      await page.getByRole('link', { name: 'Remote Control' }).click();
+      await page.waitForTimeout(2500);
+      if ((await page.title()) === 'Remote Control Session Blocked') {
+        await page.getByRole('button', { name: 'Cancel session and retry' }).click();
+      }
+      await page.waitForFunction(() => {
+        const body = document.body.innerText;
+        return body.includes('PREMIUM REMOTE CONTROL') && body.includes('Close session') && body.includes('connected');
+      }, null, { timeout: 60000 });
     }
     await page.mouse.move(1300, 90);
     await page.screenshot({ path: `${out}/${name}`, fullPage: true });
