@@ -9,7 +9,7 @@ It gives operators one place to:
 - push apps, files, and certificates
 - apply kiosk and policy rules
 - review device health, logs, and audits
-- send commands from the dashboard or CLI
+- send commands from the dashboard
 
 Core features:
 
@@ -18,7 +18,7 @@ Core features:
 - policy-based kiosk control
 - managed apps, files, and certificates
 - device status, logs, and audit visibility
-- dashboard and CLI operations
+- dashboard operations
 
 Premium features:
 
@@ -70,11 +70,9 @@ docker compose -f docker-compose.yml -f docker-compose.server.yml down
 
 - `app/`: Android launcher and agent
 - `server/`: backend services and admin console
-- `cli/`: operator command-line tools
 - `infra/`: deployment and local environment files
 - `docs/`: guides, runbooks, and release notes
 - `blueprint/`: product and architecture decisions
-- `contracts/`: shared API and data contracts
 - `playwright/`: dashboard end-to-end coverage
 
 ## Release Flow

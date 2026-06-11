@@ -3,6 +3,7 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$script_dir"
+server_dir=$(CDPATH= cd -- "$script_dir/../server" && pwd)
 
 postgres_db=${XMDM_POSTGRES_DB:-xmdm}
 postgres_user=${XMDM_POSTGRES_USER:-xmdm}
@@ -28,4 +29,5 @@ wait_for_postgres() {
 wait_for_postgres
 
 export XMDM_POSTGRES_DSN="postgres://$postgres_user:$postgres_password@127.0.0.1:5432/$postgres_db?sslmode=disable"
-go run ../server/cmd/server -migrate-only
+cd "$server_dir"
+go run ./cmd/server -migrate-only

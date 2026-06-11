@@ -2066,6 +2066,7 @@ func RegisterDashboard(mux httpx.Router, svc *auth.Service, deps DashboardDepend
 	d := &dashboard{svc: svc, deps: deps, tmpl: template.Must(template.New("dashboard").Funcs(template.FuncMap{"containsString": containsString, "navIcon": navIcon}).Parse(dashboardTemplate))}
 	mux.HandleFunc("/admin", d.overview)
 	mux.HandleFunc("/admin/login", d.login)
+	mux.HandleFunc("/admin/me", d.me)
 	mux.HandleFunc("/admin/logout", d.logout)
 	mux.HandleFunc("/admin/users", d.users)
 	mux.HandleFunc("/admin/users/{id}", d.userDetail)
@@ -2178,6 +2179,20 @@ func (d *dashboard) login(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (d *dashboard) me(w http.ResponseWriter, r *http.Request) {
+	session, ok := sessionFromRequest(r, d.svc)
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"username":    session.Username,
+		"permissions": session.Permissions,
+		"csrfToken":   issueCSRFCookie(w, r),
+	})
+}
+
 func safeAdminRedirectPath(next string) string {
 	next = strings.TrimSpace(next)
 	if next == "" {
@@ -2205,7 +2220,11 @@ func (d *dashboard) logout(w http.ResponseWriter, r *http.Request) {
 		d.svc.Logout(cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
-	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+	if wantsHTMLResponse(r) {
+		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {

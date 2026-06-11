@@ -133,8 +133,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 6. Device acks receipt and execution through `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`.
 7. Server marks the delivery complete.
 
-- The messaging and audit surface is API-first for now; a separate admin UI can be layered on later.
-- The admin API exposes JSON list endpoints at `GET /api/v1/admin/commands` and `GET /api/v1/admin/audit`.
+- The messaging and audit surface is dashboard-first for operators, with device-facing HTTP endpoints for sync and acknowledgements.
 
 - MQTT command topics use `devices/{deviceId}/commands` for device-targeted delivery.
 - The broker must enforce device-topic isolation with per-client authentication and ACLs, not topic names alone.
@@ -156,7 +155,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 - Plugins are statically registered at startup by code linked into the server build.
 - Plugins may contribute REST resources, persistence, and worker modules.
 - Plugins may contribute server-rendered admin routes under `/admin/plugins/{pluginId}/...`.
-- Plugins may contribute admin API routes under `/api/v1/admin/plugins/{pluginId}/...`.
+- Plugins may contribute browser admin routes under `/admin/plugins/{pluginId}/...`.
 - Plugins may contribute device-detail actions that link to plugin-owned routes.
 - Plugins may register command types for validation and display while the core command queue remains authoritative for delivery, expiry, and acknowledgement.
 - Plugin settings live in tenant-scoped storage.

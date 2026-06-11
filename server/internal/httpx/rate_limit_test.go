@@ -16,13 +16,13 @@ func TestWithRateLimitsBlocksAfterBurst(t *testing.T) {
 	}), RateLimitRule{
 		Name:           "login",
 		Method:         http.MethodPost,
-		Prefix:         "/api/v1/admin/login",
+		Prefix:         "/admin/login",
 		Burst:          1,
 		RefillInterval: time.Hour,
 		RetryAfter:     time.Second,
 	})
 
-	first := httptest.NewRequest(http.MethodPost, "/api/v1/admin/login", nil)
+	first := httptest.NewRequest(http.MethodPost, "/admin/login", nil)
 	first.RemoteAddr = "203.0.113.10:1234"
 	rr1 := httptest.NewRecorder()
 	handler.ServeHTTP(rr1, first)
@@ -30,7 +30,7 @@ func TestWithRateLimitsBlocksAfterBurst(t *testing.T) {
 		t.Fatalf("first request status = %d, want %d", rr1.Code, http.StatusNoContent)
 	}
 
-	second := httptest.NewRequest(http.MethodPost, "/api/v1/admin/login", nil)
+	second := httptest.NewRequest(http.MethodPost, "/admin/login", nil)
 	second.RemoteAddr = "203.0.113.10:5678"
 	rr2 := httptest.NewRecorder()
 	handler.ServeHTTP(rr2, second)

@@ -59,7 +59,7 @@ func TestAdminE2E(t *testing.T) {
 	baseURL := "http://xmdm.local"
 
 	login(client, t, baseURL, "admin", "secret")
-	assertStatus(t, client, http.MethodGet, baseURL+"/api/v1/admin/me", "", http.StatusOK)
+	assertStatus(t, client, http.MethodGet, baseURL+"/admin/me", "", http.StatusOK)
 
 	for _, kind := range []string{"users", "roles", "apps", "groups", "policies", "devices"} {
 		created := postJSON(t, client, baseURL+"/api/v1/"+kind, crudCreateBody(kind))
@@ -222,21 +222,15 @@ func TestAdminE2E(t *testing.T) {
 		t.Fatalf("unexpected audit actions: first=%s last=%s", events[0].Action, events[len(events)-1].Action)
 	}
 
-	commandList := doJSON(t, client, http.MethodGet, baseURL+"/api/v1/admin/commands", "", http.StatusOK)
-	if _, ok := commandList["commands"].([]any); !ok {
-		t.Fatalf("expected commands array in admin command list response: %#v", commandList)
-	}
-	auditList := doJSON(t, client, http.MethodGet, baseURL+"/api/v1/admin/audit", "", http.StatusOK)
-	if _, ok := auditList["events"].([]any); !ok {
-		t.Fatalf("expected events array in admin audit list response: %#v", auditList)
-	}
+	assertStatus(t, client, http.MethodGet, baseURL+"/admin/commands", "", http.StatusOK)
+	assertStatus(t, client, http.MethodGet, baseURL+"/admin/audit", "", http.StatusOK)
 
-	me := doJSON(t, client, http.MethodGet, baseURL+"/api/v1/admin/me", "", http.StatusOK)
-	csrfToken, _ := me["csrfToken"].(string)
+	meRes := doJSON(t, client, http.MethodGet, baseURL+"/admin/me", "", http.StatusOK)
+	csrfToken, _ := meRes["csrfToken"].(string)
 	if csrfToken == "" {
-		t.Fatalf("expected csrf token in admin me response: %#v", me)
+		t.Fatalf("expected csrf token in admin me response: %#v", meRes)
 	}
-	logoutReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/admin/logout", nil)
+	logoutReq, err := http.NewRequest(http.MethodPost, baseURL+"/admin/logout", nil)
 	if err != nil {
 		t.Fatalf("build logout request: %v", err)
 	}
@@ -248,9 +242,9 @@ func TestAdminE2E(t *testing.T) {
 	defer logoutRes.Body.Close()
 	io.Copy(io.Discard, logoutRes.Body)
 	if logoutRes.StatusCode != http.StatusNoContent {
-		t.Fatalf("expected %d, got %d for POST %s", http.StatusNoContent, logoutRes.StatusCode, baseURL+"/api/v1/admin/logout")
+		t.Fatalf("expected %d, got %d for POST %s", http.StatusNoContent, logoutRes.StatusCode, baseURL+"/admin/logout")
 	}
-	assertStatus(t, client, http.MethodGet, baseURL+"/api/v1/admin/me", "", http.StatusUnauthorized)
+	assertStatus(t, client, http.MethodGet, baseURL+"/admin/me", "", http.StatusUnauthorized)
 }
 
 func crudCreateBody(kind string) string {

@@ -100,16 +100,13 @@
 ## Admin APIs
 
 - The admin console manages users, roles, groups, policies, devices, and the operational admin workflow.
-- The console contract and payload shapes live in [../contracts/admin-console.md](../contracts/admin-console.md).
-- The live versioned admin session surface uses `/api/v1/admin/...`.
-- The live versioned admin resource surface uses `/api/v1/...`.
-- The console wrapper can still mount the same contract under `/admin/...` when needed.
-- All `/api/v1/admin/...` and `/api/v1/...` admin endpoints should follow the versioning and error rules below.
+- The admin console contract and payload shapes live in the blueprint and the browser dashboard docs.
+- The browser dashboard lives under `/admin/...` and uses form submissions for mutations.
+- The dashboard routes follow the versioning and error rules in this blueprint.
 
 ### Plugin APIs
 
 - Plugin metadata is exposed through admin-authenticated plugin routes.
-- Plugin API routes live under `/api/v1/admin/plugins/{pluginId}/...`.
 - Server-rendered plugin admin routes live under `/admin/plugins/{pluginId}/...`.
 - Plugin routes inherit the caller's admin auth context and must enforce the plugin's declared permission requirements.
 - The core server must return `404` or `403` for disabled plugin routes without invoking plugin handlers.
@@ -124,7 +121,7 @@
 
 ### Plugin Command Types
 
-- Plugins may register command type metadata for admin API, dashboard, and CLI validation.
+- Plugins may register command type metadata for admin API and dashboard validation.
 - Command type metadata includes `type`, `label`, target scope, payload schema description, and required permission.
 - Unregistered plugin command types are rejected by admin command creation.
 - Registered plugin command types still use the core command queue, delivery, expiry, and acknowledgement contracts.

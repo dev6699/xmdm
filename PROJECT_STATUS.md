@@ -111,20 +111,11 @@ Snapshot last updated: 2026-06-11
 | M7-07 Release Candidate | ☑ |
 | M7-08 Cleanup Pass | ☑ |
 
-### M8 - CLI Tool
+### M8 - CLI Tool Removed
 
 | Item | State |
 | --- | --- |
-| M8-01 CLI Foundation And Configuration | ☑ |
-| M8-02 Authentication And Session Management | ☑ |
-| M8-03 Resource Listing And Inspection | ☑ |
-| M8-04 Core Resource Management | ☑ |
-| M8-05 Content Management | ☑ |
-| M8-06 Enrollment And Bootstrap | ☑ |
-| M8-07 Device, Log, And Audit Inspection | ☑ |
-| M8-08 Command Operations | ☑ |
-| M8-09 Output Formats And Error Handling | ☑ |
-| M8-10 Packaging And Release Documentation | ☑ |
+| M8-00 CLI Tool | Removed |
 
 ### M9 - Admin Dashboard
 

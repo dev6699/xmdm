@@ -97,7 +97,6 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	telemetryhttp.Register(apiMux, deps.Telemetry, deps.TenantID)
 	loghttp.Register(apiMux, svc, deps.Devices, deps.Logs, deps.TenantID)
 	deviceinfohttp.Register(apiMux, svc, deps.Devices, deps.DeviceInfo, deps.TenantID)
-	adminhttp.Register(apiMux, svc, deps.PluginManager, deps.Audit, deps.Commands, deps.TenantID)
 	commandhttp.Register(apiMux, deps.Devices, deps.Commands, deps.TenantID)
 	apphttp.Register(apiMux, svc, deps.Apps, deps.Devices, deps.Artifacts, deps.Audit, deps.TenantID, deps.AgentAppPackage)
 	filehttp.Register(apiMux, svc, deps.Files, deps.Artifacts, deps.Audit, deps.TenantID)
@@ -120,26 +119,18 @@ func defaultRateLimitRules() []httpx.RateLimitRule {
 		{
 			Name:           "admin-login",
 			Method:         http.MethodPost,
-			Prefix:         "/api/v1/admin/login",
-			Burst:          100,
-			RefillInterval: 10 * time.Second,
-			RetryAfter:     10 * time.Second,
-		},
-		{
-			Name:           "admin-login",
-			Method:         http.MethodPost,
 			Prefix:         "/admin/login",
 			Burst:          100,
 			RefillInterval: 10 * time.Second,
 			RetryAfter:     10 * time.Second,
 		},
 		{
-			Name:           "admin-commands",
+			Name:           "admin-command-create",
 			Method:         http.MethodPost,
-			Prefix:         "/api/v1/admin/commands",
-			Burst:          20,
-			RefillInterval: 2 * time.Second,
-			RetryAfter:     2 * time.Second,
+			Prefix:         "/admin/commands/create",
+			Burst:          100,
+			RefillInterval: 10 * time.Second,
+			RetryAfter:     10 * time.Second,
 		},
 		{
 			Name:           "enrollment",

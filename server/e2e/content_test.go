@@ -117,9 +117,6 @@ func TestCommandMQTT(t *testing.T) {
 	waitForCommandTransportWarmup(t)
 
 	commandID := env.mustIssuePingCommand(t)
-	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
-		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
-	})
 	env.waitForCommandAck(t, commandID, "pong")
 	env.requests.assertNever(t, "polling command fetch", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
@@ -148,9 +145,6 @@ func TestCommandMQTTSyncConfig(t *testing.T) {
 
 	initialMarker := env.requests.len()
 	commandID := env.mustIssueSyncConfigCommand(t)
-	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
-		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
-	})
 	env.waitForCommandAck(t, commandID, "config refreshed")
 	env.requests.waitForAfter(t, initialMarker, time.Minute, "config snapshot fetch after sync_config command", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
@@ -179,9 +173,6 @@ func TestCommandPolling(t *testing.T) {
 	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
 
 	commandID := env.mustIssuePingCommand(t)
-	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
-		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
-	})
 	env.requests.waitFor(t, time.Minute, "HTTP polling command fetch", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
 			r.path == "/api/v1/devices/"+env.deviceID+"/commands"
@@ -213,9 +204,6 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 	waitForCommandTransportWarmup(t)
 
 	initialCommandID := env.mustIssuePingCommand(t)
-	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
-		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
-	})
 	env.waitForCommandAck(t, initialCommandID, "pong")
 
 	stopMQTTBroker(t)
@@ -237,9 +225,6 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 
 	recoveryMarker := env.requests.len()
 	recoveryCommandID := env.mustIssuePingCommand(t)
-	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands after broker recovery", func(r requestRecord) bool {
-		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
-	})
 	env.waitForCommandAck(t, recoveryCommandID, "pong")
 	env.requests.assertNeverAfter(t, recoveryMarker, "HTTP polling after broker recovery", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
@@ -497,9 +482,6 @@ func TestKioskExitChromeCommand(t *testing.T) {
 	waitForCommandTransportWarmup(t)
 
 	commandID := env.mustIssueExitKioskCommand(t)
-	env.requests.waitFor(t, time.Minute, "POST /api/v1/admin/commands", func(r requestRecord) bool {
-		return r.method == http.MethodPost && r.path == "/api/v1/admin/commands"
-	})
 	env.waitForCommandAck(t, commandID, "kiosk exit requested")
 	waitForKioskModeOffOnDevice(t, env.serial)
 	waitForForegroundPackage(t, env.serial, launcherPackage)

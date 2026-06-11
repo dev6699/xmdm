@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"xmdm/server/internal/managedfiles"
 	managedfilehttp "xmdm/server/internal/managedfiles/http"
 	"xmdm/server/internal/pagination"
+	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
 	"xmdm/server/internal/telemetry"
 	telemetryhttp "xmdm/server/internal/telemetry/http"
@@ -53,6 +55,7 @@ const (
 	loadConfigRequests    = 32
 	loadDownloadRequests  = 32
 	loadWorkers           = 8
+	loadCSRFToken         = "load-csrf-token"
 )
 
 func TestLoadRoutes(t *testing.T) {
@@ -64,7 +67,7 @@ func TestLoadRoutes(t *testing.T) {
 	})
 	t.Run("push", func(t *testing.T) {
 		runLoadCase(t, fixture.client, loadWorkers, loadCommandRequests, func() *http.Request {
-			return fixture.newRequest(http.MethodPost, "/api/v1/admin/commands", bytes.NewReader([]byte(`{"type":"reboot","target":{"type":"broadcast"}}`)), fixture.withSession(), fixture.withJSON())
+			return fixture.newRequest(http.MethodPost, "/admin/commands/create", strings.NewReader("type=reboot&targetType=device&targetDeviceId="+loadDeviceID), fixture.withSession(), fixture.withCSRF(), fixture.withForm())
 		}, http.StatusOK)
 	})
 	t.Run("poll", func(t *testing.T) {
@@ -104,7 +107,7 @@ func TestLoadRoutes(t *testing.T) {
 				return mixedFixture.newRequest(http.MethodGet, "/api/v1/devices/"+loadDeviceID+"/config", nil, mixedFixture.withDeviceSecret())
 			},
 			func() *http.Request {
-				return mixedFixture.newRequest(http.MethodPost, "/api/v1/admin/commands", bytes.NewReader([]byte(`{"type":"reboot","target":{"type":"broadcast"}}`)), mixedFixture.withSession(), mixedFixture.withJSON())
+				return mixedFixture.newRequest(http.MethodPost, "/admin/commands/create", strings.NewReader("type=reboot&targetType=device&targetDeviceId="+loadDeviceID), mixedFixture.withSession(), mixedFixture.withCSRF(), mixedFixture.withForm())
 			},
 			func() *http.Request {
 				return mixedFixture.newRequest(http.MethodGet, "/api/v1/devices/"+loadDeviceID+"/commands", nil, mixedFixture.withDeviceSecret())
@@ -156,7 +159,7 @@ func BenchmarkLoadRoutes(b *testing.B) {
 	b.Run("push", func(b *testing.B) {
 		b.ResetTimer()
 		runLoadCase(b, fixture.client, loadWorkers, b.N, func() *http.Request {
-			return fixture.newRequest(http.MethodPost, "/api/v1/admin/commands", bytes.NewReader([]byte(`{"type":"reboot","target":{"type":"broadcast"}}`)), fixture.withSession(), fixture.withJSON())
+			return fixture.newRequest(http.MethodPost, "/admin/commands/create", strings.NewReader("type=reboot&targetType=device&targetDeviceId="+loadDeviceID), fixture.withSession(), fixture.withCSRF(), fixture.withForm())
 		}, http.StatusOK)
 	})
 	b.Run("poll", func(b *testing.B) {
@@ -368,12 +371,17 @@ func newLoadFixture(tb testing.TB) *loadFixture {
 	}
 
 	mux := http.NewServeMux()
+	adminhttp.RegisterDashboard(mux, svc, adminhttp.DashboardDependencies{
+		Commands:      commandStore,
+		Devices:       devices,
+		PluginManager: plugins.Disabled(),
+		TenantID:      loadTenantID,
+	})
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
 	enrollmenthttp.Register(apiMux, svc, devices, nil, appsStore, nil, artifactStore, certsStore, policyStore, enrollment.RuntimeSnapshot{
 		CommandPollIntervalMs: 250,
 		ConfigSyncIntervalMs:  1000,
 	}, loadTenantID)
-	adminhttp.Register(apiMux, svc, nil, nil, commandStore, loadTenantID)
 	commandhttp.Register(apiMux, devices, commandStore, loadTenantID)
 	apphttp.Register(apiMux, svc, appsStore, devices, artifactStore, nil, loadTenantID, "com.xmdm.launcher")
 	certificatehttp.Register(apiMux, svc, devices, certsStore, artifactStore, nil, loadTenantID)
@@ -419,6 +427,19 @@ func (f *loadFixture) withDeviceSecret() requestOption {
 func (f *loadFixture) withJSON() requestOption {
 	return func(req *http.Request) {
 		req.Header.Set("Content-Type", "application/json")
+	}
+}
+
+func (f *loadFixture) withForm() requestOption {
+	return func(req *http.Request) {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+}
+
+func (f *loadFixture) withCSRF() requestOption {
+	return func(req *http.Request) {
+		req.AddCookie(&http.Cookie{Name: "xmdm_csrf", Value: loadCSRFToken})
+		req.Header.Set("X-XMDM-CSRF-Token", loadCSRFToken)
 	}
 }
 

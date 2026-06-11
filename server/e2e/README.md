@@ -257,7 +257,7 @@ The command transport tests share the same device bootstrap and server setup, th
 1. Boots the launcher; the test server supplies MQTT through the signed config snapshot runtime bucket.
 2. Waits for `POST /api/v1/enrollment`.
 3. Verifies the server marks the device enrolled through the API.
-4. Enqueues a `ping` command through `POST /api/v1/admin/commands`.
+4. Enqueues a `ping` command through `POST /admin/commands/create`.
 5. Verifies the device receives the command over MQTT and acknowledges it.
 6. Verifies the device does not fall back to the HTTP polling command endpoint.
 
@@ -268,7 +268,7 @@ The command transport tests share the same device bootstrap and server setup, th
 1. Boots the launcher; the test server supplies MQTT through the signed config snapshot runtime bucket.
 2. Waits for `POST /api/v1/enrollment`.
 3. Verifies the server marks the device enrolled through the API.
-4. Enqueues a `sync_config` command through `POST /api/v1/admin/commands`.
+4. Enqueues a `sync_config` command through `POST /admin/commands/create`.
 5. Verifies the device receives the command over MQTT and acknowledges it after refreshing config.
 6. Verifies the device fetches `GET /api/v1/devices/{deviceId}/config` again after the command.
 7. Verifies the device does not fall back to the HTTP polling command endpoint.
@@ -281,7 +281,7 @@ The command transport tests share the same device bootstrap and server setup, th
 2. Uses the short command-poll interval from the signed config snapshot runtime bucket.
 3. Waits for `POST /api/v1/enrollment`.
 4. Verifies the server marks the device enrolled through the API.
-5. Enqueues a `ping` command through `POST /api/v1/admin/commands`.
+5. Enqueues a `ping` command through `POST /admin/commands/create`.
 6. Verifies the device polls `GET /api/v1/devices/{deviceId}/commands`.
 7. Verifies the device acknowledges the command with `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`.
 

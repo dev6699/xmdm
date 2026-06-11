@@ -24,7 +24,7 @@ Owner roles used below:
 
 - Owner: `PM/Arch`
 - Depends on: none
-- Task: finalize the repo layout for `xmdm`, app, server, contracts, infra, and docs.
+- Task: finalize the repo layout for `xmdm`, app, server, infra, and docs.
 - Done when: source directories and docs directories are frozen and referenced from the index docs.
 
 ### M0-02 Glossary And Naming
@@ -476,84 +476,18 @@ Owner roles used below:
 - Task: run a cleanup pass for stale data, orphaned artifacts, and stuck commands.
 - Done when: the system is free of known backlog debris before release.
 
-## Milestone M8 - CLI Tool
+## Milestone M8 - CLI Tool Removed
 
-### M8-01 CLI Foundation And Configuration
-
-- Owner: `BE`
-- Depends on: M0-03, M1-01, M5-05
-- Task: create the CLI project scaffold, config loading, profile handling, and base HTTP client plumbing.
-- Done when: the CLI can resolve its configuration, target a server, and print a versioned help tree.
-
-### M8-02 Authentication And Session Management
-
-- Owner: `BE`
-- Depends on: M8-01, M1-01
-- Task: implement login, whoami, and logout flows for interactive CLI use.
-- Done when: the CLI can establish and clear an authenticated admin session.
-
-### M8-03 Resource Listing And Inspection
-
-- Owner: `BE`
-- Depends on: M8-01, M1-04, M4-01, M4-02, M4-03, M6-04, M6-05, M6-06
-- Task: implement read-only list and show commands for users, roles, groups, policies, apps, files, managed files, certificates, devices, logs, device info, commands, and audit events.
-- Done when: the CLI can inspect the core admin and device objects without mutating state.
-
-### M8-04 Core Resource Management
-
-- Owner: `BE`
-- Depends on: M8-02, M8-03
-- Task: implement create, update, and retire flows for the core admin resources.
-- Done when: the CLI can manage users, roles, groups, policies, and devices end to end.
-
-### M8-05 Content Management
-
-- Owner: `BE`
-- Depends on: M8-03, M4-01, M4-02, M4-03
-- Task: implement file upload, managed-file creation, app version publish, and certificate upload and retirement commands.
-- Done when: the CLI can manage artifacts and content records that feed device sync.
-
-### M8-06 Enrollment And Bootstrap
-
-- Owner: `BE`
-- Depends on: M8-02, M2-01, M2-02, M2-03, M2-04
-- Task: implement enrollment token management and bootstrap payload generation.
-- Done when: the CLI can prepare and issue device enrollment material safely.
-
-### M8-07 Device, Log, And Audit Inspection
-
-- Owner: `BE`
-- Depends on: M8-03, M6-04, M6-05, M6-06
-- Task: implement device status, sync, log, device-info, and audit inspection flows.
-- Done when: the CLI can answer support questions from the operational record.
-
-### M8-08 Command Operations
-
-- Owner: `BE`
-- Depends on: M8-03, M5-03, M5-04, M5-05, M5-06, M5-07
-- Task: implement command listing, command creation, command detail, and acknowledgement inspection.
-- Done when: the CLI can send and track device commands over the supported delivery paths.
-
-### M8-09 Output Formats And Error Handling
-
-- Owner: `BE`
-- Depends on: M8-01, M8-02, M8-03
-- Task: implement JSON output, table output, stable exit codes, and structured error mapping.
-- Done when: the CLI can be used reliably by humans and automation.
-
-### M8-10 Packaging And Release Documentation
-
-- Owner: `OPS`
-- Depends on: M8-01 through M8-09
-- Task: document installation, upgrade, completion, and shell integration for the CLI tool.
-- Done when: the CLI can be distributed and operated with documented procedures.
+- Status: removed
+- Reason: the CLI surface was deleted from the repo and the browser dashboard is now the supported operator path.
+- Notes: numbering is preserved so the roadmap still reads M7, M8, M9, M10 in order.
 
 ## Milestone M9 - Admin Dashboard
 
 ### M9-01 Dashboard Blueprint And Contract
 
 - Owner: `PM/Arch`
-- Depends on: M8-10
+- Depends on: M7-08
 - Task: define the browser admin dashboard scope, routes, permissions, and operator workflows.
 - Done when: the roadmap, README snapshot, and dashboard docs describe every dashboard page and mutation flow.
 
@@ -597,7 +531,7 @@ Owner roles used below:
 - Owner: `BE`
 - Depends on: M9-02, M2-01, M2-02
 - Task: implement browser workflows for enrollment token issuance, validation, revocation, and enrollment material inspection.
-- Done when: operators can prepare enrollment material without the CLI.
+- Done when: operators can prepare enrollment material from the dashboard.
 
 ### M9-08 Commands Dashboard
 
@@ -648,7 +582,7 @@ Owner roles used below:
 - Owner: `BE`
 - Depends on: M10-02, M5-05, M9-08
 - Task: let plugins register allowed command types and payload validation metadata.
-- Done when: admin API, dashboard, and CLI reject unregistered command types and accept registered plugin command types through the existing command queue.
+- Done when: admin API and dashboard reject unregistered command types and accept registered plugin command types through the existing command queue.
 
 ### M10-05 Launcher Companion-App Command Boundary
 

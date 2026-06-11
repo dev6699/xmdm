@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	appspg "xmdm/server/internal/apps/postgres"
 	"xmdm/server/internal/artifacts"
 	s3store "xmdm/server/internal/artifacts/s3"
@@ -27,8 +28,6 @@ import (
 	policypg "xmdm/server/internal/policy/postgres"
 	"xmdm/server/internal/push"
 	telemetrypg "xmdm/server/internal/telemetry/postgres"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // NewDeps initializes all dependencies for the API layer

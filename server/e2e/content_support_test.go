@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -266,106 +267,80 @@ func (e *commandTestEnv) mustBuildBootstrapURIWithExtras(t *testing.T, token str
 
 func (e *commandTestEnv) mustIssuePingCommand(t *testing.T) string {
 	t.Helper()
-
-	resp := postJSON(t, e.client, e.baseURL+"/api/v1/admin/commands", fmt.Sprintf(`{
-		"type":"ping",
-		"target":{
-			"type":"device",
-			"deviceId":"%s"
-		}
-	}`, e.deviceID))
-
-	commands, _ := resp["commands"].([]any)
-	if len(commands) != 1 {
-		t.Fatalf("expected one command row, got %#v", resp["commands"])
-	}
-	cmd, _ := commands[0].(map[string]any)
-	id, _ := cmd["id"].(string)
-	if id == "" {
-		t.Fatalf("command response did not include an id: %#v", cmd)
-	}
-	if cmd["type"] != "ping" {
-		t.Fatalf("unexpected command type: %#v", cmd["type"])
-	}
-	return id
+	return e.mustIssueDashboardCommand(t, "ping", "")
 }
 
 func (e *commandTestEnv) mustIssueSyncConfigCommand(t *testing.T) string {
 	t.Helper()
-
-	resp := postJSON(t, e.client, e.baseURL+"/api/v1/admin/commands", fmt.Sprintf(`{
-		"type":"sync_config",
-		"target":{
-			"type":"device",
-			"deviceId":"%s"
-		}
-	}`, e.deviceID))
-
-	commands, _ := resp["commands"].([]any)
-	if len(commands) != 1 {
-		t.Fatalf("expected one command row, got %#v", resp["commands"])
-	}
-	cmd, _ := commands[0].(map[string]any)
-	id, _ := cmd["id"].(string)
-	if id == "" {
-		t.Fatalf("command response did not include an id: %#v", cmd)
-	}
-	if cmd["type"] != "sync_config" {
-		t.Fatalf("unexpected command type: %#v", cmd["type"])
-	}
-	return id
+	return e.mustIssueDashboardCommand(t, "sync_config", "")
 }
 
 func (e *commandTestEnv) mustIssueExitKioskCommand(t *testing.T) string {
 	t.Helper()
+	return e.mustIssueDashboardCommand(t, "exit_kiosk", `{"packageName":"com.android.chrome"}`)
+}
 
-	sessionID := mustAdminSessionID(t, e.baseURL)
-	req, err := http.NewRequest(http.MethodPost, e.baseURL+"/api/v1/admin/commands", strings.NewReader(fmt.Sprintf(`{
-		"type":"exit_kiosk",
-		"target":{
-			"type":"device",
-			"deviceId":"%s"
-		}
-	}`, e.deviceID)))
+func (e *commandTestEnv) mustIssueDashboardCommand(t *testing.T, commandType, payload string) string {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, e.baseURL+"/admin/commands", nil)
 	if err != nil {
-		t.Fatalf("build exit kiosk command request: %v", err)
+		t.Fatalf("build command page request: %v", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cookie", auth.SessionCookieName+"="+sessionID)
-
 	res, err := e.client.Do(req)
 	if err != nil {
-		t.Fatalf("issue exit kiosk command: %v", err)
+		t.Fatalf("load command page: %v", err)
 	}
-	defer res.Body.Close()
+	res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(res.Body)
-		t.Fatalf("expected 200, got %d for POST %s: %s", res.StatusCode, req.URL, strings.TrimSpace(string(body)))
-	}
-	var resp map[string]any
-	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode exit kiosk command response: %v", err)
+		t.Fatalf("expected command page, got %d", res.StatusCode)
 	}
 
-	commands, _ := resp["commands"].([]any)
-	if len(commands) != 1 {
-		t.Fatalf("expected one command row, got %#v", resp["commands"])
+	form := url.Values{}
+	form.Set("type", commandType)
+	if payload != "" {
+		form.Set("payload", payload)
 	}
-	cmd, _ := commands[0].(map[string]any)
-	id, _ := cmd["id"].(string)
-	if id == "" {
-		t.Fatalf("command response did not include an id: %#v", cmd)
+	form.Set("targetType", "device")
+	form.Set("targetDeviceId", e.deviceID)
+
+	postReq, err := http.NewRequest(http.MethodPost, e.baseURL+"/admin/commands/create", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatalf("build command form request: %v", err)
 	}
-	if cmd["type"] != "exit_kiosk" {
-		t.Fatalf("unexpected command type: %#v", cmd["type"])
+	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	postRes, err := e.client.Do(postReq)
+	if err != nil {
+		t.Fatalf("issue command form request: %v", err)
 	}
-	return id
+	defer postRes.Body.Close()
+	if postRes.StatusCode != http.StatusSeeOther {
+		body, _ := io.ReadAll(postRes.Body)
+		t.Fatalf("expected command redirect, got %d: %s", postRes.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var commandID string
+	err = e.pool.QueryRow(context.Background(), `
+		SELECT id
+		FROM commands
+		WHERE tenant_id = $1 AND device_id = $2 AND type = $3
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, bootstrap.SeedTenantID, e.deviceID, commandType).Scan(&commandID)
+	if err != nil {
+		t.Fatalf("load issued command: %v", err)
+	}
+	if commandID == "" {
+		t.Fatalf("command id was empty for type %s", commandType)
+	}
+	return commandID
 }
 
 func mustAdminSessionID(t *testing.T, baseURL string) string {
 	t.Helper()
 	client := newHTTPClient(t)
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/admin/login", strings.NewReader(fmt.Sprintf("username=%s&password=%s", adminUsername, adminPassword)))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/admin/login", strings.NewReader(fmt.Sprintf("username=%s&password=%s", adminUsername, adminPassword)))
 	if err != nil {
 		t.Fatalf("build admin login request: %v", err)
 	}

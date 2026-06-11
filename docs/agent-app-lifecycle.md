@@ -396,7 +396,7 @@ The enterprise surface is split between hard enforcement, reporting, and future 
 | Package Rules | Fully enforced | The launcher applies allow/block lists and package suspension from policy. |
 | Device Logs | Reporting only | Devices upload structured logs; the server stores and queries them. |
 | Device Info | Reporting only | Devices upload inventory/runtime snapshots; the server exports them. |
-| Messaging And Audit | API and browser dashboard workflow | Admins can create and list commands and audit events through the API, CLI, and dashboard. |
+| Messaging And Audit | API and browser dashboard workflow | Admins can create and list commands and audit events through the API and dashboard. |
 | Image Upload | Not planned | No implementation is planned for now. |
 | Foreground Enforcement | Not planned | The roadmap item exists only as a documented non-goal. |
 

@@ -6,10 +6,10 @@ Go control plane implementation lives here.
 
 The admin console provides a session-based admin auth flow:
 
-- `GET /api/v1/admin/login` renders a simple form
-- `POST /api/v1/admin/login` creates a session cookie
-- `POST /api/v1/admin/logout` clears the session cookie
-- `GET /api/v1/admin/me` verifies the active session
+- `GET /admin/login` renders a simple form
+- `POST /admin/login` creates a session cookie
+- `POST /admin/logout` clears the session cookie
+- `GET /admin/me` verifies the active session
 - `GET /api/v1/devices` exercises a permission-gated admin route
 
 Run it with:
@@ -95,10 +95,10 @@ For topic isolation, see [../infra/mosquitto/mqtt-security.md](../infra/mosquitt
 
 The server now exposes `GET /api/v1/devices/{deviceId}/commands` as the HTTP fallback path for pending commands.
 The endpoint authenticates with `X-XMDM-Device-Secret`, reads queued or sent command rows from PostgreSQL, and returns them in a `commands` array.
-The admin surface exposes `POST /api/v1/admin/commands` for queued command creation, and the request target can expand to a device, a group, or a broadcast set.
-The admin API also exposes JSON list endpoints at `GET /api/v1/admin/commands` and `GET /api/v1/admin/audit` for recent command rows and audit events.
+The browser dashboard exposes `POST /admin/commands/create` for queued command creation, and the request target can expand to a device, a group, or a broadcast set.
+The dashboard also exposes command and audit pages at `/admin/commands` and `/admin/audit` for recent command rows and audit events.
 Device acknowledgements use `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack` with the same device secret header and update the command row to `acked` or `failed`.
-The messaging and audit surface is API-first for now; a separate admin UI can be layered on top later.
+The messaging and audit surface is dashboard-first for operators, with device-facing HTTP endpoints for sync and acknowledgements.
 
 ### Migration Tooling
 

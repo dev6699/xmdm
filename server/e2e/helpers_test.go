@@ -214,7 +214,7 @@ func login(client *http.Client, t *testing.T, baseURL, username, password string
 	form.Set("username", username)
 	form.Set("password", password)
 
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/admin/login", strings.NewReader(form.Encode()))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/admin/login", strings.NewReader(form.Encode()))
 	if err != nil {
 		t.Fatalf("build login request: %v", err)
 	}
