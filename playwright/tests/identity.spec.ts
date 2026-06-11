@@ -69,19 +69,15 @@ test('admin can manage users and roles', async ({ page }) => {
     await page.goto(dashboardPaths.roles);
     await expect(page.getByRole('heading', { name: 'Roles' })).toBeVisible();
     await expect(page.getByText('Define the permission bundles available to operators.')).toBeVisible();
-    await expect(page.getByText('Available permissions:')).toBeVisible();
-    await expect(page.locator('.permission-catalog code')).toHaveText([
-      'admin.read',
-      'admin.write',
-      'devices.read',
-      'devices.write',
-    ]);
+    await expect(page.getByRole('group', { name: 'Permissions' })).toBeVisible();
+    await expect(page.locator('input[name="permissions"]')).toHaveCount(4);
     await expect(page.getByRole('columnheader', { name: 'Created' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'ID' })).toBeVisible();
 
     await page.goto(dashboardPaths.roles);
     await page.getByLabel('Name').fill(managerRoleName);
-    await page.getByLabel('Permissions JSON array').fill('["admin.read","admin.write"]');
+    await page.getByLabel('admin.read').check();
+    await page.getByLabel('admin.write').check();
     await page.getByRole('button', { name: 'Create role' }).click();
     await expect(page).toHaveURL(new RegExp(`${dashboardPaths.roles}(\\?.*)?$`));
     const managerRoleRow = await findRowByText(page, managerRoleName);

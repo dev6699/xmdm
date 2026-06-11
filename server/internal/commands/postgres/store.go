@@ -232,9 +232,6 @@ func (s *Store) ListPendingForDevice(ctx context.Context, tenantID, deviceID str
 	if tenantID == "" || deviceID == "" {
 		return nil, httpx.ErrInvalidInput
 	}
-	if err := s.expireDueCommands(ctx, tenantID, deviceID); err != nil {
-		return nil, err
-	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at
 		 FROM commands

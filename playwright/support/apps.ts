@@ -15,6 +15,10 @@ export function agentApkPath() {
 export async function ensureAgentAppPublished(page: Page) {
   await page.goto(dashboardPaths.apps);
   await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
+  const existing = page.locator('table tbody tr').filter({ hasText: AGENT_APP_PACKAGE }).first();
+  if (await existing.count() > 0) {
+    return;
+  }
 
   await page.getByLabel('Package name').fill(AGENT_APP_PACKAGE);
   await page.getByLabel('App name').fill(AGENT_APP_NAME);

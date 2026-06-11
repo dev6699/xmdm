@@ -60,7 +60,7 @@ func (s *Store) ListApps(ctx context.Context, tenantID string, page pagination.P
 		`SELECT id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at
 		 FROM apps
 		 WHERE tenant_id = $1
-		 ORDER BY created_at, id
+		 ORDER BY created_at DESC, id DESC
 		 LIMIT $2 OFFSET $3`,
 		tenantID, page.Limit, page.Offset,
 	)
@@ -194,7 +194,7 @@ func (s *Store) ListVersions(ctx context.Context, tenantID, appID string, page p
 		`SELECT id::text, tenant_id::text, app_id::text, status, version_name, version_code, artifact_id, checksum, published_at, created_at
 		 FROM app_versions
 		 WHERE tenant_id = $1 AND app_id = $2
-		 ORDER BY created_at, id
+		 ORDER BY created_at DESC, id DESC
 		 LIMIT $3 OFFSET $4`,
 		tenantID, appID, page.Limit, page.Offset,
 	)

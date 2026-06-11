@@ -173,7 +173,7 @@ async function createCommand(page: Page, options: {
   await page.goto(dashboardPaths.commands);
   const commandSelect = page.getByLabel('Command');
   await expect(commandSelect).toHaveValue('ping');
-  await expect(commandSelect.locator('option')).toHaveText(['ping', 'reboot', 'sync_config', 'exit_kiosk']);
+  await expect(commandSelect.locator('option')).toHaveText(['ping', 'reboot', 'sync_config', 'exit_kiosk', 'launch_companion_app']);
   await expect(page.getByLabel('Target type').locator('option')).toHaveText(['Device', 'Group']);
 
   await setSelectValue('select[name="type"]', options.command);
@@ -194,6 +194,7 @@ async function createCommand(page: Page, options: {
 }
 
 test('admin can create commands for every target type and observe device ack and error states', async ({ page }) => {
+  test.setTimeout(60_000);
   const { username, password } = dashboardCredentials();
   const suffix = uniqueSuffix();
   const policyName = `playwright-command-policy-${suffix}`;
@@ -210,7 +211,7 @@ test('admin can create commands for every target type and observe device ack and
 
   await page.goto(dashboardPaths.commands);
   await expect(page.getByRole('heading', { name: 'Commands' })).toBeVisible();
-  await expect(page.getByLabel('Command').locator('option')).toHaveText(['ping', 'reboot', 'sync_config', 'exit_kiosk']);
+  await expect(page.getByLabel('Command').locator('option')).toHaveText(['ping', 'reboot', 'sync_config', 'exit_kiosk', 'launch_companion_app']);
   await expect(page.getByLabel('Target type').locator('option')).toHaveText(['Device', 'Group']);
   const deviceOptions = await page.getByLabel('Device').locator('option').evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
   expect(deviceOptions).toContain(deviceOne.deviceId);

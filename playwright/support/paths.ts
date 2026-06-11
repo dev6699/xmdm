@@ -17,7 +17,6 @@ export const dashboardPaths = {
   certificates: '/admin/certificates',
   certificateDetail: (id: string) => `/admin/certificates/${id}`,
   commands: '/admin/commands',
-  logs: '/admin/logs',
   deviceInfo: '/admin/device-info',
   audit: '/admin/audit',
 } as const;

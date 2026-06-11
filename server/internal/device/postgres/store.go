@@ -118,7 +118,7 @@ func (s *Store) ListDevices(ctx context.Context, tenantID string, page paginatio
 		 LEFT JOIN device_groups dg ON dg.tenant_id = d.tenant_id AND dg.device_id = d.id
 		 WHERE d.tenant_id = $1
 		 GROUP BY d.id, d.tenant_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras
-		 ORDER BY d.created_at, d.id
+		 ORDER BY d.created_at DESC, d.id DESC
 		 LIMIT $2 OFFSET $3`,
 		tenantID, page.Limit, page.Offset,
 	)

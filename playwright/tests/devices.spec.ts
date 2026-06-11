@@ -121,9 +121,9 @@ async function uploadDeviceInfo(page: Page, deviceId: string, deviceSecret: stri
     headers: {
       'X-XMDM-Device-Secret': deviceSecret,
     },
-      data: {
-        payload,
-      },
+    data: {
+      payload,
+    },
   });
   if (!response.ok()) {
     throw new Error(`device info upload failed with ${response.status()}: ${await response.text()}`);

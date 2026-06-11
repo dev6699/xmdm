@@ -56,7 +56,7 @@ func (s *Store) ListUsers(ctx context.Context, tenantID string, page pagination.
 		`SELECT id::text, tenant_id::text, email, role_id::text, status, created_at, updated_at, deleted_at
 		 FROM users
 		 WHERE tenant_id = $1
-		 ORDER BY created_at, id
+		 ORDER BY created_at DESC, id DESC
 		 LIMIT $2 OFFSET $3`,
 		tenantID, page.Limit, page.Offset,
 	)
@@ -84,7 +84,7 @@ func (s *Store) ListActiveUsers(ctx context.Context, tenantID string) ([]identit
 		`SELECT id::text, tenant_id::text, email, role_id::text, status, created_at, updated_at, deleted_at
 		 FROM users
 		 WHERE tenant_id = $1 AND status = 'active'
-		 ORDER BY created_at, id`,
+		 ORDER BY created_at DESC, id DESC`,
 		tenantID,
 	)
 	if err != nil {
@@ -231,7 +231,7 @@ func (s *Store) ListRoles(ctx context.Context, tenantID string, page pagination.
 		`SELECT id::text, tenant_id::text, name, permissions, status, created_at, updated_at, deleted_at
 		 FROM roles
 		 WHERE tenant_id = $1
-		 ORDER BY created_at, id
+		 ORDER BY created_at DESC, id DESC
 		 LIMIT $2 OFFSET $3`,
 		tenantID, page.Limit, page.Offset,
 	)
@@ -259,7 +259,7 @@ func (s *Store) ListActiveRoles(ctx context.Context, tenantID string) ([]identit
 		`SELECT id::text, tenant_id::text, name, permissions, status, created_at, updated_at, deleted_at
 		 FROM roles
 		 WHERE tenant_id = $1 AND status = 'active'
-		 ORDER BY created_at, id`,
+		 ORDER BY created_at DESC, id DESC`,
 		tenantID,
 	)
 	if err != nil {

@@ -57,7 +57,7 @@ func (s *Store) ListPolicies(ctx context.Context, tenantID string, page paginati
 		`SELECT id::text, tenant_id::text, name, version, kiosk_mode, kiosk_app_package, restrictions_json, status, created_at, updated_at, deleted_at
 		 FROM policies
 		 WHERE tenant_id = $1
-		 ORDER BY created_at, id
+		 ORDER BY created_at DESC, id DESC
 		 LIMIT $2 OFFSET $3`,
 		tenantID, page.Limit, page.Offset,
 	)
@@ -85,7 +85,7 @@ func (s *Store) ListActivePolicies(ctx context.Context, tenantID string) ([]poli
 		`SELECT id::text, tenant_id::text, name, version, kiosk_mode, kiosk_app_package, restrictions_json, status, created_at, updated_at, deleted_at
 		 FROM policies
 		 WHERE tenant_id = $1 AND status = $2
-		 ORDER BY created_at, id`,
+		 ORDER BY created_at DESC, id DESC`,
 		tenantID, policy.StatusActive,
 	)
 	if err != nil {

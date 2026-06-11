@@ -25,7 +25,7 @@ test('admin can inspect audit events from the dashboard', async ({ page }) => {
 
   await page.goto(dashboardPaths.roles);
   await page.getByLabel('Name').fill(roleName);
-  await page.getByLabel('Permissions JSON array').fill('["admin.read"]');
+  await page.getByLabel('admin.read').check();
   await page.getByRole('button', { name: 'Create role' }).click();
 
   const roleRow = page.locator('table tbody tr').filter({ hasText: roleName }).first();
