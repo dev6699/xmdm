@@ -8,6 +8,7 @@ import (
 
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/identity"
+	"xmdm/server/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -49,12 +50,41 @@ func (s *Store) CreateUser(ctx context.Context, tenantID string, req identity.Us
 	return scanUser(row)
 }
 
-func (s *Store) ListUsers(ctx context.Context, tenantID string) ([]identity.User, error) {
+func (s *Store) ListUsers(ctx context.Context, tenantID string, page pagination.Params) ([]identity.User, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, email, role_id::text, status, created_at, updated_at, deleted_at
 		 FROM users
 		 WHERE tenant_id = $1
-		 ORDER BY created_at`,
+		 ORDER BY created_at, id
+		 LIMIT $2 OFFSET $3`,
+		tenantID, page.Limit, page.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]identity.User, 0)
+	for rows.Next() {
+		rec, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) ListActiveUsers(ctx context.Context, tenantID string) ([]identity.User, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, tenant_id::text, email, role_id::text, status, created_at, updated_at, deleted_at
+		 FROM users
+		 WHERE tenant_id = $1 AND status = 'active'
+		 ORDER BY created_at, id`,
 		tenantID,
 	)
 	if err != nil {
@@ -74,6 +104,23 @@ func (s *Store) ListUsers(ctx context.Context, tenantID string) ([]identity.User
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) GetUser(ctx context.Context, tenantID, id string) (identity.User, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, email, role_id::text, status, created_at, updated_at, deleted_at
+		 FROM users
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, id,
+	)
+	rec, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return identity.User{}, httpx.ErrNotFound
+		}
+		return identity.User{}, err
+	}
+	return rec, nil
 }
 
 func (s *Store) UpdateUser(ctx context.Context, tenantID, id string, req identity.UserUpsert) (identity.User, error) {
@@ -178,12 +225,41 @@ func (s *Store) CreateRole(ctx context.Context, tenantID string, req identity.Ro
 	return scanRole(row)
 }
 
-func (s *Store) ListRoles(ctx context.Context, tenantID string) ([]identity.Role, error) {
+func (s *Store) ListRoles(ctx context.Context, tenantID string, page pagination.Params) ([]identity.Role, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, name, permissions, status, created_at, updated_at, deleted_at
 		 FROM roles
 		 WHERE tenant_id = $1
-		 ORDER BY created_at`,
+		 ORDER BY created_at, id
+		 LIMIT $2 OFFSET $3`,
+		tenantID, page.Limit, page.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]identity.Role, 0)
+	for rows.Next() {
+		rec, err := scanRole(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) ListActiveRoles(ctx context.Context, tenantID string) ([]identity.Role, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, tenant_id::text, name, permissions, status, created_at, updated_at, deleted_at
+		 FROM roles
+		 WHERE tenant_id = $1 AND status = 'active'
+		 ORDER BY created_at, id`,
 		tenantID,
 	)
 	if err != nil {
@@ -203,6 +279,23 @@ func (s *Store) ListRoles(ctx context.Context, tenantID string) ([]identity.Role
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) GetRole(ctx context.Context, tenantID, id string) (identity.Role, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, name, permissions, status, created_at, updated_at, deleted_at
+		 FROM roles
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, id,
+	)
+	rec, err := scanRole(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return identity.Role{}, httpx.ErrNotFound
+		}
+		return identity.Role{}, err
+	}
+	return rec, nil
 }
 
 func (s *Store) UpdateRole(ctx context.Context, tenantID, id string, req identity.RoleUpsert) (identity.Role, error) {

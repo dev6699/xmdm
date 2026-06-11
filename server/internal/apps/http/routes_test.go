@@ -15,6 +15,7 @@ import (
 	"xmdm/server/internal/device"
 	files "xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 )
 
 func TestRegisterDeviceArtifactDownload(t *testing.T) {
@@ -154,17 +155,96 @@ func TestRegisterEnrollmentAgentAPKDownloadRejectsMissingAgent(t *testing.T) {
 	}
 }
 
-type fakeAppStore struct {
-	apps     []apps.App
-	versions map[string][]apps.Version
-	version  apps.Version
+func TestRegisterAppsCollectionUsesQueryPagination(t *testing.T) {
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionAdminRead})
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+	store := &fakeAppStore{
+		apps: []apps.App{
+			{RecordBase: apps.RecordBase{ID: "app-1", TenantID: "tenant-1", Status: apps.StatusActive}, Name: "App 1"},
+			{RecordBase: apps.RecordBase{ID: "app-2", TenantID: "tenant-1", Status: apps.StatusActive}, Name: "App 2"},
+		},
+	}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, &fakeDeviceStore{}, &fakeArtifactStore{}, nil, "tenant-1", "com.xmdm.launcher")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps?page=3&limit=7", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", res.Code, res.Body.String())
+	}
+	if store.lastListParams.Limit != 7 {
+		t.Fatalf("unexpected list limit: %+v", store.lastListParams)
+	}
+	if store.lastListParams.Offset != 14 {
+		t.Fatalf("unexpected list offset: %+v", store.lastListParams)
+	}
 }
 
-func (s *fakeAppStore) ListApps(context.Context, string) ([]apps.App, error) {
+func TestRegisterAppVersionsUsesQueryPagination(t *testing.T) {
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionAdminRead})
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+	store := &fakeAppStore{
+		versions: map[string][]apps.Version{
+			"app-1": {
+				{ID: "version-1", TenantID: "tenant-1", AppID: "app-1", Status: apps.VersionStatusPublished, VersionName: "1.0.0", VersionCode: 100},
+			},
+		},
+	}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, &fakeDeviceStore{}, &fakeArtifactStore{}, nil, "tenant-1", "com.xmdm.launcher")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/versions?page=2&limit=9", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", res.Code, res.Body.String())
+	}
+	if store.lastVersionsParams.Limit != 9 {
+		t.Fatalf("unexpected versions limit: %+v", store.lastVersionsParams)
+	}
+	if store.lastVersionsParams.Offset != 9 {
+		t.Fatalf("unexpected versions offset: %+v", store.lastVersionsParams)
+	}
+}
+
+type fakeAppStore struct {
+	apps               []apps.App
+	versions           map[string][]apps.Version
+	version            apps.Version
+	lastListParams     pagination.Params
+	lastVersionsParams pagination.Params
+}
+
+func (s *fakeAppStore) ListApps(_ context.Context, _ string, params pagination.Params) ([]apps.App, error) {
+	s.lastListParams = params
 	return append([]apps.App(nil), s.apps...), nil
 }
 
+func (s *fakeAppStore) GetOverviewStats(context.Context, string) (apps.OverviewStats, error) {
+	return apps.OverviewStats{Total: len(s.apps), Active: len(s.apps)}, nil
+}
+
 func (s *fakeAppStore) GetApp(context.Context, string, string) (apps.App, error) {
+	return apps.App{}, httpx.ErrNotFound
+}
+
+func (s *fakeAppStore) GetAppByPackageName(_ context.Context, _ string, packageName string) (apps.App, error) {
+	for _, app := range s.apps {
+		if app.PackageName == packageName {
+			return app, nil
+		}
+	}
 	return apps.App{}, httpx.ErrNotFound
 }
 
@@ -180,8 +260,44 @@ func (s *fakeAppStore) RetireApp(context.Context, string, string) (apps.App, err
 	return apps.App{}, nil
 }
 
-func (s *fakeAppStore) ListVersions(_ context.Context, _ string, appID string) ([]apps.Version, error) {
+func (s *fakeAppStore) ListVersions(_ context.Context, _ string, appID string, params pagination.Params) ([]apps.Version, error) {
+	s.lastVersionsParams = params
 	return append([]apps.Version(nil), s.versions[appID]...), nil
+}
+
+func (s *fakeAppStore) GetVersionByCode(context.Context, string, string, int64) (apps.Version, error) {
+	return apps.Version{}, httpx.ErrNotFound
+}
+
+func (s *fakeAppStore) GetLatestPublishedVersion(_ context.Context, _ string, appID string) (apps.Version, error) {
+	var latest *apps.Version
+	for i := range s.versions[appID] {
+		version := s.versions[appID][i]
+		if version.Status != apps.VersionStatusPublished {
+			continue
+		}
+		if latest == nil {
+			latest = &version
+			continue
+		}
+		if version.PublishedAt != nil && latest.PublishedAt != nil {
+			if version.PublishedAt.After(*latest.PublishedAt) {
+				latest = &version
+			}
+			continue
+		}
+		if version.PublishedAt != nil && latest.PublishedAt == nil {
+			latest = &version
+			continue
+		}
+		if version.PublishedAt == nil && latest.PublishedAt == nil && version.CreatedAt.After(latest.CreatedAt) {
+			latest = &version
+		}
+	}
+	if latest == nil {
+		return apps.Version{}, httpx.ErrNotFound
+	}
+	return *latest, nil
 }
 
 func (s *fakeAppStore) GetVersion(context.Context, string, string, string) (apps.Version, error) {
@@ -194,8 +310,24 @@ func (s *fakeAppStore) CreateVersion(context.Context, string, string, apps.Versi
 
 type fakeDeviceStore struct{}
 
-func (s *fakeDeviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
+func (s *fakeDeviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return nil, nil
+}
+
+func (s *fakeDeviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
+	return nil, nil
+}
+
+func (s *fakeDeviceStore) GetOverviewStats(context.Context, string) (device.OverviewStats, error) {
+	return device.OverviewStats{}, nil
+}
+
+func (s *fakeDeviceStore) GetStatusCounts(context.Context, string) (device.StatusCounts, error) {
+	return device.StatusCounts{}, nil
+}
+
+func (s *fakeDeviceStore) GetDevice(context.Context, string, string) (device.Device, error) {
+	return device.Device{}, httpx.ErrNotFound
 }
 
 func (s *fakeDeviceStore) CreateDevice(context.Context, string, device.DeviceUpsert) (device.Device, error) {

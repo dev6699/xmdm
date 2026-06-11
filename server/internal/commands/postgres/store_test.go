@@ -12,6 +12,7 @@ import (
 	"xmdm/server/internal/commands"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/push"
 
 	"github.com/jackc/pgx/v5"
@@ -243,7 +244,7 @@ func TestExpiredCommandIsNotPendingOrAckable(t *testing.T) {
 		t.Fatalf("create command: %v", err)
 	}
 
-	pending, err := store.ListPending(context.Background(), bootstrap.SeedTenantID, deviceUUID)
+	pending, err := store.ListPending(context.Background(), bootstrap.SeedTenantID, deviceUUID, pagination.Params{Limit: pagination.DefaultLimit})
 	if err != nil {
 		t.Fatalf("list pending: %v", err)
 	}

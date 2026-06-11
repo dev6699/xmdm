@@ -8,6 +8,7 @@ import (
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/identity"
+	"xmdm/server/internal/pagination"
 	internalplugins "xmdm/server/internal/plugins"
 )
 
@@ -43,8 +44,14 @@ type fakeIdentityRepo struct {
 	updatedRoles []identity.RoleUpsert
 }
 
-func (r *fakeIdentityRepo) ListUsers(context.Context, string) ([]identity.User, error) {
+func (r *fakeIdentityRepo) ListUsers(context.Context, string, pagination.Params) ([]identity.User, error) {
 	return nil, nil
+}
+func (r *fakeIdentityRepo) ListActiveUsers(context.Context, string) ([]identity.User, error) {
+	return nil, nil
+}
+func (r *fakeIdentityRepo) GetUser(context.Context, string, string) (identity.User, error) {
+	return identity.User{}, nil
 }
 func (r *fakeIdentityRepo) CreateUser(context.Context, string, identity.UserUpsert) (identity.User, error) {
 	return identity.User{}, nil
@@ -58,8 +65,14 @@ func (r *fakeIdentityRepo) RetireUser(context.Context, string, string) (identity
 func (r *fakeIdentityRepo) AuthenticateUser(context.Context, string, string, string) (identity.User, identity.Role, error) {
 	return identity.User{}, identity.Role{}, nil
 }
-func (r *fakeIdentityRepo) ListRoles(context.Context, string) ([]identity.Role, error) {
+func (r *fakeIdentityRepo) ListRoles(context.Context, string, pagination.Params) ([]identity.Role, error) {
 	return append([]identity.Role(nil), r.roles...), nil
+}
+func (r *fakeIdentityRepo) ListActiveRoles(context.Context, string) ([]identity.Role, error) {
+	return append([]identity.Role(nil), r.roles...), nil
+}
+func (r *fakeIdentityRepo) GetRole(context.Context, string, string) (identity.Role, error) {
+	return identity.Role{}, nil
 }
 func (r *fakeIdentityRepo) CreateRole(context.Context, string, identity.RoleUpsert) (identity.Role, error) {
 	return identity.Role{}, nil

@@ -20,6 +20,7 @@ import (
 	"xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/policy"
 )
 
@@ -1181,6 +1182,10 @@ type fakePolicyStore struct {
 	policyManagedFiles []policy.PolicyManagedFile
 }
 
+func (s *fakePolicyStore) ListActivePolicies(context.Context, string) ([]policy.Policy, error) {
+	return append([]policy.Policy(nil), s.policies...), nil
+}
+
 type fakeDeviceStore struct {
 	device device.Device
 	secret string
@@ -1225,7 +1230,7 @@ func (s *fakeEnrollmentStore) BindDevice(_ context.Context, tenantID, token, dev
 	return s.bound, nil
 }
 
-func (s *fakeEnrollmentStore) ListTokens(context.Context, string) ([]enrollment.Token, error) {
+func (s *fakeEnrollmentStore) ListTokens(context.Context, string, pagination.Params) ([]enrollment.Token, error) {
 	return append([]enrollment.Token(nil), s.tokens...), nil
 }
 
@@ -1239,19 +1244,25 @@ func (s *fakeEnrollmentStore) ExpireTokens(context.Context, time.Time) (int64, e
 	return 0, nil
 }
 
-func (s *fakeCertificateStore) ListCertificates(context.Context, string) ([]certificates.Certificate, error) {
+func (s *fakeCertificateStore) ListCertificates(context.Context, string, pagination.Params) ([]certificates.Certificate, error) {
 	return append([]certificates.Certificate(nil), s.active...), nil
 }
 
-func (s *fakeCertificateStore) ListActiveCertificates(context.Context, string) ([]certificates.Certificate, error) {
+func (s *fakeCertificateStore) ListActiveCertificates(context.Context, string, pagination.Params) ([]certificates.Certificate, error) {
 	return append([]certificates.Certificate(nil), s.active...), nil
 }
 
-func (s *fakeCertificateStore) GetCertificate(context.Context, string, string) (certificates.Certificate, error) {
-	if len(s.active) == 0 {
-		return certificates.Certificate{}, httpx.ErrNotFound
+func (s *fakeCertificateStore) GetOverviewStats(context.Context, string) (certificates.OverviewStats, error) {
+	return certificates.OverviewStats{Total: len(s.active), Active: len(s.active)}, nil
+}
+
+func (s *fakeCertificateStore) GetCertificate(_ context.Context, _ string, certificateID string) (certificates.Certificate, error) {
+	for _, cert := range s.active {
+		if cert.ID == certificateID {
+			return cert, nil
+		}
 	}
-	return s.active[0], nil
+	return certificates.Certificate{}, httpx.ErrNotFound
 }
 
 func (s *fakeCertificateStore) CreateCertificate(context.Context, string, certificates.CertificateUpsert) (certificates.Certificate, error) {
@@ -1262,12 +1273,21 @@ func (s *fakeCertificateStore) RetireCertificate(context.Context, string, string
 	return certificates.Certificate{}, nil
 }
 
-func (s *fakeFileStore) ListManagedFiles(context.Context, string) ([]managedfiles.ManagedFile, error) {
+func (s *fakeFileStore) ListManagedFiles(context.Context, string, pagination.Params) ([]managedfiles.ManagedFile, error) {
 	return append([]managedfiles.ManagedFile(nil), s.items...), nil
 }
 
-func (s *fakeFileStore) GetManagedFile(context.Context, string, string) (managedfiles.ManagedFile, error) {
-	return managedfiles.ManagedFile{}, nil
+func (s *fakeFileStore) GetOverviewStats(context.Context, string) (managedfiles.OverviewStats, error) {
+	return managedfiles.OverviewStats{Total: len(s.items), Active: len(s.items)}, nil
+}
+
+func (s *fakeFileStore) GetManagedFile(_ context.Context, _ string, managedFileID string) (managedfiles.ManagedFile, error) {
+	for _, item := range s.items {
+		if item.ID == managedFileID {
+			return item, nil
+		}
+	}
+	return managedfiles.ManagedFile{}, httpx.ErrNotFound
 }
 
 func (s *fakeFileStore) CreateManagedFile(context.Context, string, managedfiles.ManagedFileUpsert) (managedfiles.ManagedFile, error) {
@@ -1278,11 +1298,29 @@ func (s *fakeFileStore) RetireManagedFile(context.Context, string, string) (mana
 	return managedfiles.ManagedFile{}, nil
 }
 
-func (s *fakeAppStore) ListApps(context.Context, string) ([]apps.App, error) {
+func (s *fakeAppStore) ListApps(context.Context, string, pagination.Params) ([]apps.App, error) {
 	return append([]apps.App(nil), s.apps...), nil
 }
 
-func (s *fakeAppStore) GetApp(context.Context, string, string) (apps.App, error) {
+func (s *fakeAppStore) GetOverviewStats(context.Context, string) (apps.OverviewStats, error) {
+	return apps.OverviewStats{Total: len(s.apps), Active: len(s.apps)}, nil
+}
+
+func (s *fakeAppStore) GetApp(_ context.Context, _ string, appID string) (apps.App, error) {
+	for _, app := range s.apps {
+		if app.ID == appID {
+			return app, nil
+		}
+	}
+	return apps.App{}, httpx.ErrNotFound
+}
+
+func (s *fakeAppStore) GetAppByPackageName(_ context.Context, _ string, packageName string) (apps.App, error) {
+	for _, app := range s.apps {
+		if app.PackageName == packageName {
+			return app, nil
+		}
+	}
 	return apps.App{}, httpx.ErrNotFound
 }
 
@@ -1298,8 +1336,49 @@ func (s *fakeAppStore) RetireApp(context.Context, string, string) (apps.App, err
 	return apps.App{}, nil
 }
 
-func (s *fakeAppStore) ListVersions(_ context.Context, _ string, appID string) ([]apps.Version, error) {
+func (s *fakeAppStore) ListVersions(_ context.Context, _ string, appID string, _ pagination.Params) ([]apps.Version, error) {
 	return append([]apps.Version(nil), s.versions[appID]...), nil
+}
+
+func (s *fakeAppStore) GetVersionByCode(_ context.Context, _ string, appID string, versionCode int64) (apps.Version, error) {
+	for _, version := range s.versions[appID] {
+		if version.VersionCode == versionCode {
+			return version, nil
+		}
+	}
+	return apps.Version{}, httpx.ErrNotFound
+}
+
+func (s *fakeAppStore) GetLatestPublishedVersion(_ context.Context, _ string, appID string) (apps.Version, error) {
+	var latest apps.Version
+	found := false
+	for _, version := range s.versions[appID] {
+		if version.Status != apps.VersionStatusPublished {
+			continue
+		}
+		if !found {
+			latest = version
+			found = true
+			continue
+		}
+		if version.PublishedAt != nil && latest.PublishedAt != nil {
+			if version.PublishedAt.After(*latest.PublishedAt) {
+				latest = version
+			}
+			continue
+		}
+		if version.PublishedAt != nil && latest.PublishedAt == nil {
+			latest = version
+			continue
+		}
+		if version.PublishedAt == nil && latest.PublishedAt == nil {
+			latest = version
+		}
+	}
+	if !found {
+		return apps.Version{}, httpx.ErrNotFound
+	}
+	return latest, nil
 }
 
 func (s *fakeAppStore) GetVersion(context.Context, string, string, string) (apps.Version, error) {
@@ -1310,8 +1389,21 @@ func (s *fakeAppStore) CreateVersion(context.Context, string, string, apps.Versi
 	return apps.Version{}, nil
 }
 
-func (s *fakePolicyStore) ListPolicies(context.Context, string) ([]policy.Policy, error) {
+func (s *fakePolicyStore) ListPolicies(context.Context, string, pagination.Params) ([]policy.Policy, error) {
 	return append([]policy.Policy(nil), s.policies...), nil
+}
+
+func (s *fakePolicyStore) GetOverviewStats(context.Context, string) (policy.OverviewStats, error) {
+	stats := policy.OverviewStats{Total: len(s.policies)}
+	for _, item := range s.policies {
+		switch item.Status {
+		case policy.StatusActive:
+			stats.Active++
+		case policy.StatusRetired:
+			stats.Retired++
+		}
+	}
+	return stats, nil
 }
 
 func (s *fakePolicyStore) GetPolicy(_ context.Context, _ string, id string) (policy.Policy, error) {
@@ -1335,8 +1427,27 @@ func (s *fakePolicyStore) RetirePolicy(context.Context, string, string) (policy.
 	return policy.Policy{}, nil
 }
 
-func (s *fakePolicyStore) ListPolicyApps(context.Context, string, string) ([]policy.PolicyApp, error) {
+func (s *fakePolicyStore) ListPolicyApps(context.Context, string, string, pagination.Params) ([]policy.PolicyApp, error) {
 	return append([]policy.PolicyApp(nil), s.policyApps...), nil
+}
+
+func (s *fakePolicyStore) ListActivePolicyApps(context.Context, string, string) ([]policy.PolicyApp, error) {
+	out := make([]policy.PolicyApp, 0, len(s.policyApps))
+	for _, item := range s.policyApps {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakePolicyStore) GetPolicyApp(_ context.Context, tenantID, policyID, appID string) (policy.PolicyApp, error) {
+	for _, item := range s.policyApps {
+		if item.TenantID == tenantID && item.PolicyID == policyID && item.AppID == appID {
+			return item, nil
+		}
+	}
+	return policy.PolicyApp{}, httpx.ErrNotFound
 }
 
 func (s *fakePolicyStore) AddPolicyApp(context.Context, string, string, string) (policy.PolicyApp, error) {
@@ -1347,8 +1458,27 @@ func (s *fakePolicyStore) RemovePolicyApp(context.Context, string, string, strin
 	return nil
 }
 
-func (s *fakePolicyStore) ListPolicyCertificates(context.Context, string, string) ([]policy.PolicyCertificate, error) {
+func (s *fakePolicyStore) ListPolicyCertificates(context.Context, string, string, pagination.Params) ([]policy.PolicyCertificate, error) {
 	return append([]policy.PolicyCertificate(nil), s.policyCertificates...), nil
+}
+
+func (s *fakePolicyStore) ListActivePolicyCertificates(context.Context, string, string) ([]policy.PolicyCertificate, error) {
+	out := make([]policy.PolicyCertificate, 0, len(s.policyCertificates))
+	for _, item := range s.policyCertificates {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakePolicyStore) GetPolicyCertificate(_ context.Context, tenantID, policyID, certificateID string) (policy.PolicyCertificate, error) {
+	for _, item := range s.policyCertificates {
+		if item.TenantID == tenantID && item.PolicyID == policyID && item.CertificateID == certificateID {
+			return item, nil
+		}
+	}
+	return policy.PolicyCertificate{}, httpx.ErrNotFound
 }
 
 func (s *fakePolicyStore) AddPolicyCertificate(_ context.Context, tenantID string, policyID string, certificateID string) (policy.PolicyCertificate, error) {
@@ -1377,8 +1507,27 @@ func (s *fakePolicyStore) RemovePolicyCertificate(_ context.Context, tenantID st
 	return httpx.ErrNotFound
 }
 
-func (s *fakePolicyStore) ListPolicyManagedFiles(context.Context, string, string) ([]policy.PolicyManagedFile, error) {
+func (s *fakePolicyStore) ListPolicyManagedFiles(context.Context, string, string, pagination.Params) ([]policy.PolicyManagedFile, error) {
 	return append([]policy.PolicyManagedFile(nil), s.policyManagedFiles...), nil
+}
+
+func (s *fakePolicyStore) ListActivePolicyManagedFiles(context.Context, string, string) ([]policy.PolicyManagedFile, error) {
+	out := make([]policy.PolicyManagedFile, 0, len(s.policyManagedFiles))
+	for _, item := range s.policyManagedFiles {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakePolicyStore) GetPolicyManagedFile(_ context.Context, tenantID, policyID, managedFileID string) (policy.PolicyManagedFile, error) {
+	for _, item := range s.policyManagedFiles {
+		if item.TenantID == tenantID && item.PolicyID == policyID && item.ManagedFileID == managedFileID {
+			return item, nil
+		}
+	}
+	return policy.PolicyManagedFile{}, httpx.ErrNotFound
 }
 
 func (s *fakePolicyStore) AddPolicyManagedFile(_ context.Context, tenantID string, policyID string, managedFileID string) (policy.PolicyManagedFile, error) {
@@ -1407,8 +1556,44 @@ func (s *fakePolicyStore) RemovePolicyManagedFile(_ context.Context, tenantID st
 	return httpx.ErrNotFound
 }
 
-func (s *fakeDeviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
+func (s *fakeDeviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return []device.Device{s.device}, nil
+}
+
+func (s *fakeDeviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
+	return []device.Device{s.device}, nil
+}
+
+func (s *fakeDeviceStore) GetOverviewStats(context.Context, string) (device.OverviewStats, error) {
+	return device.OverviewStats{Total: 1, Active: 1}, nil
+}
+
+func (s *fakeDeviceStore) GetStatusCounts(context.Context, string) (device.StatusCounts, error) {
+	counts := device.StatusCounts{}
+	switch s.device.Status {
+	case device.StatusPending:
+		counts.Pending = 1
+	case device.StatusEnrolled:
+		counts.Enrolled = 1
+	case device.StatusActive:
+		counts.Active = 1
+	case device.StatusLocked:
+		counts.Locked = 1
+	case device.StatusSuspended:
+		counts.Suspended = 1
+	case device.StatusRetired:
+		counts.Retired = 1
+	case device.StatusWiped:
+		counts.Wiped = 1
+	}
+	return counts, nil
+}
+
+func (s *fakeDeviceStore) GetDevice(_ context.Context, tenantID, id string) (device.Device, error) {
+	if tenantID != s.device.TenantID || id != s.device.ID {
+		return device.Device{}, httpx.ErrNotFound
+	}
+	return s.device, nil
 }
 
 func (s *fakeDeviceStore) CreateDevice(context.Context, string, device.DeviceUpsert) (device.Device, error) {

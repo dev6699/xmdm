@@ -16,6 +16,7 @@ import (
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/logs"
+	"xmdm/server/internal/pagination"
 )
 
 type Store struct {
@@ -79,13 +80,11 @@ func (s *Store) Search(ctx context.Context, tenantID string, filter logs.SearchF
 	if tenantID == "" {
 		return nil, httpx.ErrInvalidInput
 	}
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 100
+	page := filter.Pagination
+	if page.Limit == 0 && page.Offset == 0 && (filter.Limit != 0 || filter.Offset != 0) {
+		page = pagination.Params{Limit: filter.Limit, Offset: filter.Offset}
 	}
-	if limit > 500 {
-		limit = 500
-	}
+	page = pagination.Normalize(page, 100, 500)
 	args := []any{tenantID}
 	conditions := []string{"l.tenant_id = $1"}
 	joinDevices := true
@@ -113,7 +112,7 @@ func (s *Store) Search(ctx context.Context, tenantID string, filter logs.SearchF
 		args = append(args, filter.Until.UTC())
 		conditions = append(conditions, fmt.Sprintf("l.observed_at <= $%d", len(args)))
 	}
-	args = append(args, limit)
+	args = append(args, page.Limit, page.Offset)
 
 	query := strings.Builder{}
 	query.WriteString(`SELECT l.id::text, l.tenant_id::text, d.id::text, l.observed_at, l.source, l.level, l.message, l.payload_json
@@ -123,7 +122,7 @@ func (s *Store) Search(ctx context.Context, tenantID string, filter logs.SearchF
 	}
 	query.WriteString(` WHERE `)
 	query.WriteString(strings.Join(conditions, " AND "))
-	query.WriteString(fmt.Sprintf(` ORDER BY l.observed_at DESC, l.created_at DESC LIMIT $%d`, len(args)))
+	query.WriteString(fmt.Sprintf(` ORDER BY l.observed_at DESC, l.created_at DESC, l.id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)))
 
 	rows, err := s.pool.Query(ctx, query.String(), args...)
 	if err != nil {

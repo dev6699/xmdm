@@ -8,6 +8,7 @@ import (
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/identity"
+	"xmdm/server/internal/pagination"
 )
 
 func Register(mux httpx.Router, svc *auth.Service, store identity.Repository, auditStore audit.Store, tenantID string) {
@@ -16,8 +17,8 @@ func Register(mux httpx.Router, svc *auth.Service, store identity.Repository, au
 		ReadPerm:  auth.PermissionAdminRead,
 		WritePerm: auth.PermissionAdminWrite,
 		Decode:    decodeUserRequest,
-		List: func(ctx context.Context) ([]identity.User, error) {
-			return store.ListUsers(ctx, tenantID)
+		List: func(ctx context.Context, params pagination.Params) ([]identity.User, error) {
+			return store.ListUsers(ctx, tenantID, params)
 		},
 		Create: func(ctx context.Context, req identity.UserUpsert) (identity.User, error) {
 			return store.CreateUser(ctx, tenantID, req)
@@ -38,8 +39,8 @@ func Register(mux httpx.Router, svc *auth.Service, store identity.Repository, au
 		ReadPerm:  auth.PermissionAdminRead,
 		WritePerm: auth.PermissionAdminWrite,
 		Decode:    decodeRoleRequest,
-		List: func(ctx context.Context) ([]identity.Role, error) {
-			return store.ListRoles(ctx, tenantID)
+		List: func(ctx context.Context, params pagination.Params) ([]identity.Role, error) {
+			return store.ListRoles(ctx, tenantID, params)
 		},
 		Create: func(ctx context.Context, req identity.RoleUpsert) (identity.Role, error) {
 			return store.CreateRole(ctx, tenantID, req)

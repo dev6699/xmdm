@@ -34,6 +34,11 @@ type ManagedFileUpsert struct {
 	ReplaceVariables bool   `json:"replaceVariables"`
 }
 
+type OverviewStats struct {
+	Total  int
+	Active int
+}
+
 func (f ManagedFile) RecordID() string {
 	return f.ID
 }

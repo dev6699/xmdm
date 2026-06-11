@@ -5,7 +5,8 @@ This repository is the working home for XMDM.
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-06-08
+Snapshot last updated: 2026-06-11
+
 
 ### M0 - Foundation
 

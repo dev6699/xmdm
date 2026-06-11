@@ -1,6 +1,10 @@
 package deviceinfo
 
-import "time"
+import (
+	"time"
+
+	"xmdm/server/internal/pagination"
+)
 
 type UploadRequest struct {
 	ObservedAt time.Time      `json:"observedAt,omitempty"`
@@ -21,4 +25,6 @@ type SearchFilter struct {
 	Since    *time.Time
 	Until    *time.Time
 	Limit    int
+	Offset   int
+	Pagination pagination.Params
 }

@@ -36,6 +36,11 @@ type CertificateUpsert struct {
 	MimeType   string `json:"mimeType"`
 }
 
+type OverviewStats struct {
+	Total  int
+	Active int
+}
+
 func (c Certificate) RecordID() string {
 	return c.ID
 }

@@ -16,6 +16,7 @@ import (
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 )
 
 const deviceSecretHeader = "X-XMDM-Device-Secret"
@@ -26,8 +27,8 @@ func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, device
 		ReadPerm:  auth.PermissionAdminRead,
 		WritePerm: auth.PermissionAdminWrite,
 		Decode:    decodeAppRequest,
-		List: func(ctx context.Context) ([]apps.App, error) {
-			return store.ListApps(ctx, tenantID)
+		List: func(ctx context.Context, params pagination.Params) ([]apps.App, error) {
+			return store.ListApps(ctx, tenantID, params)
 		},
 		Create: func(ctx context.Context, req apps.AppUpsert) (apps.App, error) {
 			return store.CreateApp(ctx, tenantID, req)
@@ -189,7 +190,7 @@ func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, device
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
-			versions, err := store.ListVersions(r.Context(), tenantID, appID)
+			versions, err := store.ListVersions(r.Context(), tenantID, appID, httpx.RequestPaginationParams(r, 100))
 			if err != nil {
 				if err == httpx.ErrNotFound {
 					http.NotFound(w, r)
@@ -251,52 +252,21 @@ func latestPublishedAgentAppVersion(ctx context.Context, store apps.Repository, 
 	if packageName == "" {
 		packageName = "com.xmdm.launcher"
 	}
-	items, err := store.ListApps(ctx, tenantID)
+	item, err := store.GetAppByPackageName(ctx, tenantID, packageName)
 	if err != nil {
 		return apps.App{}, apps.Version{}, err
 	}
-	for _, item := range items {
-		if item.Status != apps.StatusActive || item.PackageName != packageName {
-			continue
-		}
-		versions, err := store.ListVersions(ctx, tenantID, item.ID)
-		if err != nil {
-			return apps.App{}, apps.Version{}, err
-		}
-		latest := latestPublishedVersion(versions)
-		if latest == nil || latest.ArtifactID == nil || strings.TrimSpace(latest.Checksum) == "" {
-			return apps.App{}, apps.Version{}, httpx.ErrNotFound
-		}
-		return item, *latest, nil
+	if item.Status != apps.StatusActive {
+		return apps.App{}, apps.Version{}, httpx.ErrNotFound
 	}
-	return apps.App{}, apps.Version{}, httpx.ErrNotFound
-}
-
-func latestPublishedVersion(items []apps.Version) *apps.Version {
-	var latest *apps.Version
-	for i := range items {
-		if items[i].Status != apps.VersionStatusPublished {
-			continue
-		}
-		if latest == nil {
-			latest = &items[i]
-			continue
-		}
-		if items[i].PublishedAt != nil && latest.PublishedAt != nil {
-			if items[i].PublishedAt.After(*latest.PublishedAt) {
-				latest = &items[i]
-			}
-			continue
-		}
-		if items[i].PublishedAt != nil && latest.PublishedAt == nil {
-			latest = &items[i]
-			continue
-		}
-		if items[i].PublishedAt == nil && latest.PublishedAt == nil && items[i].CreatedAt.After(latest.CreatedAt) {
-			latest = &items[i]
-		}
+	version, err := store.GetLatestPublishedVersion(ctx, tenantID, item.ID)
+	if err != nil {
+		return apps.App{}, apps.Version{}, err
 	}
-	return latest
+	if version.ArtifactID == nil || strings.TrimSpace(version.Checksum) == "" {
+		return apps.App{}, apps.Version{}, httpx.ErrNotFound
+	}
+	return item, version, nil
 }
 
 func decodeAppRequest(r *http.Request) (apps.AppUpsert, error) {

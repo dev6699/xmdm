@@ -27,6 +27,7 @@ import (
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/managedfiles"
 	managedfilehttp "xmdm/server/internal/managedfiles/http"
+	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/policy"
 	"xmdm/server/internal/telemetry"
 	telemetryhttp "xmdm/server/internal/telemetry/http"
@@ -544,8 +545,60 @@ type loadDeviceStore struct {
 	authCount      int
 }
 
-func (s *loadDeviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
+func (s *loadDeviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return nil, nil
+}
+
+func (s *loadDeviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
+	if s.device.Status == device.StatusActive || s.device.Status == device.StatusEnrolled {
+		return []device.Device{s.device}, nil
+	}
+	return nil, nil
+}
+
+func (s *loadDeviceStore) GetOverviewStats(context.Context, string) (device.OverviewStats, error) {
+	stats := device.OverviewStats{Total: 1}
+	switch s.device.Status {
+	case device.StatusActive:
+		stats.Active = 1
+	case device.StatusPending:
+		stats.Pending = 1
+	}
+	if s.device.Status == device.StatusRetired || s.device.Status == device.StatusWiped {
+		stats.RetiredOrWiped = 1
+	}
+	if s.device.PolicyID != nil && *s.device.PolicyID != "" {
+		stats.AssignedPolicy = 1
+	}
+	return stats, nil
+}
+
+func (s *loadDeviceStore) GetStatusCounts(context.Context, string) (device.StatusCounts, error) {
+	counts := device.StatusCounts{}
+	switch s.device.Status {
+	case device.StatusPending:
+		counts.Pending = 1
+	case device.StatusEnrolled:
+		counts.Enrolled = 1
+	case device.StatusActive:
+		counts.Active = 1
+	case device.StatusLocked:
+		counts.Locked = 1
+	case device.StatusSuspended:
+		counts.Suspended = 1
+	case device.StatusRetired:
+		counts.Retired = 1
+	case device.StatusWiped:
+		counts.Wiped = 1
+	}
+	return counts, nil
+}
+
+func (s *loadDeviceStore) GetDevice(_ context.Context, _ string, id string) (device.Device, error) {
+	if s.device.ID == id {
+		return s.device, nil
+	}
+	return device.Device{}, httpx.ErrNotFound
 }
 
 func (s *loadDeviceStore) CreateDevice(context.Context, string, device.DeviceUpsert) (device.Device, error) {
@@ -586,10 +639,22 @@ type loadAppStore struct {
 	versions map[string][]apps.Version
 }
 
-func (s *loadAppStore) ListApps(context.Context, string) ([]apps.App, error) {
+func (s *loadAppStore) ListApps(context.Context, string, pagination.Params) ([]apps.App, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]apps.App(nil), s.apps...), nil
+}
+
+func (s *loadAppStore) GetOverviewStats(context.Context, string) (apps.OverviewStats, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stats := apps.OverviewStats{Total: len(s.apps)}
+	for _, item := range s.apps {
+		if item.Status == apps.StatusActive {
+			stats.Active++
+		}
+	}
+	return stats, nil
 }
 
 func (s *loadAppStore) GetApp(_ context.Context, _ string, id string) (apps.App, error) {
@@ -597,6 +662,17 @@ func (s *loadAppStore) GetApp(_ context.Context, _ string, id string) (apps.App,
 	defer s.mu.Unlock()
 	for _, item := range s.apps {
 		if item.ID == id {
+			return item, nil
+		}
+	}
+	return apps.App{}, httpx.ErrNotFound
+}
+
+func (s *loadAppStore) GetAppByPackageName(_ context.Context, _ string, packageName string) (apps.App, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.apps {
+		if item.PackageName == packageName {
 			return item, nil
 		}
 	}
@@ -615,10 +691,41 @@ func (s *loadAppStore) RetireApp(context.Context, string, string) (apps.App, err
 	return apps.App{}, nil
 }
 
-func (s *loadAppStore) ListVersions(_ context.Context, _ string, appID string) ([]apps.Version, error) {
+func (s *loadAppStore) ListVersions(_ context.Context, _ string, appID string, _ pagination.Params) ([]apps.Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]apps.Version(nil), s.versions[appID]...), nil
+}
+
+func (s *loadAppStore) GetVersionByCode(_ context.Context, _ string, appID string, versionCode int64) (apps.Version, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, version := range s.versions[appID] {
+		if version.VersionCode == versionCode {
+			return version, nil
+		}
+	}
+	return apps.Version{}, httpx.ErrNotFound
+}
+
+func (s *loadAppStore) GetLatestPublishedVersion(_ context.Context, _ string, appID string) (apps.Version, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var latest apps.Version
+	found := false
+	for _, version := range s.versions[appID] {
+		if version.Status != apps.VersionStatusPublished {
+			continue
+		}
+		if !found || (version.PublishedAt != nil && latest.PublishedAt != nil && version.PublishedAt.After(*latest.PublishedAt)) || (version.PublishedAt != nil && latest.PublishedAt == nil) || (version.PublishedAt == nil && latest.PublishedAt == nil && version.CreatedAt.After(latest.CreatedAt)) {
+			latest = version
+			found = true
+		}
+	}
+	if !found {
+		return apps.Version{}, httpx.ErrNotFound
+	}
+	return latest, nil
 }
 
 func (s *loadAppStore) GetVersion(_ context.Context, _ string, appID, versionID string) (apps.Version, error) {
@@ -641,16 +748,23 @@ type loadCertificateStore struct {
 	certificates []certificates.Certificate
 }
 
-func (s *loadCertificateStore) ListCertificates(context.Context, string) ([]certificates.Certificate, error) {
+func (s *loadCertificateStore) ListCertificates(context.Context, string, pagination.Params) ([]certificates.Certificate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]certificates.Certificate(nil), s.certificates...), nil
 }
 
-func (s *loadCertificateStore) ListActiveCertificates(context.Context, string) ([]certificates.Certificate, error) {
+func (s *loadCertificateStore) ListActiveCertificates(context.Context, string, pagination.Params) ([]certificates.Certificate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]certificates.Certificate(nil), s.certificates...), nil
+}
+
+func (s *loadCertificateStore) GetOverviewStats(context.Context, string) (certificates.OverviewStats, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stats := certificates.OverviewStats{Total: len(s.certificates), Active: len(s.certificates)}
+	return stats, nil
 }
 
 func (s *loadCertificateStore) GetCertificate(_ context.Context, _ string, certificateID string) (certificates.Certificate, error) {
@@ -727,15 +841,27 @@ func (s *loadCommandStore) Enqueue(_ context.Context, tenantID string, req comma
 	return []commands.Command{cmd}, nil
 }
 
-func (s *loadCommandStore) ListRecent(context.Context, string, int) ([]commands.Command, error) {
+func (s *loadCommandStore) ListRecent(context.Context, string, pagination.Params) ([]commands.Command, error) {
 	return nil, nil
+}
+
+func (s *loadCommandStore) ListRecentAll(context.Context, string) ([]commands.Command, error) {
+	return nil, nil
+}
+
+func (s *loadCommandStore) GetOverviewStats(context.Context, string) (commands.OverviewStats, error) {
+	return commands.OverviewStats{}, nil
 }
 
 func (s *loadCommandStore) Get(context.Context, string, string) (commands.Command, error) {
 	return commands.Command{}, httpx.ErrNotFound
 }
 
-func (s *loadCommandStore) ListPending(context.Context, string, string) ([]commands.Command, error) {
+func (s *loadCommandStore) ListPending(context.Context, string, string, pagination.Params) ([]commands.Command, error) {
+	return nil, nil
+}
+
+func (s *loadCommandStore) ListPendingForDevice(context.Context, string, string) ([]commands.Command, error) {
 	return nil, nil
 }
 
@@ -767,10 +893,16 @@ type loadManagedFileStore struct {
 	items []managedfiles.ManagedFile
 }
 
-func (s *loadManagedFileStore) ListManagedFiles(context.Context, string) ([]managedfiles.ManagedFile, error) {
+func (s *loadManagedFileStore) ListManagedFiles(context.Context, string, pagination.Params) ([]managedfiles.ManagedFile, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]managedfiles.ManagedFile(nil), s.items...), nil
+}
+
+func (s *loadManagedFileStore) GetOverviewStats(context.Context, string) (managedfiles.OverviewStats, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return managedfiles.OverviewStats{Total: len(s.items), Active: len(s.items)}, nil
 }
 
 func (s *loadManagedFileStore) GetManagedFile(context.Context, string, string) (managedfiles.ManagedFile, error) {
@@ -815,15 +947,44 @@ func (s *loadTelemetryStore) uploads() int {
 }
 
 type loadPolicyStore struct {
-	mu         sync.Mutex
-	policies   []policy.Policy
-	policyApps []policy.PolicyApp
+	mu                 sync.Mutex
+	policies           []policy.Policy
+	policyApps         []policy.PolicyApp
+	policyCertificates []policy.PolicyCertificate
+	policyManagedFiles []policy.PolicyManagedFile
 }
 
-func (s *loadPolicyStore) ListPolicies(context.Context, string) ([]policy.Policy, error) {
+func (s *loadPolicyStore) ListPolicies(context.Context, string, pagination.Params) ([]policy.Policy, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]policy.Policy(nil), s.policies...), nil
+}
+
+func (s *loadPolicyStore) ListActivePolicies(context.Context, string) ([]policy.Policy, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]policy.Policy, 0, len(s.policies))
+	for _, item := range s.policies {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *loadPolicyStore) GetOverviewStats(context.Context, string) (policy.OverviewStats, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stats := policy.OverviewStats{Total: len(s.policies)}
+	for _, item := range s.policies {
+		switch item.Status {
+		case policy.StatusActive:
+			stats.Active++
+		case policy.StatusRetired:
+			stats.Retired++
+		}
+	}
+	return stats, nil
 }
 
 func (s *loadPolicyStore) GetPolicy(_ context.Context, _ string, id string) (policy.Policy, error) {
@@ -849,10 +1010,33 @@ func (s *loadPolicyStore) RetirePolicy(context.Context, string, string) (policy.
 	return policy.Policy{}, nil
 }
 
-func (s *loadPolicyStore) ListPolicyApps(context.Context, string, string) ([]policy.PolicyApp, error) {
+func (s *loadPolicyStore) ListPolicyApps(context.Context, string, string, pagination.Params) ([]policy.PolicyApp, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]policy.PolicyApp(nil), s.policyApps...), nil
+}
+
+func (s *loadPolicyStore) ListActivePolicyApps(context.Context, string, string) ([]policy.PolicyApp, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]policy.PolicyApp, 0, len(s.policyApps))
+	for _, item := range s.policyApps {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *loadPolicyStore) GetPolicyApp(_ context.Context, tenantID, policyID, appID string) (policy.PolicyApp, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.policyApps {
+		if item.TenantID == tenantID && item.PolicyID == policyID && item.AppID == appID {
+			return item, nil
+		}
+	}
+	return policy.PolicyApp{}, httpx.ErrNotFound
 }
 
 func (s *loadPolicyStore) AddPolicyApp(context.Context, string, string, string) (policy.PolicyApp, error) {
@@ -863,10 +1047,33 @@ func (s *loadPolicyStore) RemovePolicyApp(context.Context, string, string, strin
 	return nil
 }
 
-func (s *loadPolicyStore) ListPolicyCertificates(context.Context, string, string) ([]policy.PolicyCertificate, error) {
+func (s *loadPolicyStore) ListPolicyCertificates(context.Context, string, string, pagination.Params) ([]policy.PolicyCertificate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return nil, nil
+	return append([]policy.PolicyCertificate(nil), s.policyCertificates...), nil
+}
+
+func (s *loadPolicyStore) ListActivePolicyCertificates(context.Context, string, string) ([]policy.PolicyCertificate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]policy.PolicyCertificate, 0, len(s.policyCertificates))
+	for _, item := range s.policyCertificates {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *loadPolicyStore) GetPolicyCertificate(_ context.Context, tenantID, policyID, certificateID string) (policy.PolicyCertificate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.policyCertificates {
+		if item.TenantID == tenantID && item.PolicyID == policyID && item.CertificateID == certificateID {
+			return item, nil
+		}
+	}
+	return policy.PolicyCertificate{}, httpx.ErrNotFound
 }
 
 func (s *loadPolicyStore) AddPolicyCertificate(context.Context, string, string, string) (policy.PolicyCertificate, error) {
@@ -877,10 +1084,33 @@ func (s *loadPolicyStore) RemovePolicyCertificate(context.Context, string, strin
 	return nil
 }
 
-func (s *loadPolicyStore) ListPolicyManagedFiles(context.Context, string, string) ([]policy.PolicyManagedFile, error) {
+func (s *loadPolicyStore) ListPolicyManagedFiles(context.Context, string, string, pagination.Params) ([]policy.PolicyManagedFile, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return nil, nil
+	return append([]policy.PolicyManagedFile(nil), s.policyManagedFiles...), nil
+}
+
+func (s *loadPolicyStore) ListActivePolicyManagedFiles(context.Context, string, string) ([]policy.PolicyManagedFile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]policy.PolicyManagedFile, 0, len(s.policyManagedFiles))
+	for _, item := range s.policyManagedFiles {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *loadPolicyStore) GetPolicyManagedFile(_ context.Context, tenantID, policyID, managedFileID string) (policy.PolicyManagedFile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.policyManagedFiles {
+		if item.TenantID == tenantID && item.PolicyID == policyID && item.ManagedFileID == managedFileID {
+			return item, nil
+		}
+	}
+	return policy.PolicyManagedFile{}, httpx.ErrNotFound
 }
 
 func (s *loadPolicyStore) AddPolicyManagedFile(context.Context, string, string, string) (policy.PolicyManagedFile, error) {

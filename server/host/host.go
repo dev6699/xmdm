@@ -14,6 +14,7 @@ import (
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/config"
 	"xmdm/server/internal/identity"
+	"xmdm/server/internal/pagination"
 	internalplugins "xmdm/server/internal/plugins"
 )
 
@@ -122,7 +123,7 @@ func syncSeedRolePermissions(ctx context.Context, repo identity.Repository, tena
 	if repo == nil || len(catalog) == 0 {
 		return nil
 	}
-	roles, err := repo.ListRoles(ctx, tenantID)
+	roles, err := repo.ListRoles(ctx, tenantID, pagination.Params{Limit: pagination.DefaultLimit})
 	if err != nil {
 		return err
 	}

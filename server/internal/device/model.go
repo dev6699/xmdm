@@ -36,6 +36,24 @@ type DeviceUpsert struct {
 	GroupIDs   []string `json:"groupIds,omitempty"`
 }
 
+type OverviewStats struct {
+	Total          int
+	Active         int
+	Pending        int
+	RetiredOrWiped int
+	AssignedPolicy int
+}
+
+type StatusCounts struct {
+	Pending   int
+	Enrolled  int
+	Active    int
+	Locked    int
+	Suspended int
+	Retired   int
+	Wiped     int
+}
+
 func (d Device) RecordID() string {
 	return d.ID
 }

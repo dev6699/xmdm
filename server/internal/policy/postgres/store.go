@@ -11,6 +11,7 @@ import (
 	"xmdm/server/internal/certificates"
 	"xmdm/server/internal/httpx"
 	managedfiles "xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/pagination"
 	policy "xmdm/server/internal/policy"
 
 	"github.com/google/uuid"
@@ -50,13 +51,15 @@ func (s *Store) CreatePolicy(ctx context.Context, tenantID string, req policy.Po
 	return scanPolicy(row)
 }
 
-func (s *Store) ListPolicies(ctx context.Context, tenantID string) ([]policy.Policy, error) {
+func (s *Store) ListPolicies(ctx context.Context, tenantID string, page pagination.Params) ([]policy.Policy, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, name, version, kiosk_mode, kiosk_app_package, restrictions_json, status, created_at, updated_at, deleted_at
 		 FROM policies
 		 WHERE tenant_id = $1
-		 ORDER BY created_at`,
-		tenantID,
+		 ORDER BY created_at, id
+		 LIMIT $2 OFFSET $3`,
+		tenantID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -75,6 +78,50 @@ func (s *Store) ListPolicies(ctx context.Context, tenantID string) ([]policy.Pol
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) ListActivePolicies(ctx context.Context, tenantID string) ([]policy.Policy, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, tenant_id::text, name, version, kiosk_mode, kiosk_app_package, restrictions_json, status, created_at, updated_at, deleted_at
+		 FROM policies
+		 WHERE tenant_id = $1 AND status = $2
+		 ORDER BY created_at, id`,
+		tenantID, policy.StatusActive,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]policy.Policy, 0)
+	for rows.Next() {
+		rec, err := scanPolicy(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) GetOverviewStats(ctx context.Context, tenantID string) (policy.OverviewStats, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT
+			COUNT(*)::int,
+			COUNT(*) FILTER (WHERE status = $2)::int,
+			COUNT(*) FILTER (WHERE status = $3)::int
+		 FROM policies
+		 WHERE tenant_id = $1`,
+		tenantID, policy.StatusActive, policy.StatusRetired,
+	)
+	var stats policy.OverviewStats
+	if err := row.Scan(&stats.Total, &stats.Active, &stats.Retired); err != nil {
+		return policy.OverviewStats{}, err
+	}
+	return stats, nil
 }
 
 func (s *Store) GetPolicy(ctx context.Context, tenantID, id string) (policy.Policy, error) {
@@ -180,13 +227,15 @@ func (s *Store) RetirePolicy(ctx context.Context, tenantID, id string) (policy.P
 	return rec, nil
 }
 
-func (s *Store) ListPolicyApps(ctx context.Context, tenantID, policyID string) ([]policy.PolicyApp, error) {
+func (s *Store) ListPolicyApps(ctx context.Context, tenantID, policyID string, page pagination.Params) ([]policy.PolicyApp, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, policy_id::text, app_id::text, status, created_at, updated_at, deleted_at
 		 FROM policy_apps
 		 WHERE tenant_id = $1 AND policy_id = $2
-		 ORDER BY created_at`,
-		tenantID, policyID,
+		 ORDER BY created_at, id
+		 LIMIT $3 OFFSET $4`,
+		tenantID, policyID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -204,6 +253,50 @@ func (s *Store) ListPolicyApps(ctx context.Context, tenantID, policyID string) (
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) ListActivePolicyApps(ctx context.Context, tenantID, policyID string) ([]policy.PolicyApp, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, tenant_id::text, policy_id::text, app_id::text, status, created_at, updated_at, deleted_at
+		 FROM policy_apps
+		 WHERE tenant_id = $1 AND policy_id = $2 AND status = $3
+		 ORDER BY created_at, id`,
+		tenantID, policyID, policy.StatusActive,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]policy.PolicyApp, 0)
+	for rows.Next() {
+		rec, err := scanPolicyApp(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) GetPolicyApp(ctx context.Context, tenantID, policyID, appID string) (policy.PolicyApp, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, policy_id::text, app_id::text, status, created_at, updated_at, deleted_at
+		 FROM policy_apps
+		 WHERE tenant_id = $1 AND policy_id = $2 AND app_id = $3`,
+		tenantID, policyID, appID,
+	)
+	rec, err := scanPolicyApp(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return policy.PolicyApp{}, httpx.ErrNotFound
+		}
+		return policy.PolicyApp{}, err
+	}
+	return rec, nil
 }
 
 func (s *Store) AddPolicyApp(ctx context.Context, tenantID, policyID, appID string) (policy.PolicyApp, error) {
@@ -268,13 +361,15 @@ func (s *Store) RemovePolicyApp(ctx context.Context, tenantID, policyID, appID s
 	return nil
 }
 
-func (s *Store) ListPolicyCertificates(ctx context.Context, tenantID, policyID string) ([]policy.PolicyCertificate, error) {
+func (s *Store) ListPolicyCertificates(ctx context.Context, tenantID, policyID string, page pagination.Params) ([]policy.PolicyCertificate, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, policy_id::text, certificate_id::text, status, created_at, updated_at, deleted_at
 		 FROM policy_certificates
 		 WHERE tenant_id = $1 AND policy_id = $2
-		 ORDER BY created_at`,
-		tenantID, policyID,
+		 ORDER BY created_at, id
+		 LIMIT $3 OFFSET $4`,
+		tenantID, policyID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -292,6 +387,50 @@ func (s *Store) ListPolicyCertificates(ctx context.Context, tenantID, policyID s
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) ListActivePolicyCertificates(ctx context.Context, tenantID, policyID string) ([]policy.PolicyCertificate, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, tenant_id::text, policy_id::text, certificate_id::text, status, created_at, updated_at, deleted_at
+		 FROM policy_certificates
+		 WHERE tenant_id = $1 AND policy_id = $2 AND status = $3
+		 ORDER BY created_at, id`,
+		tenantID, policyID, policy.StatusActive,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]policy.PolicyCertificate, 0)
+	for rows.Next() {
+		rec, err := scanPolicyCertificate(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) GetPolicyCertificate(ctx context.Context, tenantID, policyID, certificateID string) (policy.PolicyCertificate, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, policy_id::text, certificate_id::text, status, created_at, updated_at, deleted_at
+		 FROM policy_certificates
+		 WHERE tenant_id = $1 AND policy_id = $2 AND certificate_id = $3`,
+		tenantID, policyID, certificateID,
+	)
+	rec, err := scanPolicyCertificate(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return policy.PolicyCertificate{}, httpx.ErrNotFound
+		}
+		return policy.PolicyCertificate{}, err
+	}
+	return rec, nil
 }
 
 func (s *Store) AddPolicyCertificate(ctx context.Context, tenantID, policyID, certificateID string) (policy.PolicyCertificate, error) {
@@ -356,13 +495,15 @@ func (s *Store) RemovePolicyCertificate(ctx context.Context, tenantID, policyID,
 	return nil
 }
 
-func (s *Store) ListPolicyManagedFiles(ctx context.Context, tenantID, policyID string) ([]policy.PolicyManagedFile, error) {
+func (s *Store) ListPolicyManagedFiles(ctx context.Context, tenantID, policyID string, page pagination.Params) ([]policy.PolicyManagedFile, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, policy_id::text, managed_file_id::text, status, created_at, updated_at, deleted_at
 		 FROM policy_managed_files
 		 WHERE tenant_id = $1 AND policy_id = $2
-		 ORDER BY created_at`,
-		tenantID, policyID,
+		 ORDER BY created_at, id
+		 LIMIT $3 OFFSET $4`,
+		tenantID, policyID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -380,6 +521,50 @@ func (s *Store) ListPolicyManagedFiles(ctx context.Context, tenantID, policyID s
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) ListActivePolicyManagedFiles(ctx context.Context, tenantID, policyID string) ([]policy.PolicyManagedFile, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, tenant_id::text, policy_id::text, managed_file_id::text, status, created_at, updated_at, deleted_at
+		 FROM policy_managed_files
+		 WHERE tenant_id = $1 AND policy_id = $2 AND status = $3
+		 ORDER BY created_at, id`,
+		tenantID, policyID, policy.StatusActive,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]policy.PolicyManagedFile, 0)
+	for rows.Next() {
+		rec, err := scanPolicyManagedFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) GetPolicyManagedFile(ctx context.Context, tenantID, policyID, managedFileID string) (policy.PolicyManagedFile, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, policy_id::text, managed_file_id::text, status, created_at, updated_at, deleted_at
+		 FROM policy_managed_files
+		 WHERE tenant_id = $1 AND policy_id = $2 AND managed_file_id = $3`,
+		tenantID, policyID, managedFileID,
+	)
+	rec, err := scanPolicyManagedFile(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return policy.PolicyManagedFile{}, httpx.ErrNotFound
+		}
+		return policy.PolicyManagedFile{}, err
+	}
+	return rec, nil
 }
 
 func (s *Store) AddPolicyManagedFile(ctx context.Context, tenantID, policyID, managedFileID string) (policy.PolicyManagedFile, error) {

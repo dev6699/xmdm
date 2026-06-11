@@ -4,10 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/pagination"
 )
+
+const requestPaginationMaxLimit = 100
 
 type Record interface {
 	RecordID() string
@@ -19,7 +24,7 @@ type ResourceSpec[Req any, Resp Record] struct {
 	ReadPerm  auth.Permission
 	WritePerm auth.Permission
 	Decode    func(*http.Request) (Req, error)
-	List      func(context.Context) ([]Resp, error)
+	List      func(context.Context, pagination.Params) ([]Resp, error)
 	Create    func(context.Context, Req) (Resp, error)
 	Update    func(context.Context, string, Req) (Resp, error)
 	Retire    func(context.Context, string) (Resp, error)
@@ -43,7 +48,7 @@ func RegisterCRUDFor[Req any, Resp Record](mux Router, svc *auth.Service, auditS
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
-			items, err := spec.List(ctx)
+			items, err := spec.List(ctx, RequestPaginationParams(r, requestPaginationMaxLimit))
 			if err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
@@ -163,6 +168,24 @@ func RegisterCRUDFor[Req any, Resp Record](mux Router, svc *auth.Service, auditS
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})
+}
+
+func RequestPaginationParams(r *http.Request, maxLimit int) pagination.Params {
+	page := 1
+	if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	limit := pagination.DefaultLimit
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	params := pagination.Normalize(pagination.Params{Limit: limit}, pagination.DefaultLimit, maxLimit)
+	params.Offset = pagination.Offset(page, params.Limit)
+	return params
 }
 
 func sessionFromRequest(r *http.Request, svc *auth.Service) (*auth.Session, bool) {

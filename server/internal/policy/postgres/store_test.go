@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"xmdm/server/internal/bootstrap"
+	"xmdm/server/internal/pagination"
 	policy "xmdm/server/internal/policy"
 
 	"github.com/google/uuid"
@@ -105,7 +106,7 @@ func TestStoreTogglesPolicyApps(t *testing.T) {
 		t.Fatalf("expected active assignment, got %#v", created)
 	}
 
-	items, err := store.ListPolicyApps(context.Background(), bootstrap.SeedTenantID, policyRec.ID)
+	items, err := store.ListPolicyApps(context.Background(), bootstrap.SeedTenantID, policyRec.ID, pagination.Params{Limit: pagination.DefaultLimit})
 	if err != nil {
 		t.Fatalf("list policy apps: %v", err)
 	}
@@ -116,7 +117,7 @@ func TestStoreTogglesPolicyApps(t *testing.T) {
 	if err := store.RemovePolicyApp(context.Background(), bootstrap.SeedTenantID, policyRec.ID, appID); err != nil {
 		t.Fatalf("remove policy app: %v", err)
 	}
-	items, err = store.ListPolicyApps(context.Background(), bootstrap.SeedTenantID, policyRec.ID)
+	items, err = store.ListPolicyApps(context.Background(), bootstrap.SeedTenantID, policyRec.ID, pagination.Params{Limit: pagination.DefaultLimit})
 	if err != nil {
 		t.Fatalf("list policy apps after remove: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestStoreTogglesPolicyApps(t *testing.T) {
 	if reactivated.Status != policy.StatusActive {
 		t.Fatalf("expected active assignment after re-add, got %#v", reactivated)
 	}
-	items, err = store.ListPolicyApps(context.Background(), bootstrap.SeedTenantID, policyRec.ID)
+	items, err = store.ListPolicyApps(context.Background(), bootstrap.SeedTenantID, policyRec.ID, pagination.Params{Limit: pagination.DefaultLimit})
 	if err != nil {
 		t.Fatalf("list policy apps after re-add: %v", err)
 	}

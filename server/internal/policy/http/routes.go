@@ -9,6 +9,7 @@ import (
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 	policy "xmdm/server/internal/policy"
 )
 
@@ -18,8 +19,8 @@ func Register(mux httpx.Router, svc *auth.Service, store policy.Repository, audi
 		ReadPerm:  auth.PermissionAdminRead,
 		WritePerm: auth.PermissionAdminWrite,
 		Decode:    decodePolicyRequest,
-		List: func(ctx context.Context) ([]policy.Policy, error) {
-			return store.ListPolicies(ctx, tenantID)
+		List: func(ctx context.Context, params pagination.Params) ([]policy.Policy, error) {
+			return store.ListPolicies(ctx, tenantID, params)
 		},
 		Create: func(ctx context.Context, req policy.PolicyUpsert) (policy.Policy, error) {
 			return store.CreatePolicy(ctx, tenantID, req)

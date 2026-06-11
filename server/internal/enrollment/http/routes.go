@@ -401,28 +401,18 @@ func listPolicyManagedFiles(ctx context.Context, policyStore policy.Repository, 
 	if policyStore == nil || store == nil || policyID == nil || strings.TrimSpace(*policyID) == "" {
 		return []enrollment.ManagedFileSnapshot{}, nil
 	}
-	assignments, err := policyStore.ListPolicyManagedFiles(ctx, tenantID, strings.TrimSpace(*policyID))
+	assignments, err := policyStore.ListActivePolicyManagedFiles(ctx, tenantID, strings.TrimSpace(*policyID))
 	if err != nil {
 		return nil, err
 	}
-	assigned := make(map[string]struct{}, len(assignments))
+	snapshots := make([]enrollment.ManagedFileSnapshot, 0, len(assignments))
 	for _, assignment := range assignments {
-		if assignment.Status != policy.StatusActive {
-			continue
-		}
-		assigned[assignment.ManagedFileID] = struct{}{}
-	}
-	if len(assigned) == 0 {
-		return []enrollment.ManagedFileSnapshot{}, nil
-	}
-	files, err := store.ListManagedFiles(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	snapshots := make([]enrollment.ManagedFileSnapshot, 0, len(files))
-	for _, file := range files {
-		if _, ok := assigned[file.ID]; !ok {
-			continue
+		file, err := store.GetManagedFile(ctx, tenantID, assignment.ManagedFileID)
+		if err != nil {
+			if err == httpx.ErrNotFound {
+				continue
+			}
+			return nil, err
 		}
 		if file.Status != managedfiles.StatusActive {
 			continue
@@ -661,27 +651,20 @@ func listPolicyCertificates(ctx context.Context, policyStore policy.Repository, 
 	if policyStore == nil || certStore == nil || policyID == nil || strings.TrimSpace(*policyID) == "" {
 		return []enrollment.CertificateSnapshot{}, nil
 	}
-	assignments, err := policyStore.ListPolicyCertificates(ctx, tenantID, strings.TrimSpace(*policyID))
+	assignments, err := policyStore.ListActivePolicyCertificates(ctx, tenantID, strings.TrimSpace(*policyID))
 	if err != nil {
 		return nil, err
 	}
-	assigned := make(map[string]struct{}, len(assignments))
+	out := make([]enrollment.CertificateSnapshot, 0, len(assignments))
 	for _, assignment := range assignments {
-		if assignment.Status != policy.StatusActive {
-			continue
+		item, err := certStore.GetCertificate(ctx, tenantID, assignment.CertificateID)
+		if err != nil {
+			if err == httpx.ErrNotFound {
+				continue
+			}
+			return nil, err
 		}
-		assigned[assignment.CertificateID] = struct{}{}
-	}
-	if len(assigned) == 0 {
-		return []enrollment.CertificateSnapshot{}, nil
-	}
-	items, err := certStore.ListActiveCertificates(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]enrollment.CertificateSnapshot, 0, len(items))
-	for _, item := range items {
-		if _, ok := assigned[item.ID]; !ok {
+		if item.Status != certificates.StatusActive {
 			continue
 		}
 		out = append(out, enrollment.CertificateSnapshot{
@@ -703,45 +686,30 @@ func listPublishedPolicyApps(ctx context.Context, policyStore policy.Repository,
 	if policyStore == nil || appStore == nil || policyID == nil || strings.TrimSpace(*policyID) == "" {
 		return []enrollment.AppSnapshot{}, nil
 	}
-	assignments, err := policyStore.ListPolicyApps(ctx, tenantID, strings.TrimSpace(*policyID))
+	assignments, err := policyStore.ListActivePolicyApps(ctx, tenantID, strings.TrimSpace(*policyID))
 	if err != nil {
 		return nil, err
 	}
-	assigned := make(map[string]struct{}, len(assignments))
+	out := make([]enrollment.AppSnapshot, 0, len(assignments))
 	for _, assignment := range assignments {
-		if assignment.Status != policy.StatusActive {
-			continue
+		appRecord, err := appStore.GetApp(ctx, tenantID, assignment.AppID)
+		if err != nil {
+			if err == httpx.ErrNotFound {
+				continue
+			}
+			return nil, err
 		}
-		assigned[assignment.AppID] = struct{}{}
-	}
-	if len(assigned) == 0 {
-		return []enrollment.AppSnapshot{}, nil
-	}
-	items, err := appStore.ListApps(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]enrollment.AppSnapshot, 0)
-	for _, appRecord := range items {
 		if appRecord.Status != apps.StatusActive {
 			continue
 		}
-		if _, ok := assigned[appRecord.ID]; !ok {
-			continue
-		}
-		versions, err := appStore.ListVersions(ctx, tenantID, appRecord.ID)
+		published, err := appStore.GetLatestPublishedVersion(ctx, tenantID, appRecord.ID)
 		if err != nil {
-			return nil, err
-		}
-		var published *apps.Version
-		for _, version := range versions {
-			if version.Status != apps.VersionStatusPublished || version.ArtifactID == nil {
+			if err == httpx.ErrNotFound {
 				continue
 			}
-			versionCopy := version
-			published = &versionCopy
+			return nil, err
 		}
-		if published == nil {
+		if published.ArtifactID == nil {
 			continue
 		}
 		out = append(out, enrollment.AppSnapshot{

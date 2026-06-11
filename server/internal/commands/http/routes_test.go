@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"xmdm/server/internal/commands"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 )
 
 func TestRegisterPollsPendingCommands(t *testing.T) {
@@ -42,6 +44,33 @@ func TestRegisterPollsPendingCommands(t *testing.T) {
 	}
 	if len(payload.Commands) != 1 || payload.Commands[0].ID != "cmd-1" || payload.Commands[0].Type != "reboot" {
 		t.Fatalf("unexpected commands: %#v", payload.Commands)
+	}
+}
+
+func TestRegisterPollsPendingCommandsAcrossPages(t *testing.T) {
+	var items []commands.Command
+	for i := 0; i < 40; i++ {
+		items = append(items, commands.Command{ID: "cmd-" + strconv.Itoa(i+1), Type: "sync", Status: commands.StatusQueued})
+	}
+	store := &fakeCommandStore{items: items}
+	devices := &fakeDeviceStore{deviceID: "device-123", secret: "secret"}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), devices, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/commands", nil)
+	req.Header.Set(deviceSecretHeader, "secret")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload PollResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Commands) != 40 {
+		t.Fatalf("expected all pending commands, got %d", len(payload.Commands))
 	}
 }
 
@@ -151,15 +180,38 @@ func (s *fakeCommandStore) Enqueue(context.Context, string, commands.Upsert) ([]
 	return nil, nil
 }
 
-func (s *fakeCommandStore) ListRecent(context.Context, string, int) ([]commands.Command, error) {
+func (s *fakeCommandStore) ListRecent(context.Context, string, pagination.Params) ([]commands.Command, error) {
 	return append([]commands.Command(nil), s.items...), nil
+}
+
+func (s *fakeCommandStore) ListRecentAll(context.Context, string) ([]commands.Command, error) {
+	return append([]commands.Command(nil), s.items...), nil
+}
+
+func (s *fakeCommandStore) GetOverviewStats(context.Context, string) (commands.OverviewStats, error) {
+	return commands.OverviewStats{Total: len(s.items)}, nil
 }
 
 func (s *fakeCommandStore) Get(context.Context, string, string) (commands.Command, error) {
 	return commands.Command{}, httpx.ErrNotFound
 }
 
-func (s *fakeCommandStore) ListPending(context.Context, string, string) ([]commands.Command, error) {
+func (s *fakeCommandStore) ListPending(_ context.Context, _ string, _ string, params pagination.Params) ([]commands.Command, error) {
+	if len(s.items) == 0 {
+		return nil, nil
+	}
+	params = pagination.Normalize(params, pagination.DefaultLimit, 100)
+	if params.Offset >= len(s.items) {
+		return []commands.Command{}, nil
+	}
+	end := params.Offset + params.Limit
+	if end > len(s.items) {
+		end = len(s.items)
+	}
+	return append([]commands.Command(nil), s.items[params.Offset:end]...), nil
+}
+
+func (s *fakeCommandStore) ListPendingForDevice(context.Context, string, string) ([]commands.Command, error) {
 	return append([]commands.Command(nil), s.items...), nil
 }
 
@@ -175,8 +227,24 @@ type fakeDeviceStore struct {
 	secret   string
 }
 
-func (s *fakeDeviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
+func (s *fakeDeviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return nil, nil
+}
+
+func (s *fakeDeviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
+	return nil, nil
+}
+
+func (s *fakeDeviceStore) GetOverviewStats(context.Context, string) (device.OverviewStats, error) {
+	return device.OverviewStats{}, nil
+}
+
+func (s *fakeDeviceStore) GetStatusCounts(context.Context, string) (device.StatusCounts, error) {
+	return device.StatusCounts{}, nil
+}
+
+func (s *fakeDeviceStore) GetDevice(context.Context, string, string) (device.Device, error) {
+	return device.Device{}, httpx.ErrNotFound
 }
 
 func (s *fakeDeviceStore) CreateDevice(context.Context, string, device.DeviceUpsert) (device.Device, error) {

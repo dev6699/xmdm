@@ -54,6 +54,11 @@ type VersionUpsert struct {
 	Publish     bool    `json:"publish"`
 }
 
+type OverviewStats struct {
+	Total  int
+	Active int
+}
+
 func (a App) RecordID() string {
 	return a.ID
 }

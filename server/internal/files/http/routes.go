@@ -29,7 +29,7 @@ func Register(mux httpx.Router, svc *auth.Service, store files.Repository, artif
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
-			items, err := store.ListFiles(r.Context(), tenantID)
+			items, err := store.ListFiles(r.Context(), tenantID, httpx.RequestPaginationParams(r, 100))
 			if err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return

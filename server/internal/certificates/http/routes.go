@@ -107,7 +107,7 @@ func Register(mux httpx.Router, svc *auth.Service, devices device.Repository, st
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
-			items, err := store.ListCertificates(r.Context(), tenantID)
+			items, err := store.ListCertificates(r.Context(), tenantID, httpx.RequestPaginationParams(r, 100))
 			if err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return

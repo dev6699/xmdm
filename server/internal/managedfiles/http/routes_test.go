@@ -15,6 +15,7 @@ import (
 	"xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/pagination"
 )
 
 func TestRegisterDeviceManagedFileArtifactRoute(t *testing.T) {
@@ -78,12 +79,44 @@ func TestRegisterDeviceManagedFileArtifactRoute(t *testing.T) {
 	}
 }
 
-type fakeManagedFileStore struct {
-	item managedfiles.ManagedFile
+func TestRegisterManagedFilesCollectionUsesQueryPagination(t *testing.T) {
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionAdminRead})
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+	store := &fakeManagedFileStore{}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, &fakeDeviceStore{}, nil, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/managed-files?page=4&limit=6", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", res.Code, res.Body.String())
+	}
+	if store.lastParams.Limit != 6 {
+		t.Fatalf("unexpected limit: %+v", store.lastParams)
+	}
+	if store.lastParams.Offset != 18 {
+		t.Fatalf("unexpected offset: %+v", store.lastParams)
+	}
 }
 
-func (s *fakeManagedFileStore) ListManagedFiles(context.Context, string) ([]managedfiles.ManagedFile, error) {
+type fakeManagedFileStore struct {
+	item       managedfiles.ManagedFile
+	lastParams pagination.Params
+}
+
+func (s *fakeManagedFileStore) ListManagedFiles(_ context.Context, _ string, params pagination.Params) ([]managedfiles.ManagedFile, error) {
+	s.lastParams = params
 	return []managedfiles.ManagedFile{s.item}, nil
+}
+
+func (s *fakeManagedFileStore) GetOverviewStats(context.Context, string) (managedfiles.OverviewStats, error) {
+	return managedfiles.OverviewStats{Total: 1, Active: 1}, nil
 }
 
 func (s *fakeManagedFileStore) GetManagedFile(context.Context, string, string) (managedfiles.ManagedFile, error) {
@@ -100,8 +133,24 @@ func (s *fakeManagedFileStore) RetireManagedFile(context.Context, string, string
 
 type fakeDeviceStore struct{}
 
-func (s *fakeDeviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
+func (s *fakeDeviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return nil, nil
+}
+
+func (s *fakeDeviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
+	return nil, nil
+}
+
+func (s *fakeDeviceStore) GetOverviewStats(context.Context, string) (device.OverviewStats, error) {
+	return device.OverviewStats{}, nil
+}
+
+func (s *fakeDeviceStore) GetStatusCounts(context.Context, string) (device.StatusCounts, error) {
+	return device.StatusCounts{}, nil
+}
+
+func (s *fakeDeviceStore) GetDevice(context.Context, string, string) (device.Device, error) {
+	return device.Device{}, httpx.ErrNotFound
 }
 
 func (s *fakeDeviceStore) CreateDevice(context.Context, string, device.DeviceUpsert) (device.Device, error) {

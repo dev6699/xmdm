@@ -25,6 +25,7 @@ import (
 	"xmdm/server/internal/identity"
 	"xmdm/server/internal/logs"
 	managedfiles "xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/policy"
 )
 
@@ -64,12 +65,31 @@ func main() {
 
 type identityStore struct{ now time.Time }
 
-func (s *identityStore) ListUsers(context.Context, string) ([]identity.User, error) {
+func (s *identityStore) ListUsers(context.Context, string, pagination.Params) ([]identity.User, error) {
 	return []identity.User{
 		{RecordBase: identity.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
 		{RecordBase: identity.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
 		{RecordBase: identity.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
 	}, nil
+}
+func (s *identityStore) ListActiveUsers(context.Context, string) ([]identity.User, error) {
+	return []identity.User{
+		{RecordBase: identity.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
+		{RecordBase: identity.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
+		{RecordBase: identity.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
+	}, nil
+}
+func (s *identityStore) GetUser(_ context.Context, _ string, id string) (identity.User, error) {
+	for _, item := range []identity.User{
+		{RecordBase: identity.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
+		{RecordBase: identity.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
+		{RecordBase: identity.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
+	} {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return identity.User{}, httpx.ErrNotFound
 }
 func (s *identityStore) CreateUser(context.Context, string, identity.UserUpsert) (identity.User, error) {
 	return identity.User{}, nil
@@ -83,12 +103,31 @@ func (s *identityStore) RetireUser(context.Context, string, string) (identity.Us
 func (s *identityStore) AuthenticateUser(context.Context, string, string, string) (identity.User, identity.Role, error) {
 	return identity.User{}, identity.Role{}, nil
 }
-func (s *identityStore) ListRoles(context.Context, string) ([]identity.Role, error) {
+func (s *identityStore) ListRoles(context.Context, string, pagination.Params) ([]identity.Role, error) {
 	return []identity.Role{
 		{RecordBase: identity.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
 		{RecordBase: identity.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
 		{RecordBase: identity.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
 	}, nil
+}
+func (s *identityStore) ListActiveRoles(context.Context, string) ([]identity.Role, error) {
+	return []identity.Role{
+		{RecordBase: identity.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
+		{RecordBase: identity.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
+		{RecordBase: identity.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
+	}, nil
+}
+func (s *identityStore) GetRole(_ context.Context, _ string, id string) (identity.Role, error) {
+	for _, item := range []identity.Role{
+		{RecordBase: identity.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
+		{RecordBase: identity.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
+		{RecordBase: identity.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
+	} {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return identity.Role{}, httpx.ErrNotFound
 }
 func (s *identityStore) CreateRole(context.Context, string, identity.RoleUpsert) (identity.Role, error) {
 	return identity.Role{}, nil
@@ -102,13 +141,46 @@ func (s *identityStore) RetireRole(context.Context, string, string) (identity.Ro
 
 type groupStore struct{ now time.Time }
 
-func (s *groupStore) ListGroups(context.Context, string) ([]group.Group, error) {
+func (s *groupStore) ListGroups(context.Context, string, pagination.Params) ([]group.Group, error) {
 	return []group.Group{
 		{RecordBase: group.RecordBase{ID: "group-field", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -18), UpdatedAt: s.now}, Name: "Field Devices"},
 		{RecordBase: group.RecordBase{ID: "group-kiosk", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -17), UpdatedAt: s.now}, Name: "Kiosk Fleet"},
 		{RecordBase: group.RecordBase{ID: "group-warehouse", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now.Add(-2 * time.Hour)}, Name: "Warehouse"},
 		{RecordBase: group.RecordBase{ID: "group-rugged", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -9), UpdatedAt: s.now.Add(-5 * time.Hour)}, Name: "Rugged Handhelds"},
 	}, nil
+}
+func (s *groupStore) ListActiveGroups(context.Context, string) ([]group.Group, error) {
+	return []group.Group{
+		{RecordBase: group.RecordBase{ID: "group-field", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -18), UpdatedAt: s.now}, Name: "Field Devices"},
+		{RecordBase: group.RecordBase{ID: "group-kiosk", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -17), UpdatedAt: s.now}, Name: "Kiosk Fleet"},
+		{RecordBase: group.RecordBase{ID: "group-warehouse", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now.Add(-2 * time.Hour)}, Name: "Warehouse"},
+		{RecordBase: group.RecordBase{ID: "group-rugged", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -9), UpdatedAt: s.now.Add(-5 * time.Hour)}, Name: "Rugged Handhelds"},
+	}, nil
+}
+func (s *groupStore) GetGroup(_ context.Context, _ string, id string) (group.Group, error) {
+	for _, item := range []group.Group{
+		{RecordBase: group.RecordBase{ID: "group-field", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -18), UpdatedAt: s.now}, Name: "Field Devices"},
+		{RecordBase: group.RecordBase{ID: "group-kiosk", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -17), UpdatedAt: s.now}, Name: "Kiosk Fleet"},
+		{RecordBase: group.RecordBase{ID: "group-warehouse", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now.Add(-2 * time.Hour)}, Name: "Warehouse"},
+		{RecordBase: group.RecordBase{ID: "group-rugged", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -9), UpdatedAt: s.now.Add(-5 * time.Hour)}, Name: "Rugged Handhelds"},
+	} {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return group.Group{}, httpx.ErrNotFound
+}
+func (s *groupStore) ListGroupDevices(_ context.Context, _ string, groupID string, _ pagination.Params) ([]device.Device, error) {
+	rows := make([]device.Device, 0)
+	for _, item := range fixtureDevices(s.now) {
+		for _, id := range item.GroupIDs {
+			if id == groupID {
+				rows = append(rows, item)
+				break
+			}
+		}
+	}
+	return rows, nil
 }
 func (s *groupStore) CreateGroup(context.Context, string, group.GroupUpsert) (group.Group, error) {
 	return group.Group{}, nil
@@ -130,8 +202,30 @@ func fixturePolicies(now time.Time) []policy.Policy {
 		{RecordBase: policy.RecordBase{ID: "policy-guest", TenantID: tenantID, Status: "retired", CreatedAt: now.AddDate(0, 0, -30), UpdatedAt: now.AddDate(0, 0, -2)}, Name: "Guest Demo", Version: 1, KioskMode: false, Restrictions: []byte(`{"allowPackages":["com.android.chrome"]}`)},
 	}
 }
-func (s *policyStore) ListPolicies(context.Context, string) ([]policy.Policy, error) {
+func (s *policyStore) ListPolicies(context.Context, string, pagination.Params) ([]policy.Policy, error) {
 	return fixturePolicies(s.now), nil
+}
+func (s *policyStore) ListActivePolicies(context.Context, string) ([]policy.Policy, error) {
+	items := make([]policy.Policy, 0)
+	for _, item := range fixturePolicies(s.now) {
+		if item.Status == policy.StatusActive {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+func (s *policyStore) GetOverviewStats(context.Context, string) (policy.OverviewStats, error) {
+	items := fixturePolicies(s.now)
+	stats := policy.OverviewStats{Total: len(items)}
+	for _, item := range items {
+		switch item.Status {
+		case policy.StatusActive:
+			stats.Active++
+		case policy.StatusRetired:
+			stats.Retired++
+		}
+	}
+	return stats, nil
 }
 func (s *policyStore) GetPolicy(_ context.Context, _ string, id string) (policy.Policy, error) {
 	for _, item := range fixturePolicies(s.now) {
@@ -150,7 +244,7 @@ func (s *policyStore) UpdatePolicy(context.Context, string, string, policy.Polic
 func (s *policyStore) RetirePolicy(context.Context, string, string) (policy.Policy, error) {
 	return policy.Policy{}, nil
 }
-func (s *policyStore) ListPolicyApps(_ context.Context, _ string, policyID string) ([]policy.PolicyApp, error) {
+func (s *policyStore) ListPolicyApps(_ context.Context, _ string, policyID string, _ pagination.Params) ([]policy.PolicyApp, error) {
 	rows := []policy.PolicyApp{
 		{RecordBase: policy.RecordBase{Status: policy.StatusActive}, AppID: "app-chrome"},
 		{RecordBase: policy.RecordBase{Status: policy.StatusActive}, AppID: "app-agent"},
@@ -165,16 +259,54 @@ func (s *policyStore) ListPolicyApps(_ context.Context, _ string, policyID strin
 	}
 	return rows, nil
 }
+func (s *policyStore) ListActivePolicyApps(ctx context.Context, tenantID, policyID string) ([]policy.PolicyApp, error) {
+	rows, _ := s.ListPolicyApps(ctx, tenantID, policyID, pagination.Params{})
+	out := make([]policy.PolicyApp, 0, len(rows))
+	for _, row := range rows {
+		if row.Status == policy.StatusActive {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+func (s *policyStore) GetPolicyApp(ctx context.Context, tenantID, policyID, appID string) (policy.PolicyApp, error) {
+	rows, _ := s.ListPolicyApps(ctx, tenantID, policyID, pagination.Params{})
+	for _, item := range rows {
+		if item.AppID == appID {
+			return item, nil
+		}
+	}
+	return policy.PolicyApp{}, httpx.ErrNotFound
+}
 func (s *policyStore) AddPolicyApp(context.Context, string, string, string) (policy.PolicyApp, error) {
 	return policy.PolicyApp{}, nil
 }
 func (s *policyStore) RemovePolicyApp(context.Context, string, string, string) error { return nil }
-func (s *policyStore) ListPolicyCertificates(_ context.Context, _ string, policyID string) ([]policy.PolicyCertificate, error) {
+func (s *policyStore) ListPolicyCertificates(_ context.Context, _ string, policyID string, _ pagination.Params) ([]policy.PolicyCertificate, error) {
 	rows := []policy.PolicyCertificate{{RecordBase: policy.RecordBase{Status: policy.StatusActive}, CertificateID: "cert-root"}}
 	if policyID == "policy-kiosk" {
 		rows = append(rows, policy.PolicyCertificate{RecordBase: policy.RecordBase{Status: policy.StatusActive}, CertificateID: "cert-wifi"})
 	}
 	return rows, nil
+}
+func (s *policyStore) ListActivePolicyCertificates(ctx context.Context, tenantID, policyID string) ([]policy.PolicyCertificate, error) {
+	rows, _ := s.ListPolicyCertificates(ctx, tenantID, policyID, pagination.Params{})
+	out := make([]policy.PolicyCertificate, 0, len(rows))
+	for _, row := range rows {
+		if row.Status == policy.StatusActive {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+func (s *policyStore) GetPolicyCertificate(ctx context.Context, tenantID, policyID, certificateID string) (policy.PolicyCertificate, error) {
+	rows, _ := s.ListPolicyCertificates(ctx, tenantID, policyID, pagination.Params{})
+	for _, item := range rows {
+		if item.CertificateID == certificateID {
+			return item, nil
+		}
+	}
+	return policy.PolicyCertificate{}, httpx.ErrNotFound
 }
 func (s *policyStore) AddPolicyCertificate(context.Context, string, string, string) (policy.PolicyCertificate, error) {
 	return policy.PolicyCertificate{}, nil
@@ -182,7 +314,7 @@ func (s *policyStore) AddPolicyCertificate(context.Context, string, string, stri
 func (s *policyStore) RemovePolicyCertificate(context.Context, string, string, string) error {
 	return nil
 }
-func (s *policyStore) ListPolicyManagedFiles(_ context.Context, _ string, policyID string) ([]policy.PolicyManagedFile, error) {
+func (s *policyStore) ListPolicyManagedFiles(_ context.Context, _ string, policyID string, _ pagination.Params) ([]policy.PolicyManagedFile, error) {
 	rows := []policy.PolicyManagedFile{{RecordBase: policy.RecordBase{Status: policy.StatusActive}, ManagedFileID: "managed-file-config"}}
 	if policyID == "policy-kiosk" {
 		rows = append(rows, policy.PolicyManagedFile{RecordBase: policy.RecordBase{Status: policy.StatusActive}, ManagedFileID: "managed-file-kiosk"})
@@ -191,6 +323,25 @@ func (s *policyStore) ListPolicyManagedFiles(_ context.Context, _ string, policy
 		rows = append(rows, policy.PolicyManagedFile{RecordBase: policy.RecordBase{Status: policy.StatusActive}, ManagedFileID: "managed-file-field"})
 	}
 	return rows, nil
+}
+func (s *policyStore) ListActivePolicyManagedFiles(ctx context.Context, tenantID, policyID string) ([]policy.PolicyManagedFile, error) {
+	rows, _ := s.ListPolicyManagedFiles(ctx, tenantID, policyID, pagination.Params{})
+	out := make([]policy.PolicyManagedFile, 0, len(rows))
+	for _, row := range rows {
+		if row.Status == policy.StatusActive {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+func (s *policyStore) GetPolicyManagedFile(ctx context.Context, tenantID, policyID, managedFileID string) (policy.PolicyManagedFile, error) {
+	rows, _ := s.ListPolicyManagedFiles(ctx, tenantID, policyID, pagination.Params{})
+	for _, item := range rows {
+		if item.ManagedFileID == managedFileID {
+			return item, nil
+		}
+	}
+	return policy.PolicyManagedFile{}, httpx.ErrNotFound
 }
 func (s *policyStore) AddPolicyManagedFile(context.Context, string, string, string) (policy.PolicyManagedFile, error) {
 	return policy.PolicyManagedFile{}, nil
@@ -226,8 +377,66 @@ func fixtureDevices(now time.Time) []device.Device {
 		{RecordBase: device.RecordBase{ID: "device-015", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -3), UpdatedAt: now.Add(-4 * time.Minute)}, Name: "screening-kiosk-015", PolicyID: &policyKiosk, GroupIDs: []string{"group-kiosk"}},
 	}
 }
-func (s *deviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
+func (s *deviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return fixtureDevices(s.now), nil
+}
+func (s *deviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
+	rows := []device.Device{}
+	for _, item := range fixtureDevices(s.now) {
+		if item.Status == device.StatusActive || item.Status == device.StatusEnrolled {
+			rows = append(rows, item)
+		}
+	}
+	return rows, nil
+}
+func (s *deviceStore) GetOverviewStats(context.Context, string) (device.OverviewStats, error) {
+	items := fixtureDevices(s.now)
+	stats := device.OverviewStats{Total: len(items)}
+	for _, item := range items {
+		switch item.Status {
+		case device.StatusActive:
+			stats.Active++
+		case device.StatusPending:
+			stats.Pending++
+		}
+		if item.Status == device.StatusRetired || item.Status == device.StatusWiped {
+			stats.RetiredOrWiped++
+		}
+		if item.PolicyID != nil && *item.PolicyID != "" {
+			stats.AssignedPolicy++
+		}
+	}
+	return stats, nil
+}
+func (s *deviceStore) GetStatusCounts(context.Context, string) (device.StatusCounts, error) {
+	counts := device.StatusCounts{}
+	for _, item := range fixtureDevices(s.now) {
+		switch item.Status {
+		case device.StatusPending:
+			counts.Pending++
+		case device.StatusEnrolled:
+			counts.Enrolled++
+		case device.StatusActive:
+			counts.Active++
+		case device.StatusLocked:
+			counts.Locked++
+		case device.StatusSuspended:
+			counts.Suspended++
+		case device.StatusRetired:
+			counts.Retired++
+		case device.StatusWiped:
+			counts.Wiped++
+		}
+	}
+	return counts, nil
+}
+func (s *deviceStore) GetDevice(_ context.Context, _ string, id string) (device.Device, error) {
+	for _, item := range fixtureDevices(s.now) {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return device.Device{}, httpx.ErrNotFound
 }
 func (s *deviceStore) CreateDevice(context.Context, string, device.DeviceUpsert) (device.Device, error) {
 	return device.Device{}, nil
@@ -257,8 +466,29 @@ func fixtureApps(now time.Time) []apps.App {
 		{RecordBase: apps.RecordBase{ID: "app-old-demo", TenantID: tenantID, Status: "retired", CreatedAt: now.AddDate(0, 0, -20), UpdatedAt: now.AddDate(0, 0, -2)}, PackageName: "com.example.old", Name: "Old Demo App"},
 	}
 }
-func (s *appStore) ListApps(context.Context, string) ([]apps.App, error) {
+func (s *appStore) ListApps(context.Context, string, pagination.Params) ([]apps.App, error) {
 	return fixtureApps(s.now), nil
+}
+func (s *appStore) GetOverviewStats(_ context.Context, _ string) (apps.OverviewStats, error) {
+	items := fixtureApps(s.now)
+	var active int
+	for _, item := range items {
+		if item.Status == apps.StatusActive {
+			active++
+		}
+	}
+	return apps.OverviewStats{
+		Total:  len(items),
+		Active: active,
+	}, nil
+}
+func (s *appStore) GetAppByPackageName(_ context.Context, _ string, packageName string) (apps.App, error) {
+	for _, item := range fixtureApps(s.now) {
+		if item.PackageName == packageName {
+			return item, nil
+		}
+	}
+	return apps.App{}, httpx.ErrNotFound
 }
 func (s *appStore) CreateApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
 	return apps.App{}, nil
@@ -277,7 +507,39 @@ func (s *appStore) GetApp(_ context.Context, _ string, id string) (apps.App, err
 	}
 	return apps.App{}, httpx.ErrNotFound
 }
-func (s *appStore) ListVersions(_ context.Context, _ string, appID string) ([]apps.Version, error) {
+func (s *appStore) GetVersionByCode(_ context.Context, _ string, appID string, versionCode int64) (apps.Version, error) {
+	for _, item := range []apps.Version{
+		{ID: "version-100", PublishedAt: timePtr(s.now.AddDate(0, 0, -8)), TenantID: tenantID, AppID: "app-chrome", Status: apps.VersionStatusPublished, VersionName: "1.0.0", VersionCode: 100, ArtifactID: &s.artifact.ID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -8)},
+		{ID: "version-120", PublishedAt: timePtr(s.now.AddDate(0, 0, -2)), TenantID: tenantID, AppID: "app-chrome", Status: apps.VersionStatusPublished, VersionName: "1.2.0", VersionCode: 120, ArtifactID: &s.artifact.ID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -2)},
+		{ID: "version-agent", PublishedAt: timePtr(s.now.AddDate(0, 0, -1)), TenantID: tenantID, AppID: "app-agent", Status: apps.VersionStatusPublished, VersionName: "0.1.0", VersionCode: 1, ArtifactID: &s.artifact.ID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -1)},
+	} {
+		if item.AppID == appID && item.VersionCode == versionCode {
+			return item, nil
+		}
+	}
+	return apps.Version{}, httpx.ErrNotFound
+}
+func (s *appStore) GetLatestPublishedVersion(_ context.Context, _ string, appID string) (apps.Version, error) {
+	var found *apps.Version
+	for _, item := range []apps.Version{
+		{ID: "version-100", PublishedAt: timePtr(s.now.AddDate(0, 0, -8)), TenantID: tenantID, AppID: "app-chrome", Status: apps.VersionStatusPublished, VersionName: "1.0.0", VersionCode: 100, ArtifactID: &s.artifact.ID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -8)},
+		{ID: "version-120", PublishedAt: timePtr(s.now.AddDate(0, 0, -2)), TenantID: tenantID, AppID: "app-chrome", Status: apps.VersionStatusPublished, VersionName: "1.2.0", VersionCode: 120, ArtifactID: &s.artifact.ID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -2)},
+		{ID: "version-agent", PublishedAt: timePtr(s.now.AddDate(0, 0, -1)), TenantID: tenantID, AppID: "app-agent", Status: apps.VersionStatusPublished, VersionName: "0.1.0", VersionCode: 1, ArtifactID: &s.artifact.ID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -1)},
+	} {
+		if item.AppID != appID || item.Status != apps.VersionStatusPublished {
+			continue
+		}
+		if found == nil || item.CreatedAt.After(found.CreatedAt) {
+			rec := item
+			found = &rec
+		}
+	}
+	if found == nil {
+		return apps.Version{}, httpx.ErrNotFound
+	}
+	return *found, nil
+}
+func (s *appStore) ListVersions(_ context.Context, _ string, appID string, _ pagination.Params) ([]apps.Version, error) {
 	artifactID := s.artifact.ID
 	switch appID {
 	case "app-chrome":
@@ -305,7 +567,7 @@ type fileStore struct {
 	artifact files.Artifact
 }
 
-func (s *fileStore) ListFiles(context.Context, string) ([]files.File, error) {
+func (s *fileStore) ListFiles(context.Context, string, pagination.Params) ([]files.File, error) {
 	return []files.File{
 		{RecordBase: files.RecordBase{ID: "file-apk", TenantID: tenantID, Status: "active", UpdatedAt: s.now}, Name: "launcher.apk", ArtifactID: s.artifact.ID, Checksum: s.artifact.Checksum, MimeType: s.artifact.MimeType, Artifact: &s.artifact},
 		{RecordBase: files.RecordBase{ID: "file-config", TenantID: tenantID, Status: "active", UpdatedAt: s.now.Add(-2 * time.Hour)}, Name: "device-config.txt", ArtifactID: s.artifact.ID, Checksum: s.artifact.Checksum, MimeType: "text/plain", Artifact: &s.artifact},
@@ -341,8 +603,18 @@ func fixtureManagedFiles(now time.Time, artifact files.Artifact) []managedfiles.
 		{RecordBase: managedfiles.RecordBase{ID: "managed-file-field", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -6), UpdatedAt: now.Add(-4 * time.Hour)}, FileID: field.ID, Path: "/sdcard/xmdm/field-rules.json", ReplaceVariables: false, File: &field},
 	}
 }
-func (s *managedFileStore) ListManagedFiles(context.Context, string) ([]managedfiles.ManagedFile, error) {
+func (s *managedFileStore) ListManagedFiles(context.Context, string, pagination.Params) ([]managedfiles.ManagedFile, error) {
 	return fixtureManagedFiles(s.now, s.artifact), nil
+}
+func (s *managedFileStore) GetOverviewStats(context.Context, string) (managedfiles.OverviewStats, error) {
+	items := fixtureManagedFiles(s.now, s.artifact)
+	stats := managedfiles.OverviewStats{Total: len(items)}
+	for _, item := range items {
+		if item.Status == managedfiles.StatusActive {
+			stats.Active++
+		}
+	}
+	return stats, nil
 }
 func (s *managedFileStore) GetManagedFile(_ context.Context, _ string, id string) (managedfiles.ManagedFile, error) {
 	for _, item := range fixtureManagedFiles(s.now, s.artifact) {
@@ -371,11 +643,21 @@ func fixtureCertificates(now time.Time, artifact files.Artifact) []certificates.
 		{RecordBase: certificates.RecordBase{ID: "cert-vpn", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -8), UpdatedAt: now.Add(-6 * time.Hour)}, Name: "VPN Client CA", ArtifactID: artifact.ID, Checksum: "sha256-vpn-cert", Artifact: &artifact},
 	}
 }
-func (s *certificateStore) ListCertificates(context.Context, string) ([]certificates.Certificate, error) {
+func (s *certificateStore) ListCertificates(context.Context, string, pagination.Params) ([]certificates.Certificate, error) {
 	return fixtureCertificates(s.now, s.artifact), nil
 }
-func (s *certificateStore) ListActiveCertificates(context.Context, string) ([]certificates.Certificate, error) {
+func (s *certificateStore) ListActiveCertificates(context.Context, string, pagination.Params) ([]certificates.Certificate, error) {
 	return fixtureCertificates(s.now, s.artifact), nil
+}
+func (s *certificateStore) GetOverviewStats(context.Context, string) (certificates.OverviewStats, error) {
+	items := fixtureCertificates(s.now, s.artifact)
+	stats := certificates.OverviewStats{Total: len(items)}
+	for _, item := range items {
+		if item.Status == certificates.StatusActive {
+			stats.Active++
+		}
+	}
+	return stats, nil
 }
 func (s *certificateStore) GetCertificate(_ context.Context, _ string, id string) (certificates.Certificate, error) {
 	for _, item := range fixtureCertificates(s.now, s.artifact) {
@@ -439,8 +721,26 @@ func commandResult(status string, idx int) map[string]any {
 func (s *commandStore) Enqueue(context.Context, string, commands.Upsert) ([]commands.Command, error) {
 	return []commands.Command{{ID: "cmd-new", Type: "ping", Status: commands.StatusQueued, DeviceID: "device-001"}}, nil
 }
-func (s *commandStore) ListRecent(context.Context, string, int) ([]commands.Command, error) {
+func (s *commandStore) ListRecent(context.Context, string, pagination.Params) ([]commands.Command, error) {
 	return fixtureCommands(s.now), nil
+}
+func (s *commandStore) ListRecentAll(context.Context, string) ([]commands.Command, error) {
+	return fixtureCommands(s.now), nil
+}
+func (s *commandStore) GetOverviewStats(context.Context, string) (commands.OverviewStats, error) {
+	items := fixtureCommands(s.now)
+	stats := commands.OverviewStats{Total: len(items)}
+	for _, item := range items {
+		switch item.Status {
+		case commands.StatusSent:
+			stats.Sent++
+		case commands.StatusAcked:
+			stats.Acked++
+		case commands.StatusFailed:
+			stats.Failed++
+		}
+	}
+	return stats, nil
 }
 func (s *commandStore) Get(_ context.Context, _ string, commandID string) (commands.Command, error) {
 	for _, item := range fixtureCommands(s.now) {
@@ -450,7 +750,7 @@ func (s *commandStore) Get(_ context.Context, _ string, commandID string) (comma
 	}
 	return commands.Command{}, httpx.ErrNotFound
 }
-func (s *commandStore) ListPending(context.Context, string, string) ([]commands.Command, error) {
+func (s *commandStore) ListPending(context.Context, string, string, pagination.Params) ([]commands.Command, error) {
 	rows := []commands.Command{}
 	for _, item := range fixtureCommands(s.now) {
 		if item.Status == commands.StatusQueued || item.Status == commands.StatusSent {
@@ -459,8 +759,22 @@ func (s *commandStore) ListPending(context.Context, string, string) ([]commands.
 	}
 	return rows, nil
 }
+func (s *commandStore) ListPendingForDevice(context.Context, string, string) ([]commands.Command, error) {
+	rows := []commands.Command{}
+	for _, item := range fixtureCommands(s.now) {
+		if item.Status == commands.StatusQueued || item.Status == commands.StatusSent {
+			rows = append(rows, item)
+		}
+	}
+	return rows, nil
+}
+
 func (s *commandStore) Acknowledge(context.Context, string, string, string, commands.Ack) (commands.Command, error) {
 	return commands.Command{}, nil
+}
+
+func (s *auditStore) ListNewest(context.Context, string) ([]audit.Event, error) {
+	return fixtureAuditEvents(s.now), nil
 }
 
 type logStore struct{ now time.Time }
@@ -607,7 +921,8 @@ type auditStore struct{ now time.Time }
 func (s *auditStore) Record(context.Context, string, string, string, string, string, map[string]any) (audit.Event, error) {
 	return audit.Event{}, nil
 }
-func (s *auditStore) List(context.Context, string) ([]audit.Event, error) {
+
+func fixtureAuditEvents(now time.Time) []audit.Event {
 	events := []struct {
 		actor        string
 		action       string
@@ -658,11 +973,19 @@ func (s *auditStore) List(context.Context, string) ([]audit.Event, error) {
 			Action:       event.action,
 			ResourceType: event.resourceType,
 			ResourceID:   event.resourceID,
-			CreatedAt:    s.now.Add(-time.Duration(i*2+(i%4)*2) * time.Hour),
+			CreatedAt:    now.Add(-time.Duration(i*2+(i%4)*2) * time.Hour),
 			Details:      event.details,
 		})
 	}
-	return rows, nil
+	return rows
+}
+
+func (s *auditStore) List(context.Context, string, pagination.Params) ([]audit.Event, error) {
+	return fixtureAuditEvents(s.now), nil
+}
+
+func (s *auditStore) CountSince(context.Context, string, time.Time) (int, error) {
+	return 2, nil
 }
 
 type enrollmentStore struct{ now time.Time }
@@ -679,7 +1002,7 @@ func (s *enrollmentStore) ConsumeToken(context.Context, string, string) (enrollm
 func (s *enrollmentStore) BindDevice(context.Context, string, string, string, map[string]any) (enrollment.BoundDevice, error) {
 	return enrollment.BoundDevice{}, nil
 }
-func (s *enrollmentStore) ListTokens(context.Context, string) ([]enrollment.Token, error) {
+func (s *enrollmentStore) ListTokens(context.Context, string, pagination.Params) ([]enrollment.Token, error) {
 	return []enrollment.Token{
 		{ID: "token-1", TenantID: tenantID, Status: enrollment.TokenStatusIssued, ExpiresAt: s.now.Add(2 * time.Hour), CreatedAt: s.now.Add(-10 * time.Minute), UpdatedAt: s.now},
 		{ID: "token-2", TenantID: tenantID, Status: enrollment.TokenStatusConsumed, ExpiresAt: s.now.Add(-30 * time.Minute), ConsumedAt: timePtr(s.now.Add(-25 * time.Minute)), CreatedAt: s.now.Add(-90 * time.Minute), UpdatedAt: s.now},

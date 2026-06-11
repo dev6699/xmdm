@@ -14,6 +14,7 @@ import (
 	"xmdm/server/internal/group"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/mqttdynsec"
+	"xmdm/server/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -108,7 +109,8 @@ func (s *Store) ensureActiveGroups(ctx context.Context, tx pgx.Tx, tenantID stri
 	return nil
 }
 
-func (s *Store) ListDevices(ctx context.Context, tenantID string) ([]device.Device, error) {
+func (s *Store) ListDevices(ctx context.Context, tenantID string, page pagination.Params) ([]device.Device, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT d.id::text, d.tenant_id::text, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id::text, d.bootstrap_extras::text,
 		        COALESCE(array_agg(DISTINCT dg.group_id::text ORDER BY dg.group_id::text) FILTER (WHERE dg.group_id IS NOT NULL), '{}'::text[]) AS group_ids
@@ -116,8 +118,9 @@ func (s *Store) ListDevices(ctx context.Context, tenantID string) ([]device.Devi
 		 LEFT JOIN device_groups dg ON dg.tenant_id = d.tenant_id AND dg.device_id = d.id
 		 WHERE d.tenant_id = $1
 		 GROUP BY d.id, d.tenant_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras
-		 ORDER BY d.created_at`,
-		tenantID,
+		 ORDER BY d.created_at, d.id
+		 LIMIT $2 OFFSET $3`,
+		tenantID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -136,6 +139,103 @@ func (s *Store) ListDevices(ctx context.Context, tenantID string) ([]device.Devi
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) ListActiveDevices(ctx context.Context, tenantID string) ([]device.Device, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT d.id::text, d.tenant_id::text, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id::text, d.bootstrap_extras::text,
+		        COALESCE(array_agg(DISTINCT dg.group_id::text ORDER BY dg.group_id::text) FILTER (WHERE dg.group_id IS NOT NULL), '{}'::text[]) AS group_ids
+		 FROM devices d
+		 LEFT JOIN device_groups dg ON dg.tenant_id = d.tenant_id AND dg.device_id = d.id
+		 WHERE d.tenant_id = $1 AND d.status IN ($2, $3)
+		 GROUP BY d.id, d.tenant_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras
+		 ORDER BY d.created_at, d.id`,
+		tenantID, device.StatusActive, device.StatusEnrolled,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]device.Device, 0)
+	for rows.Next() {
+		rec, err := scanDevice(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) GetOverviewStats(ctx context.Context, tenantID string) (device.OverviewStats, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT
+			COUNT(*)::int,
+			COUNT(*) FILTER (WHERE status = $2)::int,
+			COUNT(*) FILTER (WHERE status = $3)::int,
+			COUNT(*) FILTER (WHERE lower(status) IN ($4, $5))::int,
+			COUNT(*) FILTER (WHERE policy_id IS NOT NULL)::int
+		 FROM devices
+		 WHERE tenant_id = $1`,
+		tenantID, device.StatusActive, device.StatusPending, device.StatusRetired, device.StatusWiped,
+	)
+	var stats device.OverviewStats
+	if err := row.Scan(&stats.Total, &stats.Active, &stats.Pending, &stats.RetiredOrWiped, &stats.AssignedPolicy); err != nil {
+		return device.OverviewStats{}, err
+	}
+	return stats, nil
+}
+
+func (s *Store) GetStatusCounts(ctx context.Context, tenantID string) (device.StatusCounts, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT
+			COUNT(*) FILTER (WHERE status = $2)::int,
+			COUNT(*) FILTER (WHERE status = $3)::int,
+			COUNT(*) FILTER (WHERE status = $4)::int,
+			COUNT(*) FILTER (WHERE status = $5)::int,
+			COUNT(*) FILTER (WHERE status = $6)::int,
+			COUNT(*) FILTER (WHERE status = $7)::int,
+			COUNT(*) FILTER (WHERE status = $8)::int
+		 FROM devices
+		 WHERE tenant_id = $1`,
+		tenantID,
+		device.StatusPending,
+		device.StatusEnrolled,
+		device.StatusActive,
+		device.StatusLocked,
+		device.StatusSuspended,
+		device.StatusRetired,
+		device.StatusWiped,
+	)
+	var counts device.StatusCounts
+	if err := row.Scan(&counts.Pending, &counts.Enrolled, &counts.Active, &counts.Locked, &counts.Suspended, &counts.Retired, &counts.Wiped); err != nil {
+		return device.StatusCounts{}, err
+	}
+	return counts, nil
+}
+
+func (s *Store) GetDevice(ctx context.Context, tenantID, id string) (device.Device, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT d.id::text, d.tenant_id::text, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id::text, d.bootstrap_extras::text,
+		        COALESCE(array_agg(DISTINCT dg.group_id::text ORDER BY dg.group_id::text) FILTER (WHERE dg.group_id IS NOT NULL), '{}'::text[]) AS group_ids
+		 FROM devices d
+		 LEFT JOIN device_groups dg ON dg.tenant_id = d.tenant_id AND dg.device_id = d.id
+		 WHERE d.tenant_id = $1 AND d.id = $2
+		 GROUP BY d.id, d.tenant_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras`,
+		tenantID, id,
+	)
+	rec, err := scanDevice(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return device.Device{}, httpx.ErrNotFound
+		}
+		return device.Device{}, err
+	}
+	return rec, nil
 }
 
 func (s *Store) UpdateDevice(ctx context.Context, tenantID, id string, req device.DeviceUpsert) (device.Device, error) {

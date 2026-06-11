@@ -8,6 +8,7 @@ import (
 
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,7 +52,7 @@ func TestStoreCreateManagedFileReplacesExistingPath(t *testing.T) {
 		t.Fatalf("expected created_at to remain stable, got first=%v replaced=%v", first.CreatedAt, replaced.CreatedAt)
 	}
 
-	items, err := store.ListManagedFiles(context.Background(), bootstrap.SeedTenantID)
+	items, err := store.ListManagedFiles(context.Background(), bootstrap.SeedTenantID, pagination.Params{Limit: pagination.DefaultLimit})
 	if err != nil {
 		t.Fatalf("list managed files: %v", err)
 	}

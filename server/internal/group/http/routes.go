@@ -8,6 +8,7 @@ import (
 	"xmdm/server/internal/auth"
 	group "xmdm/server/internal/group"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 )
 
 func Register(mux httpx.Router, svc *auth.Service, store group.Repository, auditStore audit.Store, tenantID string) {
@@ -16,8 +17,8 @@ func Register(mux httpx.Router, svc *auth.Service, store group.Repository, audit
 		ReadPerm:  auth.PermissionAdminRead,
 		WritePerm: auth.PermissionAdminWrite,
 		Decode:    decodeGroupRequest,
-		List: func(ctx context.Context) ([]group.Group, error) {
-			return store.ListGroups(ctx, tenantID)
+		List: func(ctx context.Context, params pagination.Params) ([]group.Group, error) {
+			return store.ListGroups(ctx, tenantID, params)
 		},
 		Create: func(ctx context.Context, req group.GroupUpsert) (group.Group, error) {
 			return store.CreateGroup(ctx, tenantID, req)

@@ -13,6 +13,7 @@ import (
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/logs"
+	"xmdm/server/internal/pagination"
 )
 
 func TestRegisterDeviceLogUpload(t *testing.T) {
@@ -93,8 +94,24 @@ func (s *fakeLogStore) Search(context.Context, string, logs.SearchFilter) ([]log
 
 type fakeDeviceStore struct{}
 
-func (s *fakeDeviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
+func (s *fakeDeviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return nil, nil
+}
+
+func (s *fakeDeviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
+	return nil, nil
+}
+
+func (s *fakeDeviceStore) GetOverviewStats(context.Context, string) (device.OverviewStats, error) {
+	return device.OverviewStats{}, nil
+}
+
+func (s *fakeDeviceStore) GetStatusCounts(context.Context, string) (device.StatusCounts, error) {
+	return device.StatusCounts{}, nil
+}
+
+func (s *fakeDeviceStore) GetDevice(context.Context, string, string) (device.Device, error) {
+	return device.Device{}, httpx.ErrNotFound
 }
 func (s *fakeDeviceStore) CreateDevice(context.Context, string, device.DeviceUpsert) (device.Device, error) {
 	return device.Device{}, nil

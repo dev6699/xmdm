@@ -134,7 +134,7 @@ func registerCommandRoutes(mux httpx.Router, svc *auth.Service, pluginManager *p
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
-			items, err := commandStore.ListRecent(r.Context(), tenantID, 25)
+			items, err := commandStore.ListRecentAll(r.Context(), tenantID)
 			if err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
@@ -286,7 +286,7 @@ func registerAuditRoutes(mux httpx.Router, svc *auth.Service, auditStore audit.S
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		items, err := auditStore.List(r.Context(), tenantID)
+		items, err := auditStore.ListNewest(r.Context(), tenantID)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return

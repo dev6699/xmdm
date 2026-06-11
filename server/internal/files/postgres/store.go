@@ -7,6 +7,7 @@ import (
 
 	"xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -68,15 +69,17 @@ func (s *Store) CreateFile(ctx context.Context, tenantID string, req files.FileU
 	return rec, nil
 }
 
-func (s *Store) ListFiles(ctx context.Context, tenantID string) ([]files.File, error) {
+func (s *Store) ListFiles(ctx context.Context, tenantID string, page pagination.Params) ([]files.File, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT f.id::text, f.tenant_id::text, f.name, f.status, f.updated_at, f.deleted_at, f.artifact_id::text, f.checksum, f.mime_type,
 		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
 		 FROM files f
 		 JOIN artifacts a ON a.tenant_id = f.tenant_id AND a.id = f.artifact_id
 		 WHERE f.tenant_id = $1
-		 ORDER BY f.created_at`,
-		tenantID,
+		 ORDER BY f.created_at, f.id
+		 LIMIT $2 OFFSET $3`,
+		tenantID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err

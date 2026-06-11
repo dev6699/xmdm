@@ -12,6 +12,7 @@ import (
 	device "xmdm/server/internal/device"
 	"xmdm/server/internal/group"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/push"
 
 	"github.com/google/uuid"
@@ -87,23 +88,18 @@ func (s *Store) Enqueue(ctx context.Context, tenantID string, req commands.Upser
 	return commandsOut, nil
 }
 
-func (s *Store) ListRecent(ctx context.Context, tenantID string, limit int) ([]commands.Command, error) {
+func (s *Store) ListRecent(ctx context.Context, tenantID string, page pagination.Params) ([]commands.Command, error) {
 	if tenantID == "" {
 		return nil, httpx.ErrInvalidInput
 	}
-	if limit <= 0 {
-		limit = 25
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at
 		 FROM commands
 		 WHERE tenant_id = $1
 		 ORDER BY created_at DESC, id DESC
-		 LIMIT $2`,
-		tenantID, limit,
+		 LIMIT $2 OFFSET $3`,
+		tenantID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -124,6 +120,63 @@ func (s *Store) ListRecent(ctx context.Context, tenantID string, limit int) ([]c
 	return items, nil
 }
 
+func (s *Store) ListRecentAll(ctx context.Context, tenantID string) ([]commands.Command, error) {
+	if tenantID == "" {
+		return nil, httpx.ErrInvalidInput
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at
+		 FROM commands
+		 WHERE tenant_id = $1
+		 ORDER BY created_at DESC, id DESC`,
+		tenantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]commands.Command, 0)
+	for rows.Next() {
+		rec, err := scanCommand(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) GetOverviewStats(ctx context.Context, tenantID string) (commands.OverviewStats, error) {
+	if tenantID == "" {
+		return commands.OverviewStats{}, httpx.ErrInvalidInput
+	}
+	row := s.pool.QueryRow(ctx,
+		`WITH recent AS (
+			SELECT status
+			FROM commands
+			WHERE tenant_id = $1
+			ORDER BY created_at DESC, id DESC
+			LIMIT $2
+		)
+		SELECT
+			COUNT(*)::int,
+			COUNT(*) FILTER (WHERE status = $3)::int,
+			COUNT(*) FILTER (WHERE status = $4)::int,
+			COUNT(*) FILTER (WHERE status = $5)::int
+		FROM recent`,
+		tenantID, 50, commands.StatusSent, commands.StatusAcked, commands.StatusFailed,
+	)
+	var stats commands.OverviewStats
+	if err := row.Scan(&stats.Total, &stats.Sent, &stats.Acked, &stats.Failed); err != nil {
+		return commands.OverviewStats{}, err
+	}
+	return stats, nil
+}
+
 func (s *Store) Get(ctx context.Context, tenantID, commandID string) (commands.Command, error) {
 	if tenantID == "" || commandID == "" {
 		return commands.Command{}, httpx.ErrInvalidInput
@@ -137,7 +190,45 @@ func (s *Store) Get(ctx context.Context, tenantID, commandID string) (commands.C
 	return scanCommand(row)
 }
 
-func (s *Store) ListPending(ctx context.Context, tenantID, deviceID string) ([]commands.Command, error) {
+func (s *Store) ListPending(ctx context.Context, tenantID, deviceID string, page pagination.Params) ([]commands.Command, error) {
+	if tenantID == "" || deviceID == "" {
+		return nil, httpx.ErrInvalidInput
+	}
+	if err := s.expireDueCommands(ctx, tenantID, deviceID); err != nil {
+		return nil, err
+	}
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at
+		 FROM commands
+		 WHERE tenant_id = $1
+		   AND device_id = $2
+		   AND status IN ($3::text, $4::text)
+		   AND (expires_at IS NULL OR expires_at > $5)
+		 ORDER BY created_at, id
+		 LIMIT $6 OFFSET $7`,
+		tenantID, deviceID, commands.StatusQueued, commands.StatusSent, s.now(), page.Limit, page.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]commands.Command, 0)
+	for rows.Next() {
+		rec, err := scanCommand(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) ListPendingForDevice(ctx context.Context, tenantID, deviceID string) ([]commands.Command, error) {
 	if tenantID == "" || deviceID == "" {
 		return nil, httpx.ErrInvalidInput
 	}

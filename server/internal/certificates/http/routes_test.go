@@ -14,6 +14,7 @@ import (
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 )
 
 func TestRegisterCertificateArtifactRoute(t *testing.T) {
@@ -76,12 +77,54 @@ func TestRegisterCertificateArtifactRoute(t *testing.T) {
 	}
 }
 
+func TestRegisterCertificatesCollectionUsesQueryPagination(t *testing.T) {
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionAdminRead})
+	session, err := svc.Login("admin", "secret")
+	if err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+	store := &fakeCertificateStore{}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, &fakeDeviceStore{}, store, nil, nil, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/certificates?page=2&limit=9", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", res.Code, res.Body.String())
+	}
+	if store.lastParams.Limit != 9 {
+		t.Fatalf("unexpected limit: %+v", store.lastParams)
+	}
+	if store.lastParams.Offset != 9 {
+		t.Fatalf("unexpected offset: %+v", store.lastParams)
+	}
+}
+
 type fakeDeviceStore struct {
 	device device.Device
 }
 
-func (s *fakeDeviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
+func (s *fakeDeviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return nil, nil
+}
+
+func (s *fakeDeviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
+	return nil, nil
+}
+
+func (s *fakeDeviceStore) GetOverviewStats(context.Context, string) (device.OverviewStats, error) {
+	return device.OverviewStats{}, nil
+}
+
+func (s *fakeDeviceStore) GetStatusCounts(context.Context, string) (device.StatusCounts, error) {
+	return device.StatusCounts{}, nil
+}
+
+func (s *fakeDeviceStore) GetDevice(context.Context, string, string) (device.Device, error) {
+	return device.Device{}, httpx.ErrNotFound
 }
 
 func (s *fakeDeviceStore) CreateDevice(context.Context, string, device.DeviceUpsert) (device.Device, error) {
@@ -109,14 +152,21 @@ func (s *fakeDeviceStore) Authenticate(_ context.Context, _ string, deviceID, se
 
 type fakeCertificateStore struct {
 	certificate certificates.Certificate
+	lastParams  pagination.Params
 }
 
-func (s *fakeCertificateStore) ListCertificates(context.Context, string) ([]certificates.Certificate, error) {
+func (s *fakeCertificateStore) ListCertificates(_ context.Context, _ string, params pagination.Params) ([]certificates.Certificate, error) {
+	s.lastParams = params
 	return []certificates.Certificate{s.certificate}, nil
 }
 
-func (s *fakeCertificateStore) ListActiveCertificates(context.Context, string) ([]certificates.Certificate, error) {
+func (s *fakeCertificateStore) ListActiveCertificates(_ context.Context, _ string, params pagination.Params) ([]certificates.Certificate, error) {
+	s.lastParams = params
 	return []certificates.Certificate{s.certificate}, nil
+}
+
+func (s *fakeCertificateStore) GetOverviewStats(context.Context, string) (certificates.OverviewStats, error) {
+	return certificates.OverviewStats{Total: 1, Active: 1}, nil
 }
 
 func (s *fakeCertificateStore) GetCertificate(context.Context, string, string) (certificates.Certificate, error) {

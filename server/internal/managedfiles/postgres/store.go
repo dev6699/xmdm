@@ -9,6 +9,7 @@ import (
 	files "xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -73,7 +74,8 @@ func (s *Store) CreateManagedFile(ctx context.Context, tenantID string, req mana
 	return rec, nil
 }
 
-func (s *Store) ListManagedFiles(ctx context.Context, tenantID string) ([]managedfiles.ManagedFile, error) {
+func (s *Store) ListManagedFiles(ctx context.Context, tenantID string, page pagination.Params) ([]managedfiles.ManagedFile, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT m.id::text, m.tenant_id::text, m.file_id::text, m.path, m.status, m.created_at, m.updated_at, m.deleted_at, m.replace_variables,
 		        f.id::text, f.tenant_id::text, f.name, f.status, f.updated_at, f.deleted_at, f.artifact_id::text, f.checksum, f.mime_type,
@@ -82,8 +84,9 @@ func (s *Store) ListManagedFiles(ctx context.Context, tenantID string) ([]manage
 		 JOIN files f ON f.tenant_id = m.tenant_id AND f.id = m.file_id
 		 JOIN artifacts a ON a.tenant_id = f.tenant_id AND a.id = f.artifact_id
 		 WHERE m.tenant_id = $1
-		 ORDER BY m.created_at`,
-		tenantID,
+		 ORDER BY m.created_at DESC, m.id DESC
+		 LIMIT $2 OFFSET $3`,
+		tenantID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -102,6 +105,22 @@ func (s *Store) ListManagedFiles(ctx context.Context, tenantID string) ([]manage
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) GetOverviewStats(ctx context.Context, tenantID string) (managedfiles.OverviewStats, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT
+			COUNT(*)::int,
+			COUNT(*) FILTER (WHERE status = $2)::int
+		 FROM managed_files
+		 WHERE tenant_id = $1`,
+		tenantID, managedfiles.StatusActive,
+	)
+	var stats managedfiles.OverviewStats
+	if err := row.Scan(&stats.Total, &stats.Active); err != nil {
+		return managedfiles.OverviewStats{}, err
+	}
+	return stats, nil
 }
 
 func (s *Store) GetManagedFile(ctx context.Context, tenantID, id string) (managedfiles.ManagedFile, error) {

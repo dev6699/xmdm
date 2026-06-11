@@ -50,3 +50,10 @@ type Ack struct {
 	Message string         `json:"message,omitempty"`
 	Details map[string]any `json:"details,omitempty"`
 }
+
+type OverviewStats struct {
+	Total  int
+	Sent   int
+	Acked  int
+	Failed int
+}

@@ -11,6 +11,7 @@ import (
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/deviceinfo"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 )
 
 const deviceSecretHeader = "X-XMDM-Device-Secret"
@@ -135,6 +136,7 @@ func decodeSearchFilter(r *http.Request) (deviceinfo.SearchFilter, error) {
 		}
 		filter.Limit = value
 	}
+	filter.Pagination = pagination.Params{Limit: filter.Limit, Offset: filter.Offset}
 	return filter, nil
 }
 

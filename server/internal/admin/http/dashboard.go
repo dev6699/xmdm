@@ -36,6 +36,7 @@ import (
 	"xmdm/server/internal/identity"
 	"xmdm/server/internal/logs"
 	managedfiles "xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
 
@@ -592,6 +593,34 @@ const dashboardTemplate = `<!doctype html>
       transition: border-color .18s, background .2s;
     }
     .panel:hover { border-color: var(--border-hi); }
+    details.panel {
+      padding: 0;
+    }
+    details.panel > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    details.panel > summary::-webkit-details-marker {
+      display: none;
+    }
+    details.panel > summary::after {
+      content: '▾';
+      color: var(--ink-3);
+      font-size: .8rem;
+      flex: 0 0 auto;
+      transition: transform .15s ease;
+    }
+    details.panel:not([open]) > summary::after {
+      transform: rotate(-90deg);
+    }
+    details.panel > .panel-body {
+      padding: 0 1.5rem 1.5rem;
+    }
 
     /* metric grid */
     .grid {
@@ -1257,6 +1286,33 @@ const dashboardTemplate = `<!doctype html>
        TABLES
     ═══════════════════════════════════════════ */
     .table-wrap { overflow-x: auto; margin: 0 -1.5rem; padding: 0 1.5rem; }
+    .pager {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin: 0;
+      padding: 1rem 0 0;
+      border-top: 1px solid var(--border);
+      color: var(--ink-2);
+      width: 100%;
+    }
+    .pager a,
+    .pager span {
+      white-space: nowrap;
+    }
+    .pager a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .pager a:hover {
+      text-decoration: underline;
+    }
+    .pager-disabled {
+      opacity: .45;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -1526,11 +1582,11 @@ const dashboardTemplate = `<!doctype html>
       table-layout: fixed;
       min-width: 760px;
     }
-    .audit-table .audit-created { width: 10.5rem; }
+    .audit-table .audit-created { width: 12.5rem; }
     .audit-table .audit-actor { width: 7rem; max-width: 7rem; }
     .audit-table .audit-action { width: 7.5rem; }
     .audit-table .audit-resource { width: 13rem; }
-    .audit-table .audit-details { width: auto; }
+    .audit-table .audit-details { width: 41%; }
     .audit-table td.audit-actor,
     .audit-table td.audit-action,
     .audit-table td.audit-resource {
@@ -2175,40 +2231,31 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 		ov.Attention = append(ov.Attention, overviewAttention{Title: title, Detail: detail, Tone: tone, Href: href})
 	}
 
-	allDevices := []device.Device{}
+	activeDeviceRecords := []device.Device{}
 	totalDevices := 0
 	activeDevices := 0
 	pendingDevices := 0
 	inactiveDevices := 0
 	retiredOrWipedDevices := 0
 	staleActiveDevices := 0
-	assignedPolicyDevices := 0
 
 	if d.deps.Devices != nil {
-		items, err := d.deps.Devices.ListDevices(ctx, d.deps.TenantID)
+		stats, err := d.deps.Devices.GetOverviewStats(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		allDevices = items
-		totalDevices = len(items)
-		for _, item := range items {
-			if item.Status == device.StatusActive {
-				activeDevices++
-			} else {
-				inactiveDevices++
-			}
-			if item.Status == device.StatusPending {
-				pendingDevices++
-			}
-			status := strings.ToLower(strings.TrimSpace(item.Status))
-			if status == "retired" || status == "wiped" {
-				retiredOrWipedDevices++
-			}
-			if firstPolicyID(item.PolicyID) != "" {
-				assignedPolicyDevices++
-			}
+		items, err := d.deps.Devices.ListActiveDevices(ctx, d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
 		}
+		activeDeviceRecords = items
+		totalDevices = stats.Total
+		activeDevices = stats.Active
+		pendingDevices = stats.Pending
+		retiredOrWipedDevices = stats.RetiredOrWiped
+		inactiveDevices = totalDevices - activeDevices
 		tone := "neutral"
 		if totalDevices == 0 {
 			tone = "warn"
@@ -2228,20 +2275,14 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 	activePolicies := 0
 	retiredPolicies := 0
 	if d.deps.Policies != nil {
-		items, err := d.deps.Policies.ListPolicies(ctx, d.deps.TenantID)
+		stats, err := d.deps.Policies.GetOverviewStats(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		totalPolicies = len(items)
-		for _, item := range items {
-			switch item.Status {
-			case policy.StatusActive:
-				activePolicies++
-			case policy.StatusRetired:
-				retiredPolicies++
-			}
-		}
+		totalPolicies = stats.Total
+		activePolicies = stats.Active
+		retiredPolicies = stats.Retired
 		tone := "neutral"
 		if activePolicies > 0 {
 			tone = "good"
@@ -2252,42 +2293,30 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if d.deps.Apps != nil {
-		items, err := d.deps.Apps.ListApps(ctx, d.deps.TenantID)
+		stats, err := d.deps.Apps.GetOverviewStats(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		for _, item := range items {
-			if item.Status == apps.StatusActive {
-				ov.ContentStats.ActiveApps++
-			}
-		}
+		ov.ContentStats.ActiveApps = stats.Active
 	}
 
 	if d.deps.ManagedFiles != nil {
-		items, err := d.deps.ManagedFiles.ListManagedFiles(ctx, d.deps.TenantID)
+		stats, err := d.deps.ManagedFiles.GetOverviewStats(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		for _, item := range items {
-			if item.Status == managedfiles.StatusActive {
-				ov.ContentStats.ActiveFiles++
-			}
-		}
+		ov.ContentStats.ActiveFiles = stats.Active
 	}
 
 	if d.deps.Certificates != nil {
-		items, err := d.deps.Certificates.ListCertificates(ctx, d.deps.TenantID)
+		stats, err := d.deps.Certificates.GetOverviewStats(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		for _, item := range items {
-			if item.Status == certificates.StatusActive {
-				ov.ContentStats.ActiveCerts++
-			}
-		}
+		ov.ContentStats.ActiveCerts = stats.Active
 	}
 
 	totalContent := ov.ContentStats.ActiveApps + ov.ContentStats.ActiveFiles + ov.ContentStats.ActiveCerts
@@ -2298,22 +2327,17 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 	appendSignal("Content readiness", strconv.Itoa(totalContent), fmt.Sprintf("%d apps, %d files, %d certs", ov.ContentStats.ActiveApps, ov.ContentStats.ActiveFiles, ov.ContentStats.ActiveCerts), contentTone, "/admin/apps")
 
 	if d.deps.Commands != nil {
-		items, err := d.deps.Commands.ListRecent(ctx, d.deps.TenantID, 50)
+		stats, err := d.deps.Commands.GetOverviewStats(ctx, d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
-		for _, item := range items {
-			ov.CommandStats.Total++
-			switch item.Status {
-			case commands.StatusSent:
-				ov.CommandStats.Sent++
-			case commands.StatusAcked:
-				ov.CommandStats.Acked++
-			case commands.StatusFailed:
-				ov.CommandStats.Failed++
-			}
+		items, err := d.deps.Commands.ListRecent(ctx, d.deps.TenantID, pagination.Params{Limit: 50})
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
 		}
+		ov.CommandStats = overviewCommandStats{Total: stats.Total, Sent: stats.Sent, Acked: stats.Acked, Failed: stats.Failed}
 		ov.CommandTrendChart = buildCommandDeliveryTrendChart(items, now, 7)
 		commandTone := "good"
 		if ov.CommandStats.Failed > 0 {
@@ -2326,21 +2350,27 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if d.deps.DeviceInfo != nil {
-		items, err := d.deps.DeviceInfo.Search(ctx, d.deps.TenantID, deviceinfo.SearchFilter{Limit: 200})
+		items, err := d.deps.DeviceInfo.Search(ctx, d.deps.TenantID, deviceinfo.SearchFilter{Pagination: pagination.Params{Limit: 200}})
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
 		}
 		ov.DeviceActivityChart = buildUniqueDeviceActivityChart(items, now, 7)
-		ov.DeviceTelemetryChart = buildDeviceTelemetryFreshnessChart(allDevices, items, now)
-		staleActiveDevices = countStaleActiveDevices(allDevices, items, now, 72*time.Hour)
-		ov.DeviceModelChart = buildDeviceModelChart(allDevices, items, 6)
+		ov.DeviceTelemetryChart = buildDeviceTelemetryFreshnessChart(activeDeviceRecords, items, now)
+		staleActiveDevices = countStaleActiveDevices(activeDeviceRecords, items, now, 72*time.Hour)
+		ov.DeviceModelChart = buildDeviceModelChart(activeDeviceRecords, items, 6)
 	}
 
 	var auditEvents []audit.Event
 	auditLast24h := 0
 	if d.deps.Audit != nil {
-		items, err := d.deps.Audit.List(ctx, d.deps.TenantID)
+		count, err := d.deps.Audit.CountSince(ctx, d.deps.TenantID, now.Add(-24*time.Hour))
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
+		}
+		auditLast24h = count
+		items, err := d.deps.Audit.List(ctx, d.deps.TenantID, pagination.Params{Limit: 5})
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return
@@ -2349,16 +2379,7 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 			return items[i].CreatedAt.After(items[j].CreatedAt)
 		})
 		auditEvents = items
-		for _, item := range items {
-			if item.CreatedAt.After(now.Add(-24 * time.Hour)) {
-				auditLast24h++
-			}
-		}
-		if len(items) > 5 {
-			ov.RecentActivity = items[:5]
-		} else {
-			ov.RecentActivity = items
-		}
+		ov.RecentActivity = items
 		auditTone := "neutral"
 		if auditLast24h > 0 {
 			auditTone = "good"
@@ -2407,7 +2428,14 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 	)
 
 	ov.Chart = buildOverviewChart(auditEvents, now, 7)
-	ov.DeviceStatusChart = buildDeviceStatusChart(allDevices)
+	if d.deps.Devices != nil {
+		counts, err := d.deps.Devices.GetStatusCounts(ctx, d.deps.TenantID)
+		if err != nil {
+			d.renderPageError(w, r, session, "Overview", err)
+			return
+		}
+		ov.DeviceStatusChart = buildDeviceStatusChart(counts)
+	}
 	if len(ov.DeviceActivityChart.Values) == 0 {
 		ov.DeviceActivityChart = buildOverviewChart(nil, now, 7)
 		ov.DeviceActivityChart.Title = "Device activity timeline"
@@ -2796,20 +2824,22 @@ func renderOverviewChart(chart overviewChart) template.HTML {
 	return template.HTML(b.String())
 }
 
-func buildDeviceStatusChart(items []device.Device) overviewChart {
+func buildDeviceStatusChart(counts device.StatusCounts) overviewChart {
 	chart := overviewChart{Title: "Device status distribution", EmptyNote: "No devices enrolled yet."}
-	if len(items) == 0 {
+	total := counts.Pending + counts.Enrolled + counts.Active + counts.Locked + counts.Suspended + counts.Retired + counts.Wiped
+	if total == 0 {
 		return chart
 	}
-	counts := map[string]int{}
-	for _, item := range items {
-		label := strings.TrimSpace(string(item.Status))
-		if label == "" {
-			label = "unknown"
-		}
-		counts[label]++
+	values := map[string]int{
+		"pending":   counts.Pending,
+		"enrolled":  counts.Enrolled,
+		"active":    counts.Active,
+		"locked":    counts.Locked,
+		"suspended": counts.Suspended,
+		"retired":   counts.Retired,
+		"wiped":     counts.Wiped,
 	}
-	return chartFromCounts(chart.Title, counts, 8, chart.EmptyNote)
+	return chartFromCounts(chart.Title, values, 8, chart.EmptyNote)
 }
 
 func buildDeviceTelemetryFreshnessChart(devices []device.Device, records any, now time.Time) overviewChart {
@@ -3341,12 +3371,23 @@ func (d *dashboard) users(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	items, err := d.deps.Identity.ListUsers(r.Context(), d.deps.TenantID)
+	page, params := listPaginationParams(r, pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, err := d.deps.Identity.ListUsers(r.Context(), d.deps.TenantID, params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Users", err)
 		return
 	}
-	roles, err := d.deps.Identity.ListRoles(r.Context(), d.deps.TenantID)
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
+	}
+	roles, err := d.loadRolesForUsers(r.Context(), items)
+	if err != nil {
+		d.renderPageError(w, r, session, "Users", err)
+		return
+	}
+	roleOptions, err := d.loadRolesForSelect(r.Context(), "")
 	if err != nil {
 		d.renderPageError(w, r, session, "Users", err)
 		return
@@ -3354,7 +3395,7 @@ func (d *dashboard) users(w http.ResponseWriter, r *http.Request) {
 	data := pageData{
 		Title:    "Users",
 		Subtitle: "Manage operator accounts and role bindings.",
-		Items:    usersTable(items, roleNameByID(roles), d.csrfToken(r), d.canWrite(session)),
+		Items:    withPager(usersTable(items, roleNameByID(roles), d.csrfToken(r), d.canWrite(session)), pagerHTML(r, page, limit, hasNext)),
 	}
 	if d.canWrite(session) {
 		data.Forms = []formData{{
@@ -3363,7 +3404,7 @@ func (d *dashboard) users(w http.ResponseWriter, r *http.Request) {
 			Fields: []fieldData{
 				{Name: "email", Label: "Email", Type: "email", Placeholder: "operator@example.com", Required: true},
 				{Name: "password", Label: "Password", Type: "password", Placeholder: "password", Required: true},
-				{Name: "roleId", Label: "Role", Type: "select", Placeholder: "Select a role", Options: allRoleOptions(roles), Required: true},
+				{Name: "roleId", Label: "Role", Type: "select", Placeholder: "Select a role", Options: allRoleOptions(roleOptions), Required: true},
 			},
 			Submit: "Create user",
 		}}
@@ -3380,24 +3421,13 @@ func (d *dashboard) userDetail(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	items, err := d.deps.Identity.ListUsers(r.Context(), d.deps.TenantID)
+	found, err := d.deps.Identity.GetUser(r.Context(), d.deps.TenantID, r.PathValue("id"))
 	if err != nil {
 		d.renderPageError(w, r, session, "User Detail", err)
 		return
 	}
-	id := r.PathValue("id")
-	var found *identity.User
-	for i := range items {
-		if items[i].ID == id {
-			found = &items[i]
-			break
-		}
-	}
-	if found == nil {
-		d.renderPageError(w, r, session, "User Detail", httpx.ErrNotFound)
-		return
-	}
-	roles, err := d.deps.Identity.ListRoles(r.Context(), d.deps.TenantID)
+	id := found.ID
+	roles, err := d.loadRolesForSelect(r.Context(), found.RoleID)
 	if err != nil {
 		d.renderPageError(w, r, session, "User Detail", err)
 		return
@@ -3495,15 +3525,21 @@ func (d *dashboard) roles(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := d.deps.Identity.ListRoles(r.Context(), d.deps.TenantID)
+	page, params := listPaginationParams(r, pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, err := d.deps.Identity.ListRoles(r.Context(), d.deps.TenantID, params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Roles", err)
 		return
 	}
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
+	}
 	data := pageData{
 		Title:    "Roles",
 		Subtitle: "Define the permission bundles available to operators.",
-		Items:    rolesTable(items, d.csrfToken(r), d.canWrite(session)),
+		Items:    withPager(rolesTable(items, d.csrfToken(r), d.canWrite(session)), pagerHTML(r, page, limit, hasNext)),
 	}
 	catalog := d.permissionCatalog()
 	if d.canWrite(session) {
@@ -3529,23 +3565,12 @@ func (d *dashboard) roleDetail(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	items, err := d.deps.Identity.ListRoles(r.Context(), d.deps.TenantID)
+	found, err := d.deps.Identity.GetRole(r.Context(), d.deps.TenantID, r.PathValue("id"))
 	if err != nil {
 		d.renderPageError(w, r, session, "Role Detail", err)
 		return
 	}
-	id := r.PathValue("id")
-	var found *identity.Role
-	for i := range items {
-		if items[i].ID == id {
-			found = &items[i]
-			break
-		}
-	}
-	if found == nil {
-		d.renderPageError(w, r, session, "Role Detail", httpx.ErrNotFound)
-		return
-	}
+	id := found.ID
 	catalog := d.permissionCatalog()
 	data := pageData{
 		Title:    "Role Detail",
@@ -3632,16 +3657,22 @@ func (d *dashboard) groups(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := d.deps.Groups.ListGroups(r.Context(), d.deps.TenantID)
+	page, params := listPaginationParams(r, pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, err := d.deps.Groups.ListGroups(r.Context(), d.deps.TenantID, params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Groups", err)
 		return
+	}
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
 	}
 	d.renderForSession(w, r, session, pageData{
 		Title:    "Groups",
 		Subtitle: "Define device cohorts and inspect the devices assigned to each cohort.",
 		Forms:    []formData{{Title: "Create group", Action: "/admin/groups/create", Fields: []fieldData{{Name: "name", Label: "Name", Type: "text", Placeholder: "Field Devices", Required: true}}, Submit: "Create group"}},
-		Items:    groupsTable(items, d.csrfToken(r), d.canWrite(session)),
+		Items:    withPager(groupsTable(items, d.csrfToken(r), d.canWrite(session)), pagerHTML(r, page, limit, hasNext)),
 	})
 }
 
@@ -3671,12 +3702,13 @@ func (d *dashboard) groupDetail(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	found, devices, policies, err := d.loadGroupDetail(r.Context(), r.PathValue("id"))
+	_, params := listPaginationParamsForKeys(r, "memberDevicesPage", "memberDevicesLimit", pagination.DefaultLimit)
+	found, devices, policies, err := d.loadGroupDetail(r.Context(), r.PathValue("id"), params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Group Detail", err)
 		return
 	}
-	data := d.groupDetailPageData(session, found, devices, policies)
+	data := d.groupDetailPageData(r, session, found, devices, policies)
 	d.renderForSession(w, r, session, data)
 }
 
@@ -3710,43 +3742,125 @@ func (d *dashboard) retireGroup(w http.ResponseWriter, r *http.Request) {
 	d.redirectOK(w, r, "/admin/groups", "group retired")
 }
 
-func (d *dashboard) loadGroupDetail(ctx context.Context, id string) (*group.Group, []device.Device, []policy.Policy, error) {
-	groups, err := d.deps.Groups.ListGroups(ctx, d.deps.TenantID)
+func (d *dashboard) loadRolesForSelect(ctx context.Context, selectedID string) ([]identity.Role, error) {
+	items := []identity.Role{}
+	if d.deps.Identity != nil {
+		var err error
+		items, err = d.deps.Identity.ListActiveRoles(ctx, d.deps.TenantID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	selectedID = strings.TrimSpace(selectedID)
+	if selectedID == "" || containsRoleID(items, selectedID) {
+		return items, nil
+	}
+	if d.deps.Identity == nil {
+		return items, nil
+	}
+	found, err := d.deps.Identity.GetRole(ctx, d.deps.TenantID, selectedID)
+	if err != nil {
+		if err == httpx.ErrNotFound {
+			return items, nil
+		}
+		return nil, err
+	}
+	return append([]identity.Role{found}, items...), nil
+}
+
+func (d *dashboard) loadPoliciesForSelect(ctx context.Context, selectedID string) ([]policy.Policy, error) {
+	items := []policy.Policy{}
+	if d.deps.Policies != nil {
+		var err error
+		items, err = d.deps.Policies.ListActivePolicies(ctx, d.deps.TenantID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	selectedID = strings.TrimSpace(selectedID)
+	if selectedID == "" || containsPolicyID(items, selectedID) {
+		return items, nil
+	}
+	if d.deps.Policies == nil {
+		return items, nil
+	}
+	found, err := d.deps.Policies.GetPolicy(ctx, d.deps.TenantID, selectedID)
+	if err != nil {
+		if err == httpx.ErrNotFound {
+			return items, nil
+		}
+		return nil, err
+	}
+	return append([]policy.Policy{found}, items...), nil
+}
+
+func (d *dashboard) loadRolesForUsers(ctx context.Context, items []identity.User) ([]identity.Role, error) {
+	if d.deps.Identity == nil {
+		return []identity.Role{}, nil
+	}
+	ids := roleIDsForUsers(items)
+	roles := make([]identity.Role, 0, len(ids))
+	for _, id := range ids {
+		rec, err := d.deps.Identity.GetRole(ctx, d.deps.TenantID, id)
+		if err != nil {
+			if err == httpx.ErrNotFound {
+				continue
+			}
+			return nil, err
+		}
+		roles = append(roles, rec)
+	}
+	return roles, nil
+}
+
+func (d *dashboard) loadPoliciesForDevices(ctx context.Context, items []device.Device) ([]policy.Policy, error) {
+	if d.deps.Policies == nil {
+		return []policy.Policy{}, nil
+	}
+	ids := policyIDsForDevices(items)
+	policies := make([]policy.Policy, 0, len(ids))
+	for _, id := range ids {
+		rec, err := d.deps.Policies.GetPolicy(ctx, d.deps.TenantID, id)
+		if err != nil {
+			if err == httpx.ErrNotFound {
+				continue
+			}
+			return nil, err
+		}
+		policies = append(policies, rec)
+	}
+	return policies, nil
+}
+
+func (d *dashboard) loadGroupDetail(ctx context.Context, id string, page pagination.Params) (*group.Group, []device.Device, []policy.Policy, error) {
+	found, err := d.deps.Groups.GetGroup(ctx, d.deps.TenantID, id)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	var found *group.Group
-	for i := range groups {
-		if groups[i].ID == id {
-			found = &groups[i]
-			break
-		}
-	}
-	if found == nil {
-		return nil, nil, nil, httpx.ErrNotFound
-	}
 	devices := []device.Device{}
-	if d.deps.Devices != nil {
-		devices, err = d.deps.Devices.ListDevices(ctx, d.deps.TenantID)
+	if d.deps.Groups != nil {
+		devices, err = d.deps.Groups.ListGroupDevices(ctx, d.deps.TenantID, found.ID, page)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		devices = groupDevicesFor(found.ID, devices)
 	}
 	policies := []policy.Policy{}
 	if d.deps.Policies != nil {
-		policies, err = d.deps.Policies.ListPolicies(ctx, d.deps.TenantID)
+		policies, err = d.loadPoliciesForDevices(ctx, devices)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 	}
-	return found, devices, policies, nil
+	return &found, devices, policies, nil
 }
 
-func (d *dashboard) groupDetailPageData(session *auth.Session, found *group.Group, devices []device.Device, policies []policy.Policy) pageData {
+func (d *dashboard) groupDetailPageData(r *http.Request, session *auth.Session, found *group.Group, devices []device.Device, policies []policy.Policy) pageData {
 	body := "<section class=\"panel\"><h2>Current group</h2>" + pre(found) + "</section>"
+	page, params := listPaginationParamsForKeys(r, "memberDevicesPage", "memberDevicesLimit", pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, hasNext := paginateItems(devices, limit)
 	if len(devices) > 0 {
-		body += "<section class=\"panel\"><h2>Member devices</h2>" + string(devicesTable(devices, policies, "", false)) + "</section>"
+		body += "<section class=\"panel\"><h2>Member devices</h2>" + string(withPager(devicesTable(items, policies, "", false), pagerHTMLForKeys(r, "memberDevicesPage", "memberDevicesLimit", page, limit, hasNext))) + "</section>"
 	} else {
 		body += `<section class="panel"><h2>Member devices</h2><p class="muted">No devices are linked to this group.</p></section>`
 	}
@@ -3776,10 +3890,16 @@ func (d *dashboard) policies(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := d.deps.Policies.ListPolicies(r.Context(), d.deps.TenantID)
+	page, params := listPaginationParams(r, pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, err := d.deps.Policies.ListPolicies(r.Context(), d.deps.TenantID, params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Policies", err)
 		return
+	}
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
 	}
 	d.renderForSession(w, r, session, pageData{
 		Title:    "Policies",
@@ -3790,7 +3910,7 @@ func (d *dashboard) policies(w http.ResponseWriter, r *http.Request) {
 			Fields: policyFields(policy.Policy{}),
 			Submit: "Create policy",
 		}},
-		Items: policiesTable(items, d.csrfToken(r), d.canWrite(session)),
+		Items: withPager(policiesTable(items, d.csrfToken(r), d.canWrite(session)), pagerHTML(r, page, limit, hasNext)),
 	})
 }
 
@@ -3809,65 +3929,78 @@ func (d *dashboard) policyDetail(w http.ResponseWriter, r *http.Request) {
 		d.renderPageError(w, r, session, "Policy Detail", err)
 		return
 	}
-	apps, appAssignments, certificatesList, certificateAssignments, managedFiles, managedFileAssignments, err := d.loadPolicyDetailPolicyContent(r.Context(), found.ID)
-	if err != nil {
-		d.renderPageError(w, r, session, "Policy Detail", err)
-		return
-	}
-	data := d.policyDetailPageData(session, d.csrfToken(r), found, apps, appAssignments, certificatesList, certificateAssignments, managedFiles, managedFileAssignments)
-	d.renderForSession(w, r, session, data)
-}
-
-func (d *dashboard) loadPolicyDetailPolicyContent(ctx context.Context, policyID string) ([]apps.App, []policy.PolicyApp, []certificates.Certificate, []policy.PolicyCertificate, []managedfiles.ManagedFile, []policy.PolicyManagedFile, error) {
-	appsList := []apps.App{}
+	ctx := r.Context()
+	apps := []apps.App{}
 	if d.deps.Apps != nil {
-		var err error
-		appsList, err = d.deps.Apps.ListApps(ctx, d.deps.TenantID)
+		_, appParams := listPaginationParamsForKeys(r, "policyAppsPage", "policyAppsLimit", pagination.DefaultLimit)
+		apps, err = d.deps.Apps.ListApps(ctx, d.deps.TenantID, appParams)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
+			d.renderPageError(w, r, session, "Policy Detail", err)
+			return
 		}
 	}
-	assignments := []policy.PolicyApp{}
+	appAssignments := make([]policy.PolicyApp, 0, len(apps))
 	if d.deps.Policies != nil {
-		var err error
-		assignments, err = d.deps.Policies.ListPolicyApps(ctx, d.deps.TenantID, policyID)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
+		for _, app := range apps {
+			rec, err := d.deps.Policies.GetPolicyApp(ctx, d.deps.TenantID, found.ID, app.ID)
+			if err != nil {
+				if err != httpx.ErrNotFound {
+					d.renderPageError(w, r, session, "Policy Detail", err)
+					return
+				}
+				continue
+			}
+			appAssignments = append(appAssignments, rec)
 		}
 	}
 	certificatesList := []certificates.Certificate{}
 	if d.deps.Certificates != nil {
-		var err error
-		certificatesList, err = d.deps.Certificates.ListCertificates(ctx, d.deps.TenantID)
+		_, certParams := listPaginationParamsForKeys(r, "policyCertificatesPage", "policyCertificatesLimit", pagination.DefaultLimit)
+		certificatesList, err = d.deps.Certificates.ListCertificates(ctx, d.deps.TenantID, certParams)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
+			d.renderPageError(w, r, session, "Policy Detail", err)
+			return
 		}
 	}
-	certificateAssignments := []policy.PolicyCertificate{}
+	certificateAssignments := make([]policy.PolicyCertificate, 0, len(certificatesList))
 	if d.deps.Policies != nil {
-		var err error
-		certificateAssignments, err = d.deps.Policies.ListPolicyCertificates(ctx, d.deps.TenantID, policyID)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
+		for _, cert := range certificatesList {
+			rec, err := d.deps.Policies.GetPolicyCertificate(ctx, d.deps.TenantID, found.ID, cert.ID)
+			if err != nil {
+				if err != httpx.ErrNotFound {
+					d.renderPageError(w, r, session, "Policy Detail", err)
+					return
+				}
+				continue
+			}
+			certificateAssignments = append(certificateAssignments, rec)
 		}
 	}
-	managedFilesList := []managedfiles.ManagedFile{}
+	managedFiles := []managedfiles.ManagedFile{}
 	if d.deps.ManagedFiles != nil {
-		var err error
-		managedFilesList, err = d.deps.ManagedFiles.ListManagedFiles(ctx, d.deps.TenantID)
+		_, fileParams := listPaginationParamsForKeys(r, "policyManagedFilesPage", "policyManagedFilesLimit", pagination.DefaultLimit)
+		managedFiles, err = d.deps.ManagedFiles.ListManagedFiles(ctx, d.deps.TenantID, fileParams)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
+			d.renderPageError(w, r, session, "Policy Detail", err)
+			return
 		}
 	}
-	managedFileAssignments := []policy.PolicyManagedFile{}
+	managedFileAssignments := make([]policy.PolicyManagedFile, 0, len(managedFiles))
 	if d.deps.Policies != nil {
-		var err error
-		managedFileAssignments, err = d.deps.Policies.ListPolicyManagedFiles(ctx, d.deps.TenantID, policyID)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
+		for _, item := range managedFiles {
+			rec, err := d.deps.Policies.GetPolicyManagedFile(ctx, d.deps.TenantID, found.ID, item.ID)
+			if err != nil {
+				if err != httpx.ErrNotFound {
+					d.renderPageError(w, r, session, "Policy Detail", err)
+					return
+				}
+				continue
+			}
+			managedFileAssignments = append(managedFileAssignments, rec)
 		}
 	}
-	return appsList, assignments, certificatesList, certificateAssignments, managedFilesList, managedFileAssignments, nil
+	data := d.policyDetailPageData(r, session, d.csrfToken(r), found, apps, appAssignments, certificatesList, certificateAssignments, managedFiles, managedFileAssignments)
+	d.renderForSession(w, r, session, data)
 }
 
 func (d *dashboard) togglePolicyApp(w http.ResponseWriter, r *http.Request) {
@@ -3880,18 +4013,14 @@ func (d *dashboard) togglePolicyApp(w http.ResponseWriter, r *http.Request) {
 	}
 	policyID := r.PathValue("id")
 	appID := r.PathValue("appId")
-	items, err := d.deps.Policies.ListPolicyApps(r.Context(), d.deps.TenantID, policyID)
+	binding, err := d.deps.Policies.GetPolicyApp(r.Context(), d.deps.TenantID, policyID, appID)
 	if err != nil {
-		d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
-		return
-	}
-	active := false
-	for _, item := range items {
-		if item.AppID == appID && item.Status == policy.StatusActive {
-			active = true
-			break
+		if err != httpx.ErrNotFound {
+			d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+			return
 		}
 	}
+	active := err == nil && binding.Status == policy.StatusActive
 	message := "app enabled"
 	action := "update"
 	if active {
@@ -3920,18 +4049,14 @@ func (d *dashboard) togglePolicyCertificate(w http.ResponseWriter, r *http.Reque
 	}
 	policyID := r.PathValue("id")
 	certificateID := r.PathValue("certificateId")
-	items, err := d.deps.Policies.ListPolicyCertificates(r.Context(), d.deps.TenantID, policyID)
+	binding, err := d.deps.Policies.GetPolicyCertificate(r.Context(), d.deps.TenantID, policyID, certificateID)
 	if err != nil {
-		d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
-		return
-	}
-	active := false
-	for _, item := range items {
-		if item.CertificateID == certificateID && item.Status == policy.StatusActive {
-			active = true
-			break
+		if err != httpx.ErrNotFound {
+			d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+			return
 		}
 	}
+	active := err == nil && binding.Status == policy.StatusActive
 	message := "certificate enabled"
 	action := "update"
 	if active {
@@ -3960,18 +4085,14 @@ func (d *dashboard) togglePolicyManagedFile(w http.ResponseWriter, r *http.Reque
 	}
 	policyID := r.PathValue("id")
 	managedFileID := r.PathValue("managedFileId")
-	items, err := d.deps.Policies.ListPolicyManagedFiles(r.Context(), d.deps.TenantID, policyID)
+	binding, err := d.deps.Policies.GetPolicyManagedFile(r.Context(), d.deps.TenantID, policyID, managedFileID)
 	if err != nil {
-		d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
-		return
-	}
-	active := false
-	for _, item := range items {
-		if item.ManagedFileID == managedFileID && item.Status == policy.StatusActive {
-			active = true
-			break
+		if err != httpx.ErrNotFound {
+			d.redirectError(w, r, "/admin/policies/"+policyID, err.Error())
+			return
 		}
 	}
+	active := err == nil && binding.Status == policy.StatusActive
 	message := "managed file enabled"
 	action := "update"
 	if active {
@@ -4049,22 +4170,30 @@ func (d *dashboard) devices(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID)
+	page, params := listPaginationParams(r, pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, err := d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID, params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Devices", err)
 		return
 	}
-	policies := []policy.Policy{}
-	if d.deps.Policies != nil {
-		policies, err = d.deps.Policies.ListPolicies(r.Context(), d.deps.TenantID)
-		if err != nil {
-			d.renderPageError(w, r, session, "Devices", err)
-			return
-		}
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
+	}
+	policies, err := d.loadPoliciesForDevices(r.Context(), items)
+	if err != nil {
+		d.renderPageError(w, r, session, "Devices", err)
+		return
+	}
+	policyOptions, err := d.loadPoliciesForSelect(r.Context(), "")
+	if err != nil {
+		d.renderPageError(w, r, session, "Devices", err)
+		return
 	}
 	groups := []group.Group{}
 	if d.deps.Groups != nil {
-		groups, err = d.deps.Groups.ListGroups(r.Context(), d.deps.TenantID)
+		groups, err = d.deps.Groups.ListActiveGroups(r.Context(), d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Devices", err)
 			return
@@ -4077,13 +4206,13 @@ func (d *dashboard) devices(w http.ResponseWriter, r *http.Request) {
 			Action: "/admin/devices/create",
 			Fields: []fieldData{
 				{Name: "name", Label: "Display name", Type: "text", Placeholder: "warehouse-tablet-001", Required: true},
-				{Name: "policyId", Label: "Policy", Type: "select", Placeholder: "Select a policy", Options: allPolicyOptions(policies), Required: true},
+				{Name: "policyId", Label: "Policy", Type: "select", Placeholder: "Select a policy", Options: allPolicyOptions(policyOptions), Required: true},
 				{Name: "groupIds", Label: "Groups", Type: "multiselect", Placeholder: "Select one or more groups", Options: activeGroupOptions(groups)},
 			},
 			Help:   "",
 			Submit: "Create device",
 		}},
-		Items: devicesTable(items, policies, d.csrfToken(r), d.canWrite(session)),
+		Items: withPager(devicesTable(items, policies, d.csrfToken(r), d.canWrite(session)), pagerHTML(r, page, limit, hasNext)),
 	})
 }
 
@@ -4097,39 +4226,25 @@ func (d *dashboard) deviceDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	devices, err := d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID)
+	found, err := d.deps.Devices.GetDevice(r.Context(), d.deps.TenantID, id)
 	if err != nil {
 		d.renderPageError(w, r, session, "Device Detail", err)
 		return
 	}
-	var found *device.Device
-	for i := range devices {
-		if devices[i].ID == id {
-			found = &devices[i]
-			break
-		}
-	}
-	if found == nil {
-		d.renderPageError(w, r, session, "Device Detail", httpx.ErrNotFound)
+	policies, err := d.loadPoliciesForSelect(r.Context(), firstPolicyID(found.PolicyID))
+	if err != nil {
+		d.renderPageError(w, r, session, "Device Detail", err)
 		return
-	}
-	policies := []policy.Policy{}
-	if d.deps.Policies != nil {
-		policies, err = d.deps.Policies.ListPolicies(r.Context(), d.deps.TenantID)
-		if err != nil {
-			d.renderPageError(w, r, session, "Device Detail", err)
-			return
-		}
 	}
 	groups := []group.Group{}
 	if d.deps.Groups != nil {
-		groups, err = d.deps.Groups.ListGroups(r.Context(), d.deps.TenantID)
+		groups, err = d.deps.Groups.ListActiveGroups(r.Context(), d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Device Detail", err)
 			return
 		}
 	}
-	data := d.deviceDetailPageData(r, session, found, policies, groups, "")
+	data := d.deviceDetailPageData(r, session, &found, policies, groups, "")
 	d.renderForSession(w, r, session, data)
 }
 
@@ -4169,35 +4284,22 @@ func (d *dashboard) deviceEnrollmentQR(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *dashboard) loadDeviceDetail(ctx context.Context, id string) (*device.Device, []policy.Policy, []group.Group, error) {
-	devices, err := d.deps.Devices.ListDevices(ctx, d.deps.TenantID)
+	found, err := d.deps.Devices.GetDevice(ctx, d.deps.TenantID, id)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	var found *device.Device
-	for i := range devices {
-		if devices[i].ID == id {
-			found = &devices[i]
-			break
-		}
-	}
-	if found == nil {
-		return nil, nil, nil, httpx.ErrNotFound
-	}
-	policies := []policy.Policy{}
-	if d.deps.Policies != nil {
-		policies, err = d.deps.Policies.ListPolicies(ctx, d.deps.TenantID)
-		if err != nil {
-			return nil, nil, nil, err
-		}
+	policies, err := d.loadPoliciesForSelect(ctx, firstPolicyID(found.PolicyID))
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	groups := []group.Group{}
 	if d.deps.Groups != nil {
-		groups, err = d.deps.Groups.ListGroups(ctx, d.deps.TenantID)
+		groups, err = d.deps.Groups.ListActiveGroups(ctx, d.deps.TenantID)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 	}
-	return found, policies, groups, nil
+	return &found, policies, groups, nil
 }
 
 func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session, found *device.Device, policies []policy.Policy, groups []group.Group, callout template.HTML) pageData {
@@ -4205,7 +4307,14 @@ func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session,
 	policyMap := policyNameByID(policies)
 	policyID := firstPolicyID(found.PolicyID)
 	if policyID != "" {
-		if rec, ok := policyMap[policyID]; ok {
+		rec, ok := policyMap[policyID]
+		if !ok && d.deps.Policies != nil {
+			if exact, err := d.deps.Policies.GetPolicy(r.Context(), d.deps.TenantID, policyID); err == nil {
+				rec = exact
+				ok = true
+			}
+		}
+		if ok {
 			var b strings.Builder
 			label := rec.Name
 			if strings.TrimSpace(label) == "" {
@@ -4234,6 +4343,10 @@ func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session,
 			label := groupID
 			if rec, ok := groupMap[groupID]; ok && strings.TrimSpace(rec.Name) != "" {
 				label = rec.Name
+			} else if d.deps.Groups != nil {
+				if exact, err := d.deps.Groups.GetGroup(r.Context(), d.deps.TenantID, groupID); err == nil && strings.TrimSpace(exact.Name) != "" {
+					label = exact.Name
+				}
 			}
 			b.WriteString(summaryTextItem("Group", label))
 		}
@@ -4246,16 +4359,31 @@ func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session,
 	deviceKey := firstNonEmpty(found.ID, found.Name)
 	deviceRowID := found.RecordID()
 	if d.deps.Logs != nil {
-		rows, _ := d.deps.Logs.Search(r.Context(), d.deps.TenantID, logs.SearchFilter{DeviceID: deviceKey, Limit: 10})
-		body += "<section class=\"panel\"><h2>Recent logs</h2>" + pre(rows) + "</section>"
+		page, params := listPaginationParamsForKeys(r, "logsPage", "logsLimit", pagination.DefaultLimit)
+		limit := params.Limit - 1
+		rows, err := d.deps.Logs.Search(r.Context(), d.deps.TenantID, logs.SearchFilter{DeviceID: deviceKey, Limit: params.Limit, Offset: params.Offset, Pagination: params})
+		if err == nil {
+			items, hasNext := paginateItems(rows, limit)
+			body += `<details class="panel"><summary><h2 style="margin:0;border:0;padding:0;">Recent logs</h2></summary><div class="panel-body">` + string(withPager(template.HTML(pre(items)), pagerHTMLForKeys(r, "logsPage", "logsLimit", page, limit, hasNext))) + `</div></details>`
+		}
 	}
 	if d.deps.DeviceInfo != nil {
-		rows, _ := d.deps.DeviceInfo.Search(r.Context(), d.deps.TenantID, deviceinfo.SearchFilter{DeviceID: deviceKey, Limit: 10})
-		body += "<section class=\"panel\"><h2>Recent device info</h2>" + pre(rows) + "</section>"
+		page, params := listPaginationParamsForKeys(r, "deviceInfoPage", "deviceInfoLimit", pagination.DefaultLimit)
+		limit := params.Limit - 1
+		rows, err := d.deps.DeviceInfo.Search(r.Context(), d.deps.TenantID, deviceinfo.SearchFilter{DeviceID: deviceKey, Limit: params.Limit, Offset: params.Offset, Pagination: params})
+		if err == nil {
+			items, hasNext := paginateItems(rows, limit)
+			body += `<details class="panel"><summary><h2 style="margin:0;border:0;padding:0;">Recent device info</h2></summary><div class="panel-body">` + string(withPager(template.HTML(pre(items)), pagerHTMLForKeys(r, "deviceInfoPage", "deviceInfoLimit", page, limit, hasNext))) + `</div></details>`
+		}
 	}
 	if d.deps.Commands != nil {
-		rows, _ := d.deps.Commands.ListPending(r.Context(), d.deps.TenantID, deviceRowID)
-		body += "<section class=\"panel\"><h2>Pending commands</h2>" + pre(rows) + "</section>"
+		page, params := listPaginationParamsForKeys(r, "commandsPage", "commandsLimit", pagination.DefaultLimit)
+		limit := params.Limit - 1
+		rows, err := d.deps.Commands.ListPending(r.Context(), d.deps.TenantID, deviceRowID, params)
+		if err == nil {
+			items, hasNext := paginateItems(rows, limit)
+			body += `<details class="panel"><summary><h2 style="margin:0;border:0;padding:0;">Pending commands</h2></summary><div class="panel-body">` + string(withPager(template.HTML(pre(items)), pagerHTMLForKeys(r, "commandsPage", "commandsLimit", page, limit, hasNext))) + `</div></details>`
+		}
 	}
 	if d.deps.PluginManager != nil {
 		actions := d.deps.PluginManager.DeviceActionsFor(session, found.ID)
@@ -4412,20 +4540,9 @@ func (d *dashboard) updateDevice(w http.ResponseWriter, r *http.Request) {
 		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), "device secret rotation is disabled")
 		return
 	}
-	devices, err := d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID)
+	found, err := d.deps.Devices.GetDevice(r.Context(), d.deps.TenantID, r.PathValue("id"))
 	if err != nil {
 		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), err.Error())
-		return
-	}
-	var found *device.Device
-	for i := range devices {
-		if devices[i].ID == r.PathValue("id") {
-			found = &devices[i]
-			break
-		}
-	}
-	if found == nil {
-		d.redirectError(w, r, "/admin/devices/"+r.PathValue("id"), "not found")
 		return
 	}
 	if found.Status == device.StatusRetired || found.Status == device.StatusWiped {
@@ -4459,17 +4576,25 @@ func (d *dashboard) apps(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := d.deps.Apps.ListApps(r.Context(), d.deps.TenantID)
+	page, params := listPaginationParams(r, pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, err := d.deps.Apps.ListApps(r.Context(), d.deps.TenantID, params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Apps", err)
 		return
 	}
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
+	}
 	versions := map[string][]apps.Version{}
 	for _, item := range items {
-		rows, _ := d.deps.Apps.ListVersions(r.Context(), d.deps.TenantID, item.ID)
-		versions[item.ID] = rows
+		latest, err := d.deps.Apps.GetLatestPublishedVersion(r.Context(), d.deps.TenantID, item.ID)
+		if err == nil {
+			versions[item.ID] = []apps.Version{latest}
+		}
 	}
-	d.renderForSession(w, r, session, pageData{Title: "Apps", Forms: []formData{managedAppForm("/admin/apps/create")}, Items: appsTable(items, versions)})
+	d.renderForSession(w, r, session, pageData{Title: "Apps", Forms: []formData{managedAppForm("/admin/apps/create")}, Items: withPager(appsTable(items, versions), pagerHTML(r, page, limit, hasNext))})
 }
 
 func (d *dashboard) appDetail(w http.ResponseWriter, r *http.Request) {
@@ -4481,32 +4606,42 @@ func (d *dashboard) appDetail(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	found, versions, err := d.loadAppDetail(r.Context(), r.PathValue("id"))
+	found, versions, latest, err := d.loadAppDetail(r.Context(), r.PathValue("id"), r)
 	if err != nil {
 		d.renderPageError(w, r, session, "App Detail", err)
 		return
 	}
-	data := d.appDetailPageData(session, found, versions)
+	data := d.appDetailPageData(r, session, found, versions, latest)
 	d.renderForSession(w, r, session, data)
 }
 
-func (d *dashboard) loadAppDetail(ctx context.Context, id string) (*apps.App, []apps.Version, error) {
+func (d *dashboard) loadAppDetail(ctx context.Context, id string, r *http.Request) (*apps.App, []apps.Version, *apps.Version, error) {
 	found, err := d.deps.Apps.GetApp(ctx, d.deps.TenantID, id)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	versions, err := d.deps.Apps.ListVersions(ctx, d.deps.TenantID, found.ID)
+	_, params := listPaginationParamsForKeys(r, "versionsPage", "versionsLimit", pagination.DefaultLimit)
+	versions, err := d.deps.Apps.ListVersions(ctx, d.deps.TenantID, found.ID, params)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return &found, versions, nil
+	latest, err := d.deps.Apps.GetLatestPublishedVersion(ctx, d.deps.TenantID, found.ID)
+	if err != nil {
+		if err == httpx.ErrNotFound {
+			return &found, versions, nil, nil
+		}
+		return nil, nil, nil, err
+	}
+	return &found, versions, &latest, nil
 }
 
-func (d *dashboard) appDetailPageData(session *auth.Session, found *apps.App, versions []apps.Version) pageData {
-	latest := appLatestPublishedVersion(versions)
-	body := "<section class=\"panel\"><h2>Current app</h2>" + appSummary(*found, latest) + "</section>"
+func (d *dashboard) appDetailPageData(r *http.Request, session *auth.Session, found *apps.App, versions []apps.Version, latest *apps.Version) pageData {
+	page, params := listPaginationParamsForKeys(r, "versionsPage", "versionsLimit", pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, hasNext := paginateItems(versions, limit)
+	body := "<section class=\"panel\"><h2>Current app</h2>" + string(appSummary(*found, latest)) + "</section>"
 	if len(versions) > 0 {
-		body += "<section class=\"panel\"><h2>Versions</h2>" + appVersionsTable(versions) + "</section>"
+		body += "<section class=\"panel\"><h2>Versions</h2>" + string(withPager(appVersionsTable(items), pagerHTMLForKeys(r, "versionsPage", "versionsLimit", page, limit, hasNext))) + "</section>"
 	}
 	data := pageData{
 		Title:    "App Detail",
@@ -4545,12 +4680,11 @@ func (d *dashboard) downloadApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	found, versions, err := d.loadAppDetail(r.Context(), r.PathValue("id"))
+	found, _, latest, err := d.loadAppDetail(r.Context(), r.PathValue("id"), r)
 	if err != nil {
 		d.renderPageError(w, r, session, "App Detail", err)
 		return
 	}
-	latest := appLatestPublishedVersion(versions)
 	if latest == nil {
 		http.NotFound(w, r)
 		return
@@ -4663,30 +4797,27 @@ func (d *dashboard) createApp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *dashboard) findManagedAppForCreate(ctx context.Context, appReq apps.AppUpsert, versionCode int64, checksumValue string) (apps.App, *apps.Version, bool, error) {
-	items, err := d.deps.Apps.ListApps(ctx, d.deps.TenantID)
+	item, err := d.deps.Apps.GetAppByPackageName(ctx, d.deps.TenantID, appReq.PackageName)
 	if err != nil {
-		return apps.App{}, nil, false, err
-	}
-	for _, item := range items {
-		if item.PackageName != appReq.PackageName {
-			continue
+		if err != httpx.ErrNotFound {
+			return apps.App{}, nil, false, err
 		}
+	}
+	if item.ID != "" {
 		if item.Status != apps.StatusActive {
 			return apps.App{}, nil, false, fmt.Errorf("app package already exists")
 		}
-		versions, err := d.deps.Apps.ListVersions(ctx, d.deps.TenantID, item.ID)
+		version, err := d.deps.Apps.GetVersionByCode(ctx, d.deps.TenantID, item.ID, versionCode)
 		if err != nil {
+			if err == httpx.ErrNotFound {
+				return item, nil, true, nil
+			}
 			return apps.App{}, nil, false, err
 		}
-		for _, version := range versions {
-			if version.VersionCode == versionCode {
-				if version.Checksum != checksumValue {
-					return apps.App{}, nil, false, fmt.Errorf("app version already exists with different content")
-				}
-				return item, &version, true, nil
-			}
+		if version.Checksum != checksumValue {
+			return apps.App{}, nil, false, fmt.Errorf("app version already exists with different content")
 		}
-		return item, nil, true, nil
+		return item, &version, true, nil
 	}
 	rec, err := d.deps.Apps.CreateApp(ctx, d.deps.TenantID, appReq)
 	if err != nil {
@@ -4757,12 +4888,18 @@ func (d *dashboard) managedFiles(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := d.deps.ManagedFiles.ListManagedFiles(r.Context(), d.deps.TenantID)
+	page, params := listPaginationParams(r, pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, err := d.deps.ManagedFiles.ListManagedFiles(r.Context(), d.deps.TenantID, params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Managed Files", err)
 		return
 	}
-	d.renderForSession(w, r, session, pageData{Title: "Managed Files", Forms: []formData{{Title: "Upload managed file", Action: "/admin/managed-files/create", EncType: "multipart/form-data", Fields: []fieldData{{Name: "path", Label: "Device path", Type: "text", Required: true, Placeholder: "/sdcard/xmdm/device-config.txt"}, {Name: "replaceVariables", Label: "Replace variables", Type: "checkbox", Value: "on"}, {Name: "file", Label: "File", Type: "file", Required: true}}, Submit: "Upload managed file"}}, Items: managedFilesTable(items)})
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
+	}
+	d.renderForSession(w, r, session, pageData{Title: "Managed Files", Forms: []formData{{Title: "Upload managed file", Action: "/admin/managed-files/create", EncType: "multipart/form-data", Fields: []fieldData{{Name: "path", Label: "Device path", Type: "text", Required: true, Placeholder: "/sdcard/xmdm/device-config.txt"}, {Name: "replaceVariables", Label: "Replace variables", Type: "checkbox", Value: "on"}, {Name: "file", Label: "File", Type: "file", Required: true}}, Submit: "Upload managed file"}}, Items: withPager(managedFilesTable(items), pagerHTML(r, page, limit, hasNext))})
 }
 
 func (d *dashboard) managedFileDetail(w http.ResponseWriter, r *http.Request) {
@@ -4926,12 +5063,18 @@ func (d *dashboard) certificates(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := d.deps.Certificates.ListCertificates(r.Context(), d.deps.TenantID)
+	page, params := listPaginationParams(r, pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, err := d.deps.Certificates.ListCertificates(r.Context(), d.deps.TenantID, params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Certificates", err)
 		return
 	}
-	d.renderForSession(w, r, session, pageData{Title: "Certificates", Forms: []formData{certificateUploadForm("/admin/certificates/create")}, Items: certificatesTable(items)})
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
+	}
+	d.renderForSession(w, r, session, pageData{Title: "Certificates", Forms: []formData{certificateUploadForm("/admin/certificates/create")}, Items: withPager(certificatesTable(items), pagerHTML(r, page, limit, hasNext))})
 }
 
 func (d *dashboard) certificateDetail(w http.ResponseWriter, r *http.Request) {
@@ -5092,7 +5235,7 @@ func (d *dashboard) commands(w http.ResponseWriter, r *http.Request) {
 	devices := []device.Device{}
 	if d.deps.Devices != nil {
 		var err error
-		devices, err = d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID)
+		devices, err = d.deps.Devices.ListActiveDevices(r.Context(), d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Commands", err)
 			return
@@ -5105,22 +5248,28 @@ func (d *dashboard) commands(w http.ResponseWriter, r *http.Request) {
 	groups := []group.Group{}
 	if d.deps.Groups != nil {
 		var err error
-		groups, err = d.deps.Groups.ListGroups(r.Context(), d.deps.TenantID)
+		groups, err = d.deps.Groups.ListActiveGroups(r.Context(), d.deps.TenantID)
 		if err != nil {
 			d.renderPageError(w, r, session, "Commands", err)
 			return
 		}
 	}
-	items, err := d.deps.Commands.ListRecent(r.Context(), d.deps.TenantID, queryLimit(r, 25))
+	page, params := listPaginationParams(r, pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, err := d.deps.Commands.ListRecent(r.Context(), d.deps.TenantID, params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Commands", err)
 		return
+	}
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
 	}
 	d.renderForSession(w, r, session, pageData{
 		Title:    "Commands",
 		Subtitle: "Send commands to individual devices or device groups. Broadcast is disabled from the dashboard.",
 		Forms:    []formData{{Title: "Send command", Action: "/admin/commands/create", Fields: commandFields(session, d.deps.PluginManager, devices, groups), Submit: "Send command"}},
-		Items:    commandsTable(items, deviceMap),
+		Items:    withPager(commandsTable(items, deviceMap), pagerHTML(r, page, limit, hasNext)),
 	})
 }
 
@@ -5143,23 +5292,18 @@ func (d *dashboard) commandDetail(w http.ResponseWriter, r *http.Request) {
 		d.renderPageError(w, r, session, "Commands", err)
 		return
 	}
-	devices := []device.Device{}
+	deviceRec := device.Device{}
 	if d.deps.Devices != nil {
-		var err error
-		devices, err = d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID)
-		if err != nil {
+		deviceRec, err = d.deps.Devices.GetDevice(r.Context(), d.deps.TenantID, found.DeviceID)
+		if err != nil && err != httpx.ErrNotFound {
 			d.renderPageError(w, r, session, "Commands", err)
 			return
 		}
 	}
-	deviceMap := make(map[string]device.Device, len(devices))
-	for _, item := range devices {
-		deviceMap[item.ID] = item
-	}
 	d.renderForSession(w, r, session, pageData{
 		Title:    "Command Detail",
 		Subtitle: "Inspect the queued command row, payload, delivery state, and device acknowledgement result.",
-		Items:    commandSummary(found, deviceMap[found.DeviceID]),
+		Items:    commandSummary(found, deviceRec),
 	})
 }
 
@@ -5205,7 +5349,19 @@ func (d *dashboard) logs(w http.ResponseWriter, r *http.Request) {
 		d.renderPageError(w, r, session, "Logs", err)
 		return
 	}
-	d.renderForSession(w, r, session, pageData{Title: "Logs", Items: searchAndTable("/admin/logs", []fieldData{{Name: "deviceId", Label: "Device ID", Type: "text", Value: r.URL.Query().Get("deviceId")}, {Name: "source", Label: "Source", Type: "text", Value: r.URL.Query().Get("source")}, {Name: "level", Label: "Level", Type: "text", Value: r.URL.Query().Get("level")}, {Name: "q", Label: "Query", Type: "text", Value: r.URL.Query().Get("q")}, {Name: "limit", Label: "Limit", Type: "number", Value: firstNonEmpty(r.URL.Query().Get("limit"), "25")}}, logsTable(items))})
+	limit := filter.Pagination.Limit - 1
+	if limit <= 0 {
+		limit = filter.Limit
+	}
+	if limit <= 0 {
+		limit = pagination.DefaultLimit
+	}
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
+	}
+	page := pagination.Page(filter.Pagination.Offset, limit)
+	d.renderForSession(w, r, session, pageData{Title: "Logs", Items: withPager(searchAndTable("/admin/logs", []fieldData{{Name: "deviceId", Label: "Device ID", Type: "text", Value: r.URL.Query().Get("deviceId")}, {Name: "source", Label: "Source", Type: "text", Value: r.URL.Query().Get("source")}, {Name: "level", Label: "Level", Type: "text", Value: r.URL.Query().Get("level")}, {Name: "q", Label: "Query", Type: "text", Value: r.URL.Query().Get("q")}, {Name: "limit", Label: "Limit", Type: "number", Value: firstNonEmpty(r.URL.Query().Get("limit"), strconv.Itoa(pagination.DefaultLimit))}}, logsTable(items)), pagerHTML(r, page, limit, hasNext))})
 }
 
 func (d *dashboard) audit(w http.ResponseWriter, r *http.Request) {
@@ -5213,12 +5369,18 @@ func (d *dashboard) audit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := d.deps.Audit.List(r.Context(), d.deps.TenantID)
+	page, params := listPaginationParams(r, pagination.DefaultLimit)
+	limit := params.Limit - 1
+	items, err := d.deps.Audit.List(r.Context(), d.deps.TenantID, params)
 	if err != nil {
 		d.renderPageError(w, r, session, "Audit", err)
 		return
 	}
-	d.renderForSession(w, r, session, pageData{Title: "Audit", Items: auditTable(items)})
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
+	}
+	d.renderForSession(w, r, session, pageData{Title: "Audit", Items: withPager(auditTable(items), pagerHTML(r, page, limit, hasNext))})
 }
 
 func (d *dashboard) requireRead(w http.ResponseWriter, r *http.Request, title string) (*auth.Session, bool) {
@@ -5608,15 +5770,37 @@ func certificateMimeType(filename string, content []byte) string {
 }
 
 func logFilterFromQuery(r *http.Request) (logs.SearchFilter, error) {
-	return logs.SearchFilter{DeviceID: r.URL.Query().Get("deviceId"), Source: r.URL.Query().Get("source"), Level: r.URL.Query().Get("level"), Query: r.URL.Query().Get("q"), Limit: queryLimit(r, 25)}, nil
+	_, pageParams := listPaginationParams(r, pagination.DefaultLimit)
+	limit := pageParams.Limit - 1
+	return logs.SearchFilter{
+		DeviceID:   r.URL.Query().Get("deviceId"),
+		Source:     r.URL.Query().Get("source"),
+		Level:      r.URL.Query().Get("level"),
+		Query:      r.URL.Query().Get("q"),
+		Limit:      limit,
+		Offset:     pageParams.Offset,
+		Pagination: pagination.Params{Limit: pageParams.Limit, Offset: pageParams.Offset},
+	}, nil
 }
 
 func deviceInfoFilterFromQuery(r *http.Request) (deviceinfo.SearchFilter, error) {
-	return deviceinfo.SearchFilter{DeviceID: r.URL.Query().Get("deviceId"), Query: r.URL.Query().Get("q"), Limit: queryLimit(r, 25)}, nil
+	_, pageParams := listPaginationParams(r, pagination.DefaultLimit)
+	limit := pageParams.Limit - 1
+	return deviceinfo.SearchFilter{
+		DeviceID:   r.URL.Query().Get("deviceId"),
+		Query:      r.URL.Query().Get("q"),
+		Limit:      limit,
+		Offset:     pageParams.Offset,
+		Pagination: pagination.Params{Limit: pageParams.Limit, Offset: pageParams.Offset},
+	}, nil
 }
 
 func queryLimit(r *http.Request, fallback int) int {
-	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	return queryLimitForKey(r, "limit", fallback)
+}
+
+func queryLimitForKey(r *http.Request, key string, fallback int) int {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
 	if raw == "" {
 		return fallback
 	}
@@ -5625,6 +5809,111 @@ func queryLimit(r *http.Request, fallback int) int {
 		return fallback
 	}
 	return limit
+}
+
+func queryPage(r *http.Request, fallback int) int {
+	return queryPageForKey(r, "page", fallback)
+}
+
+func queryPageForKey(r *http.Request, key string, fallback int) int {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return fallback
+	}
+	page, err := strconv.Atoi(raw)
+	if err != nil || page <= 0 {
+		return fallback
+	}
+	return page
+}
+
+func listPaginationParams(r *http.Request, fallbackLimit int) (int, pagination.Params) {
+	return listPaginationParamsForKeys(r, "page", "limit", fallbackLimit)
+}
+
+func listPaginationParamsForKeys(r *http.Request, pageKey, limitKey string, fallbackLimit int) (int, pagination.Params) {
+	limit := queryLimitForKey(r, limitKey, fallbackLimit)
+	page := queryPageForKey(r, pageKey, 1)
+	limit = pagination.Normalize(pagination.Params{Limit: limit}, fallbackLimit, paginationLimitCap(limitKey)).Limit
+	return page, pagination.Params{Limit: limit + 1, Offset: pagination.Offset(page, limit)}
+}
+
+func paginationLimitCap(limitKey string) int {
+	switch limitKey {
+	case "logsLimit", "deviceInfoLimit":
+		return 500
+	default:
+		return 100
+	}
+}
+
+func pagerHTML(r *http.Request, page, limit int, hasNext bool) template.HTML {
+	return pagerHTMLForKeys(r, "page", "limit", page, limit, hasNext)
+}
+
+func pagerHTMLForKeys(r *http.Request, pageKey, limitKey string, page, limit int, hasNext bool) template.HTML {
+	if page <= 1 && !hasNext {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<nav class="pager">`)
+	if page > 1 {
+		prevQuery := cloneQuery(r.URL.Query())
+		if page-1 <= 1 {
+			prevQuery.Del(pageKey)
+		} else {
+			prevQuery.Set(pageKey, strconv.Itoa(page-1))
+		}
+		if limit > 0 {
+			prevQuery.Set(limitKey, strconv.Itoa(limit))
+		}
+		prevURL := *r.URL
+		prevURL.RawQuery = prevQuery.Encode()
+		b.WriteString(`<a href="` + escAttr(prevURL.String()) + `">Previous</a>`)
+	} else {
+		b.WriteString(`<span class="pager-disabled">Previous</span>`)
+	}
+	b.WriteString(`<span>Page ` + strconv.Itoa(page) + `</span>`)
+	if hasNext {
+		nextQuery := cloneQuery(r.URL.Query())
+		nextQuery.Set(pageKey, strconv.Itoa(page+1))
+		if limit > 0 {
+			nextQuery.Set(limitKey, strconv.Itoa(limit))
+		}
+		nextURL := *r.URL
+		nextURL.RawQuery = nextQuery.Encode()
+		b.WriteString(`<a href="` + escAttr(nextURL.String()) + `">Next</a>`)
+	} else {
+		b.WriteString(`<span class="pager-disabled">Next</span>`)
+	}
+	b.WriteString(`</nav>`)
+	return template.HTML(b.String())
+}
+
+func withPager(content template.HTML, pager template.HTML) template.HTML {
+	if strings.TrimSpace(string(pager)) == "" {
+		return content
+	}
+	return template.HTML(string(content) + string(pager))
+}
+
+func paginateItems[T any](items []T, limit int) ([]T, bool) {
+	if limit <= 0 {
+		return items, false
+	}
+	hasNext := len(items) > limit
+	if hasNext {
+		items = items[:limit]
+	}
+	return items, hasNext
+}
+
+func cloneQuery(values url.Values) url.Values {
+	out := make(url.Values, len(values))
+	for key, items := range values {
+		out[key] = append([]string(nil), items...)
+	}
+	return out
 }
 
 func firstNonEmpty(values ...string) string {
@@ -6043,19 +6332,6 @@ func groupNameByID(items []group.Group) map[string]group.Group {
 	return groups
 }
 
-func groupDevicesFor(groupID string, items []device.Device) []device.Device {
-	devices := make([]device.Device, 0)
-	for _, item := range items {
-		for _, assigned := range item.GroupIDs {
-			if strings.TrimSpace(assigned) == groupID {
-				devices = append(devices, item)
-				break
-			}
-		}
-	}
-	return devices
-}
-
 func policyNameByID(items []policy.Policy) map[string]policy.Policy {
 	policies := make(map[string]policy.Policy, len(items))
 	for _, item := range items {
@@ -6068,6 +6344,26 @@ func containsString(items []string, value string) bool {
 	value = strings.TrimSpace(value)
 	for _, item := range items {
 		if strings.TrimSpace(item) == value {
+			return true
+		}
+	}
+	return false
+}
+
+func containsRoleID(items []identity.Role, id string) bool {
+	id = strings.TrimSpace(id)
+	for _, item := range items {
+		if strings.TrimSpace(item.ID) == id {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPolicyID(items []policy.Policy, id string) bool {
+	id = strings.TrimSpace(id)
+	for _, item := range items {
+		if strings.TrimSpace(item.ID) == id {
 			return true
 		}
 	}
@@ -6118,6 +6414,60 @@ func roleNameByID(items []identity.Role) map[string]identity.Role {
 		roles[item.ID] = item
 	}
 	return roles
+}
+
+func roleIDsForUsers(items []identity.User) []string {
+	seen := map[string]struct{}{}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		id := strings.TrimSpace(item.RoleID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func policyIDsForDevices(items []device.Device) []string {
+	seen := map[string]struct{}{}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.PolicyID == nil {
+			continue
+		}
+		id := strings.TrimSpace(*item.PolicyID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func uniqueStrings(items []string) []string {
+	seen := map[string]struct{}{}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		id := strings.TrimSpace(item)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func statusBadge(status string) string {
@@ -6486,7 +6836,7 @@ func auditTable(items []audit.Event) template.HTML {
 	b.WriteString(`<table class="audit-table"><colgroup><col class="audit-created"><col class="audit-actor"><col class="audit-action"><col class="audit-resource"><col class="audit-details"></colgroup><thead><tr><th class="audit-created">Created</th><th class="audit-actor">Actor</th><th class="audit-action">Action</th><th class="audit-resource">Resource</th><th class="audit-details">Details</th></tr></thead><tbody>`)
 	for _, item := range items {
 		b.WriteString(`<tr>`)
-		b.WriteString(`<td class="audit-created">` + esc(item.CreatedAt.Format(time.RFC3339)) + `</td>`)
+		b.WriteString(`<td class="audit-created">` + esc(formatDashboardTime(item.CreatedAt)) + `</td>`)
 		b.WriteString(`<td class="audit-actor">` + esc(item.Actor) + `</td>`)
 		b.WriteString(`<td class="audit-action">` + esc(item.Action) + `</td>`)
 		b.WriteString(`<td class="audit-resource">` + esc(item.ResourceType+"/"+item.ResourceID) + `</td>`)
@@ -6528,10 +6878,10 @@ func policyFields(item policy.Policy) []fieldData {
 	}
 }
 
-func (d *dashboard) policyDetailPageData(session *auth.Session, csrf string, found policy.Policy, items []apps.App, assignments []policy.PolicyApp, certificatesList []certificates.Certificate, certificateAssignments []policy.PolicyCertificate, managedFiles []managedfiles.ManagedFile, managedFileAssignments []policy.PolicyManagedFile) pageData {
-	managedApps := policyManagedAppsSummary(found.ID, items, assignments, csrf, d.canWrite(session) && found.Status != "retired")
-	managedCertificates := policyManagedCertificatesSummary(found.ID, certificatesList, certificateAssignments, csrf, d.canWrite(session) && found.Status != "retired")
-	managedFileBindings := policyManagedFilesSummary(found.ID, managedFiles, managedFileAssignments, csrf, d.canWrite(session) && found.Status != "retired")
+func (d *dashboard) policyDetailPageData(r *http.Request, session *auth.Session, csrf string, found policy.Policy, items []apps.App, assignments []policy.PolicyApp, certificatesList []certificates.Certificate, certificateAssignments []policy.PolicyCertificate, managedFiles []managedfiles.ManagedFile, managedFileAssignments []policy.PolicyManagedFile) pageData {
+	managedApps := policyManagedAppsSummary(r, found.ID, items, assignments, csrf, d.canWrite(session) && found.Status != "retired")
+	managedCertificates := policyManagedCertificatesSummary(r, found.ID, certificatesList, certificateAssignments, csrf, d.canWrite(session) && found.Status != "retired")
+	managedFileBindings := policyManagedFilesSummary(r, found.ID, managedFiles, managedFileAssignments, csrf, d.canWrite(session) && found.Status != "retired")
 	data := pageData{
 		Title:    "Policy Detail",
 		Subtitle: "Edit the policy definition, enable managed apps, managed files, and certificates, or retire it from active use.",
@@ -6553,29 +6903,30 @@ func (d *dashboard) policyDetailPageData(session *auth.Session, csrf string, fou
 	return data
 }
 
-func policyManagedAppsSummary(policyID string, items []apps.App, assignments []policy.PolicyApp, csrf string, canWrite bool) template.HTML {
-	activeCount := 0
-	for _, app := range items {
-		if app.Status == apps.StatusActive {
-			activeCount++
-		}
-	}
-	if activeCount == 0 {
-		return template.HTML(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed apps</span><span class="section-heading-meta">0 available</span></h2><p class="muted">No managed apps are available yet.</p></section>`)
-	}
+func policyManagedAppsSummary(r *http.Request, policyID string, items []apps.App, assignments []policy.PolicyApp, csrf string, canWrite bool) template.HTML {
 	assignmentMap := appAssignmentStatusByID(assignments)
+	page, params := listPaginationParamsForKeys(r, "policyAppsPage", "policyAppsLimit", pagination.DefaultLimit)
+	limit := params.Limit - 1
+	rows, hasNext := paginateItems(items, limit)
+	activeCount := 0
 	enabledCount := 0
-	for _, app := range items {
-		if app.Status == apps.StatusActive && assignmentMap[app.ID] {
+	for _, app := range rows {
+		if app.Status != apps.StatusActive {
+			continue
+		}
+		activeCount++
+		if assignmentMap[app.ID] {
 			enabledCount++
 		}
 	}
 	var b strings.Builder
 	b.WriteString(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed apps</span><span class="section-heading-meta">` + strconv.Itoa(enabledCount) + ` enabled / ` + strconv.Itoa(activeCount) + ` available</span></h2><table><thead><tr><th>Name</th><th>Package</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
-	for _, app := range items {
+	rendered := 0
+	for _, app := range rows {
 		if app.Status != apps.StatusActive {
 			continue
 		}
+		rendered++
 		enabled := assignmentMap[app.ID]
 		label := app.Name
 		if strings.TrimSpace(label) == "" {
@@ -6587,33 +6938,39 @@ func policyManagedAppsSummary(policyID string, items []apps.App, assignments []p
 		}
 		b.WriteString(`</td></tr>`)
 	}
-	b.WriteString(`</tbody></table></section>`)
+	if rendered == 0 {
+		b.WriteString(`<tr><td colspan="5" class="muted">No active managed apps on this page.</td></tr>`)
+	}
+	b.WriteString(`</tbody></table>`)
+	b.WriteString(string(pagerHTMLForKeys(r, "policyAppsPage", "policyAppsLimit", page, limit, hasNext)))
+	b.WriteString(`</section>`)
 	return template.HTML(b.String())
 }
 
-func policyManagedCertificatesSummary(policyID string, items []certificates.Certificate, assignments []policy.PolicyCertificate, csrf string, canWrite bool) template.HTML {
-	activeCount := 0
-	for _, cert := range items {
-		if cert.Status == certificates.StatusActive {
-			activeCount++
-		}
-	}
-	if activeCount == 0 {
-		return template.HTML(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed certificates</span><span class="section-heading-meta">0 available</span></h2><p class="muted">No managed certificates are available yet.</p></section>`)
-	}
+func policyManagedCertificatesSummary(r *http.Request, policyID string, items []certificates.Certificate, assignments []policy.PolicyCertificate, csrf string, canWrite bool) template.HTML {
 	assignmentMap := certificateAssignmentStatusByID(assignments)
+	page, params := listPaginationParamsForKeys(r, "policyCertificatesPage", "policyCertificatesLimit", pagination.DefaultLimit)
+	limit := params.Limit - 1
+	rows, hasNext := paginateItems(items, limit)
+	activeCount := 0
 	enabledCount := 0
-	for _, cert := range items {
-		if cert.Status == certificates.StatusActive && assignmentMap[cert.ID] {
+	for _, cert := range rows {
+		if cert.Status != certificates.StatusActive {
+			continue
+		}
+		activeCount++
+		if assignmentMap[cert.ID] {
 			enabledCount++
 		}
 	}
 	var b strings.Builder
 	b.WriteString(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed certificates</span><span class="section-heading-meta">` + strconv.Itoa(enabledCount) + ` enabled / ` + strconv.Itoa(activeCount) + ` available</span></h2><table><thead><tr><th>Name</th><th>Artifact</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
-	for _, cert := range items {
+	rendered := 0
+	for _, cert := range rows {
 		if cert.Status != certificates.StatusActive {
 			continue
 		}
+		rendered++
 		enabled := assignmentMap[cert.ID]
 		label := cert.Name
 		if strings.TrimSpace(label) == "" {
@@ -6629,33 +6986,39 @@ func policyManagedCertificatesSummary(policyID string, items []certificates.Cert
 		}
 		b.WriteString(`</td></tr>`)
 	}
-	b.WriteString(`</tbody></table></section>`)
+	if rendered == 0 {
+		b.WriteString(`<tr><td colspan="5" class="muted">No active managed certificates on this page.</td></tr>`)
+	}
+	b.WriteString(`</tbody></table>`)
+	b.WriteString(string(pagerHTMLForKeys(r, "policyCertificatesPage", "policyCertificatesLimit", page, limit, hasNext)))
+	b.WriteString(`</section>`)
 	return template.HTML(b.String())
 }
 
-func policyManagedFilesSummary(policyID string, items []managedfiles.ManagedFile, assignments []policy.PolicyManagedFile, csrf string, canWrite bool) template.HTML {
-	activeCount := 0
-	for _, item := range items {
-		if item.Status == managedfiles.StatusActive {
-			activeCount++
-		}
-	}
-	if activeCount == 0 {
-		return template.HTML(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed files</span><span class="section-heading-meta">0 available</span></h2><p class="muted">No managed files are available yet.</p></section>`)
-	}
+func policyManagedFilesSummary(r *http.Request, policyID string, items []managedfiles.ManagedFile, assignments []policy.PolicyManagedFile, csrf string, canWrite bool) template.HTML {
 	assignmentMap := managedFileAssignmentStatusByID(assignments)
+	page, params := listPaginationParamsForKeys(r, "policyManagedFilesPage", "policyManagedFilesLimit", pagination.DefaultLimit)
+	limit := params.Limit - 1
+	rows, hasNext := paginateItems(items, limit)
+	activeCount := 0
 	enabledCount := 0
-	for _, item := range items {
-		if item.Status == managedfiles.StatusActive && assignmentMap[item.ID] {
+	for _, item := range rows {
+		if item.Status != managedfiles.StatusActive {
+			continue
+		}
+		activeCount++
+		if assignmentMap[item.ID] {
 			enabledCount++
 		}
 	}
 	var b strings.Builder
 	b.WriteString(`<section class="panel policy-detail-section"><h2 class="section-heading"><span>Managed files</span><span class="section-heading-meta">` + strconv.Itoa(enabledCount) + ` enabled / ` + strconv.Itoa(activeCount) + ` available</span></h2><table><thead><tr><th>Path</th><th>File</th><th>Template</th><th>Status</th><th>Policy state</th><th>Action</th></tr></thead><tbody>`)
-	for _, item := range items {
+	rendered := 0
+	for _, item := range rows {
 		if item.Status != managedfiles.StatusActive {
 			continue
 		}
+		rendered++
 		enabled := assignmentMap[item.ID]
 		path := item.Path
 		if strings.TrimSpace(path) == "" {
@@ -6671,7 +7034,12 @@ func policyManagedFilesSummary(policyID string, items []managedfiles.ManagedFile
 		}
 		b.WriteString(`</td></tr>`)
 	}
-	b.WriteString(`</tbody></table></section>`)
+	if rendered == 0 {
+		b.WriteString(`<tr><td colspan="6" class="muted">No active managed files on this page.</td></tr>`)
+	}
+	b.WriteString(`</tbody></table>`)
+	b.WriteString(string(pagerHTMLForKeys(r, "policyManagedFilesPage", "policyManagedFilesLimit", page, limit, hasNext)))
+	b.WriteString(`</section>`)
 	return template.HTML(b.String())
 }
 
@@ -6991,25 +7359,21 @@ func latestPublishedAgentAppVersion(ctx context.Context, store apps.Repository, 
 		return apps.App{}, apps.Version{}, httpx.ErrNotFound
 	}
 	packageName := firstNonEmpty(strings.TrimSpace(agentAppPackage), defaultAgentAppPackage)
-	items, err := store.ListApps(ctx, tenantID)
+	item, err := store.GetAppByPackageName(ctx, tenantID, packageName)
 	if err != nil {
 		return apps.App{}, apps.Version{}, err
 	}
-	for _, item := range items {
-		if item.Status != apps.StatusActive || item.PackageName != packageName {
-			continue
-		}
-		versions, err := store.ListVersions(ctx, tenantID, item.ID)
-		if err != nil {
-			return apps.App{}, apps.Version{}, err
-		}
-		latest := appLatestPublishedVersion(versions)
-		if latest == nil || latest.ArtifactID == nil || strings.TrimSpace(latest.Checksum) == "" {
-			return apps.App{}, apps.Version{}, httpx.ErrNotFound
-		}
-		return item, *latest, nil
+	if item.Status != apps.StatusActive {
+		return apps.App{}, apps.Version{}, httpx.ErrNotFound
 	}
-	return apps.App{}, apps.Version{}, httpx.ErrNotFound
+	latest, err := store.GetLatestPublishedVersion(ctx, tenantID, item.ID)
+	if err != nil {
+		return apps.App{}, apps.Version{}, err
+	}
+	if latest.ArtifactID == nil || strings.TrimSpace(latest.Checksum) == "" {
+		return apps.App{}, apps.Version{}, httpx.ErrNotFound
+	}
+	return item, latest, nil
 }
 
 func deviceEnrollmentQRForm(deviceID string) formData {

@@ -8,6 +8,7 @@ import (
 	"xmdm/server/internal/auth"
 	device "xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 )
 
 func Register(mux httpx.Router, svc *auth.Service, store device.Repository, auditStore audit.Store, tenantID string) {
@@ -16,8 +17,8 @@ func Register(mux httpx.Router, svc *auth.Service, store device.Repository, audi
 		ReadPerm:  auth.PermissionDevicesRead,
 		WritePerm: auth.PermissionDevicesWrite,
 		Decode:    decodeDeviceRequest,
-		List: func(ctx context.Context) ([]device.Device, error) {
-			return store.ListDevices(ctx, tenantID)
+		List: func(ctx context.Context, params pagination.Params) ([]device.Device, error) {
+			return store.ListDevices(ctx, tenantID, params)
 		},
 		Create: func(ctx context.Context, req device.DeviceUpsert) (device.Device, error) {
 			return store.CreateDevice(ctx, tenantID, req)

@@ -8,6 +8,7 @@ import (
 	"xmdm/server/internal/certificates"
 	files "xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -69,15 +70,17 @@ func (s *Store) CreateCertificate(ctx context.Context, tenantID string, req cert
 	return rec, nil
 }
 
-func (s *Store) ListCertificates(ctx context.Context, tenantID string) ([]certificates.Certificate, error) {
+func (s *Store) ListCertificates(ctx context.Context, tenantID string, page pagination.Params) ([]certificates.Certificate, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT c.id::text, c.tenant_id::text, c.name, c.status, c.created_at, c.updated_at, c.deleted_at, c.artifact_id::text, c.checksum,
 		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
 		 FROM certificates c
 		 JOIN artifacts a ON a.tenant_id = c.tenant_id AND a.id = c.artifact_id
 		 WHERE c.tenant_id = $1
-		 ORDER BY c.created_at`,
-		tenantID,
+		 ORDER BY c.created_at DESC, c.id DESC
+		 LIMIT $2 OFFSET $3`,
+		tenantID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -98,15 +101,33 @@ func (s *Store) ListCertificates(ctx context.Context, tenantID string) ([]certif
 	return items, nil
 }
 
-func (s *Store) ListActiveCertificates(ctx context.Context, tenantID string) ([]certificates.Certificate, error) {
+func (s *Store) GetOverviewStats(ctx context.Context, tenantID string) (certificates.OverviewStats, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT
+			COUNT(*)::int,
+			COUNT(*) FILTER (WHERE status = $2)::int
+		 FROM certificates
+		 WHERE tenant_id = $1`,
+		tenantID, certificates.StatusActive,
+	)
+	var stats certificates.OverviewStats
+	if err := row.Scan(&stats.Total, &stats.Active); err != nil {
+		return certificates.OverviewStats{}, err
+	}
+	return stats, nil
+}
+
+func (s *Store) ListActiveCertificates(ctx context.Context, tenantID string, page pagination.Params) ([]certificates.Certificate, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT c.id::text, c.tenant_id::text, c.name, c.status, c.created_at, c.updated_at, c.deleted_at, c.artifact_id::text, c.checksum,
 		        a.id::text, a.tenant_id::text, a.storage_key, a.checksum, a.size_bytes, a.mime_type, a.status, a.updated_at, a.deleted_at
 		 FROM certificates c
 		 JOIN artifacts a ON a.tenant_id = c.tenant_id AND a.id = c.artifact_id
 		 WHERE c.tenant_id = $1 AND c.status = $2
-		 ORDER BY c.created_at`,
-		tenantID, certificates.StatusActive,
+		 ORDER BY c.created_at DESC, c.id DESC
+		 LIMIT $3 OFFSET $4`,
+		tenantID, certificates.StatusActive, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err

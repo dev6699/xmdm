@@ -11,6 +11,7 @@ import (
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -147,7 +148,7 @@ func TestStoreListTokens(t *testing.T) {
 		t.Fatalf("revoke token: %v", err)
 	}
 
-	items, err := store.ListTokens(context.Background(), bootstrap.SeedTenantID)
+	items, err := store.ListTokens(context.Background(), bootstrap.SeedTenantID, pagination.Params{Limit: pagination.DefaultLimit})
 	if err != nil {
 		t.Fatalf("list tokens: %v", err)
 	}

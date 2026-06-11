@@ -29,6 +29,7 @@ import (
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/identity"
 	"xmdm/server/internal/managedfiles"
+	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
 )
@@ -2130,6 +2131,7 @@ func TestRegisterDashboardGroupDetailShowsMemberDevices(t *testing.T) {
 			{RecordBase: device.RecordBase{ID: "device-2", TenantID: "tenant-1", Status: device.StatusActive, CreatedAt: time.Date(2026, 5, 13, 11, 32, 0, 0, time.UTC)}, Name: "other-tablet", PolicyID: strPtr("policy-2")},
 		},
 	}
+	groupStore.devices = deviceStore.devices
 	policyStore := &fakeDashboardPolicyStore{
 		policies: []policy.Policy{
 			{RecordBase: policy.RecordBase{ID: "policy-1", TenantID: "tenant-1", Status: "active"}, Name: "Baseline"},
@@ -2721,8 +2723,27 @@ func (s *fakeAdminCommandStore) Enqueue(_ context.Context, _ string, req command
 	return append([]commands.Command(nil), s.items...), nil
 }
 
-func (s *fakeAdminCommandStore) ListRecent(context.Context, string, int) ([]commands.Command, error) {
+func (s *fakeAdminCommandStore) ListRecent(context.Context, string, pagination.Params) ([]commands.Command, error) {
 	return append([]commands.Command(nil), s.items...), nil
+}
+
+func (s *fakeAdminCommandStore) ListRecentAll(context.Context, string) ([]commands.Command, error) {
+	return append([]commands.Command(nil), s.items...), nil
+}
+
+func (s *fakeAdminCommandStore) GetOverviewStats(context.Context, string) (commands.OverviewStats, error) {
+	stats := commands.OverviewStats{Total: len(s.items)}
+	for _, item := range s.items {
+		switch item.Status {
+		case commands.StatusSent:
+			stats.Sent++
+		case commands.StatusAcked:
+			stats.Acked++
+		case commands.StatusFailed:
+			stats.Failed++
+		}
+	}
+	return stats, nil
 }
 
 func (s *fakeAdminCommandStore) Get(_ context.Context, _ string, commandID string) (commands.Command, error) {
@@ -2734,8 +2755,12 @@ func (s *fakeAdminCommandStore) Get(_ context.Context, _ string, commandID strin
 	return commands.Command{}, httpx.ErrNotFound
 }
 
-func (s *fakeAdminCommandStore) ListPending(context.Context, string, string) ([]commands.Command, error) {
+func (s *fakeAdminCommandStore) ListPending(context.Context, string, string, pagination.Params) ([]commands.Command, error) {
 	return nil, nil
+}
+
+func (s *fakeAdminCommandStore) ListPendingForDevice(context.Context, string, string) ([]commands.Command, error) {
+	return append([]commands.Command(nil), s.items...), nil
 }
 
 func (s *fakeAdminCommandStore) Acknowledge(context.Context, string, string, string, commands.Ack) (commands.Command, error) {
@@ -2750,8 +2775,16 @@ func (s *fakeAuditStore) Record(context.Context, string, string, string, string,
 	return audit.Event{}, nil
 }
 
-func (s *fakeAuditStore) List(context.Context, string) ([]audit.Event, error) {
+func (s *fakeAuditStore) List(context.Context, string, pagination.Params) ([]audit.Event, error) {
 	return append([]audit.Event(nil), s.events...), nil
+}
+
+func (s *fakeAuditStore) ListNewest(context.Context, string) ([]audit.Event, error) {
+	return append([]audit.Event(nil), s.events...), nil
+}
+
+func (s *fakeAuditStore) CountSince(context.Context, string, time.Time) (int, error) {
+	return len(s.events), nil
 }
 
 var _ commands.Repository = (*fakeAdminCommandStore)(nil)
@@ -2763,8 +2796,69 @@ type fakeDashboardDeviceStore struct {
 	updatedDevice device.DeviceUpsert
 }
 
-func (s *fakeDashboardDeviceStore) ListDevices(context.Context, string) ([]device.Device, error) {
+func (s *fakeDashboardDeviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return append([]device.Device(nil), s.devices...), nil
+}
+
+func (s *fakeDashboardDeviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
+	out := make([]device.Device, 0, len(s.devices))
+	for _, item := range s.devices {
+		if item.Status == device.StatusActive || item.Status == device.StatusEnrolled {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeDashboardDeviceStore) GetOverviewStats(context.Context, string) (device.OverviewStats, error) {
+	stats := device.OverviewStats{Total: len(s.devices)}
+	for _, item := range s.devices {
+		switch item.Status {
+		case device.StatusActive:
+			stats.Active++
+		case device.StatusPending:
+			stats.Pending++
+		}
+		if item.Status == device.StatusRetired || item.Status == device.StatusWiped {
+			stats.RetiredOrWiped++
+		}
+		if item.PolicyID != nil && *item.PolicyID != "" {
+			stats.AssignedPolicy++
+		}
+	}
+	return stats, nil
+}
+
+func (s *fakeDashboardDeviceStore) GetStatusCounts(context.Context, string) (device.StatusCounts, error) {
+	counts := device.StatusCounts{}
+	for _, item := range s.devices {
+		switch item.Status {
+		case device.StatusPending:
+			counts.Pending++
+		case device.StatusEnrolled:
+			counts.Enrolled++
+		case device.StatusActive:
+			counts.Active++
+		case device.StatusLocked:
+			counts.Locked++
+		case device.StatusSuspended:
+			counts.Suspended++
+		case device.StatusRetired:
+			counts.Retired++
+		case device.StatusWiped:
+			counts.Wiped++
+		}
+	}
+	return counts, nil
+}
+
+func (s *fakeDashboardDeviceStore) GetDevice(_ context.Context, _ string, id string) (device.Device, error) {
+	for _, item := range s.devices {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return device.Device{}, httpx.ErrNotFound
 }
 
 func (s *fakeDashboardDeviceStore) CreateDevice(_ context.Context, _ string, req device.DeviceUpsert) (device.Device, error) {
@@ -2791,8 +2885,12 @@ type fakeDashboardManagedFileStore struct {
 	items []managedfiles.ManagedFile
 }
 
-func (s *fakeDashboardManagedFileStore) ListManagedFiles(context.Context, string) ([]managedfiles.ManagedFile, error) {
+func (s *fakeDashboardManagedFileStore) ListManagedFiles(context.Context, string, pagination.Params) ([]managedfiles.ManagedFile, error) {
 	return append([]managedfiles.ManagedFile(nil), s.items...), nil
+}
+
+func (s *fakeDashboardManagedFileStore) GetOverviewStats(context.Context, string) (managedfiles.OverviewStats, error) {
+	return managedfiles.OverviewStats{Total: len(s.items), Active: len(s.items)}, nil
 }
 
 func (s *fakeDashboardManagedFileStore) GetManagedFile(_ context.Context, _ string, id string) (managedfiles.ManagedFile, error) {
@@ -2842,12 +2940,16 @@ type fakeDashboardCertificateStore struct {
 	createCalled bool
 }
 
-func (s *fakeDashboardCertificateStore) ListCertificates(context.Context, string) ([]certificates.Certificate, error) {
+func (s *fakeDashboardCertificateStore) ListCertificates(context.Context, string, pagination.Params) ([]certificates.Certificate, error) {
 	return append([]certificates.Certificate(nil), s.items...), nil
 }
 
-func (s *fakeDashboardCertificateStore) ListActiveCertificates(context.Context, string) ([]certificates.Certificate, error) {
+func (s *fakeDashboardCertificateStore) ListActiveCertificates(context.Context, string, pagination.Params) ([]certificates.Certificate, error) {
 	return append([]certificates.Certificate(nil), s.items...), nil
+}
+
+func (s *fakeDashboardCertificateStore) GetOverviewStats(context.Context, string) (certificates.OverviewStats, error) {
+	return certificates.OverviewStats{Total: len(s.items), Active: len(s.items)}, nil
 }
 
 func (s *fakeDashboardCertificateStore) GetCertificate(_ context.Context, _ string, id string) (certificates.Certificate, error) {
@@ -2889,8 +2991,31 @@ type fakeDashboardPolicyStore struct {
 	policyManagedFiles []policy.PolicyManagedFile
 }
 
-func (s *fakeDashboardPolicyStore) ListPolicies(context.Context, string) ([]policy.Policy, error) {
+func (s *fakeDashboardPolicyStore) ListPolicies(context.Context, string, pagination.Params) ([]policy.Policy, error) {
 	return append([]policy.Policy(nil), s.policies...), nil
+}
+
+func (s *fakeDashboardPolicyStore) ListActivePolicies(context.Context, string) ([]policy.Policy, error) {
+	out := make([]policy.Policy, 0, len(s.policies))
+	for _, item := range s.policies {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeDashboardPolicyStore) GetOverviewStats(context.Context, string) (policy.OverviewStats, error) {
+	stats := policy.OverviewStats{Total: len(s.policies)}
+	for _, item := range s.policies {
+		switch item.Status {
+		case policy.StatusActive:
+			stats.Active++
+		case policy.StatusRetired:
+			stats.Retired++
+		}
+	}
+	return stats, nil
 }
 
 func (s *fakeDashboardPolicyStore) GetPolicy(_ context.Context, _ string, id string) (policy.Policy, error) {
@@ -2914,8 +3039,27 @@ func (s *fakeDashboardPolicyStore) RetirePolicy(context.Context, string, string)
 	return policy.Policy{}, nil
 }
 
-func (s *fakeDashboardPolicyStore) ListPolicyApps(context.Context, string, string) ([]policy.PolicyApp, error) {
+func (s *fakeDashboardPolicyStore) ListPolicyApps(context.Context, string, string, pagination.Params) ([]policy.PolicyApp, error) {
 	return append([]policy.PolicyApp(nil), s.policyApps...), nil
+}
+
+func (s *fakeDashboardPolicyStore) ListActivePolicyApps(context.Context, string, string) ([]policy.PolicyApp, error) {
+	out := make([]policy.PolicyApp, 0, len(s.policyApps))
+	for _, item := range s.policyApps {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeDashboardPolicyStore) GetPolicyApp(_ context.Context, tenantID, policyID, appID string) (policy.PolicyApp, error) {
+	for _, item := range s.policyApps {
+		if item.TenantID == tenantID && item.PolicyID == policyID && item.AppID == appID {
+			return item, nil
+		}
+	}
+	return policy.PolicyApp{}, httpx.ErrNotFound
 }
 
 func (s *fakeDashboardPolicyStore) AddPolicyApp(_ context.Context, tenantID string, policyID string, appID string) (policy.PolicyApp, error) {
@@ -2944,8 +3088,27 @@ func (s *fakeDashboardPolicyStore) RemovePolicyApp(_ context.Context, tenantID s
 	return httpx.ErrNotFound
 }
 
-func (s *fakeDashboardPolicyStore) ListPolicyCertificates(context.Context, string, string) ([]policy.PolicyCertificate, error) {
+func (s *fakeDashboardPolicyStore) ListPolicyCertificates(context.Context, string, string, pagination.Params) ([]policy.PolicyCertificate, error) {
 	return append([]policy.PolicyCertificate(nil), s.policyCertificates...), nil
+}
+
+func (s *fakeDashboardPolicyStore) ListActivePolicyCertificates(context.Context, string, string) ([]policy.PolicyCertificate, error) {
+	out := make([]policy.PolicyCertificate, 0, len(s.policyCertificates))
+	for _, item := range s.policyCertificates {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeDashboardPolicyStore) GetPolicyCertificate(_ context.Context, tenantID, policyID, certificateID string) (policy.PolicyCertificate, error) {
+	for _, item := range s.policyCertificates {
+		if item.TenantID == tenantID && item.PolicyID == policyID && item.CertificateID == certificateID {
+			return item, nil
+		}
+	}
+	return policy.PolicyCertificate{}, httpx.ErrNotFound
 }
 
 func (s *fakeDashboardPolicyStore) AddPolicyCertificate(_ context.Context, tenantID string, policyID string, certificateID string) (policy.PolicyCertificate, error) {
@@ -2974,8 +3137,27 @@ func (s *fakeDashboardPolicyStore) RemovePolicyCertificate(_ context.Context, te
 	return httpx.ErrNotFound
 }
 
-func (s *fakeDashboardPolicyStore) ListPolicyManagedFiles(context.Context, string, string) ([]policy.PolicyManagedFile, error) {
+func (s *fakeDashboardPolicyStore) ListPolicyManagedFiles(context.Context, string, string, pagination.Params) ([]policy.PolicyManagedFile, error) {
 	return append([]policy.PolicyManagedFile(nil), s.policyManagedFiles...), nil
+}
+
+func (s *fakeDashboardPolicyStore) ListActivePolicyManagedFiles(context.Context, string, string) ([]policy.PolicyManagedFile, error) {
+	out := make([]policy.PolicyManagedFile, 0, len(s.policyManagedFiles))
+	for _, item := range s.policyManagedFiles {
+		if item.Status == policy.StatusActive {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeDashboardPolicyStore) GetPolicyManagedFile(_ context.Context, tenantID, policyID, managedFileID string) (policy.PolicyManagedFile, error) {
+	for _, item := range s.policyManagedFiles {
+		if item.TenantID == tenantID && item.PolicyID == policyID && item.ManagedFileID == managedFileID {
+			return item, nil
+		}
+	}
+	return policy.PolicyManagedFile{}, httpx.ErrNotFound
 }
 
 func (s *fakeDashboardPolicyStore) AddPolicyManagedFile(_ context.Context, tenantID string, policyID string, managedFileID string) (policy.PolicyManagedFile, error) {
@@ -3007,11 +3189,38 @@ func (s *fakeDashboardPolicyStore) RemovePolicyManagedFile(_ context.Context, te
 var _ policy.Repository = (*fakeDashboardPolicyStore)(nil)
 
 type fakeDashboardGroupStore struct {
-	items []group.Group
+	items   []group.Group
+	devices []device.Device
 }
 
-func (s *fakeDashboardGroupStore) ListGroups(context.Context, string) ([]group.Group, error) {
+func (s *fakeDashboardGroupStore) ListGroups(context.Context, string, pagination.Params) ([]group.Group, error) {
 	return append([]group.Group(nil), s.items...), nil
+}
+
+func (s *fakeDashboardGroupStore) ListActiveGroups(context.Context, string) ([]group.Group, error) {
+	return append([]group.Group(nil), s.items...), nil
+}
+
+func (s *fakeDashboardGroupStore) ListGroupDevices(_ context.Context, _ string, groupID string, _ pagination.Params) ([]device.Device, error) {
+	out := make([]device.Device, 0)
+	for _, item := range s.devices {
+		for _, assigned := range item.GroupIDs {
+			if assigned == groupID {
+				out = append(out, item)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeDashboardGroupStore) GetGroup(_ context.Context, _ string, id string) (group.Group, error) {
+	for _, item := range s.items {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return group.Group{}, httpx.ErrNotFound
 }
 
 func (s *fakeDashboardGroupStore) CreateGroup(context.Context, string, group.GroupUpsert) (group.Group, error) {
@@ -3038,8 +3247,27 @@ type fakeDashboardAppStore struct {
 	retiredAppIDs     []string
 }
 
-func (s *fakeDashboardAppStore) ListApps(context.Context, string) ([]apps.App, error) {
+func (s *fakeDashboardAppStore) ListApps(context.Context, string, pagination.Params) ([]apps.App, error) {
 	return append([]apps.App(nil), s.apps...), nil
+}
+
+func (s *fakeDashboardAppStore) GetOverviewStats(context.Context, string) (apps.OverviewStats, error) {
+	stats := apps.OverviewStats{Total: len(s.apps)}
+	for _, item := range s.apps {
+		if item.Status == apps.StatusActive {
+			stats.Active++
+		}
+	}
+	return stats, nil
+}
+
+func (s *fakeDashboardAppStore) GetAppByPackageName(_ context.Context, _ string, packageName string) (apps.App, error) {
+	for _, item := range s.apps {
+		if item.PackageName == packageName {
+			return item, nil
+		}
+	}
+	return apps.App{}, httpx.ErrNotFound
 }
 
 func (s *fakeDashboardAppStore) GetApp(_ context.Context, _ string, id string) (apps.App, error) {
@@ -3066,11 +3294,38 @@ func (s *fakeDashboardAppStore) RetireApp(_ context.Context, _ string, id string
 	return apps.App{RecordBase: apps.RecordBase{ID: id, TenantID: "tenant-1", Status: apps.StatusRetired, CreatedAt: time.Date(2026, 5, 13, 11, 34, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 5, 13, 11, 34, 0, 0, time.UTC)}}, nil
 }
 
-func (s *fakeDashboardAppStore) ListVersions(_ context.Context, _ string, appID string) ([]apps.Version, error) {
+func (s *fakeDashboardAppStore) ListVersions(_ context.Context, _ string, appID string, _ pagination.Params) ([]apps.Version, error) {
 	if s.versions == nil {
 		return nil, nil
 	}
 	return append([]apps.Version(nil), s.versions[appID]...), nil
+}
+
+func (s *fakeDashboardAppStore) GetVersionByCode(_ context.Context, _ string, appID string, versionCode int64) (apps.Version, error) {
+	for _, version := range s.versions[appID] {
+		if version.VersionCode == versionCode {
+			return version, nil
+		}
+	}
+	return apps.Version{}, httpx.ErrNotFound
+}
+
+func (s *fakeDashboardAppStore) GetLatestPublishedVersion(_ context.Context, _ string, appID string) (apps.Version, error) {
+	var latest apps.Version
+	found := false
+	for _, version := range s.versions[appID] {
+		if version.Status != apps.VersionStatusPublished {
+			continue
+		}
+		if !found || (version.PublishedAt != nil && latest.PublishedAt != nil && version.PublishedAt.After(*latest.PublishedAt)) || (version.PublishedAt != nil && latest.PublishedAt == nil) || (version.PublishedAt == nil && latest.PublishedAt == nil && version.CreatedAt.After(latest.CreatedAt)) {
+			latest = version
+			found = true
+		}
+	}
+	if !found {
+		return apps.Version{}, httpx.ErrNotFound
+	}
+	return latest, nil
 }
 
 func (s *fakeDashboardAppStore) GetVersion(_ context.Context, _ string, appID string, versionID string) (apps.Version, error) {
@@ -3122,7 +3377,7 @@ type fakeDashboardFileStore struct {
 	retiredIDs    []string
 }
 
-func (s *fakeDashboardFileStore) ListFiles(context.Context, string) ([]files.File, error) {
+func (s *fakeDashboardFileStore) ListFiles(context.Context, string, pagination.Params) ([]files.File, error) {
 	return nil, nil
 }
 
@@ -3201,7 +3456,7 @@ func (s *fakeDashboardEnrollmentStore) BindDevice(context.Context, string, strin
 	return enrollment.BoundDevice{}, nil
 }
 
-func (s *fakeDashboardEnrollmentStore) ListTokens(context.Context, string) ([]enrollment.Token, error) {
+func (s *fakeDashboardEnrollmentStore) ListTokens(context.Context, string, pagination.Params) ([]enrollment.Token, error) {
 	return append([]enrollment.Token(nil), s.tokens...), nil
 }
 
@@ -3231,8 +3486,21 @@ type fakeDashboardAuthUser struct {
 	user         identity.User
 }
 
-func (s *fakeDashboardIdentityStore) ListUsers(context.Context, string) ([]identity.User, error) {
+func (s *fakeDashboardIdentityStore) ListUsers(context.Context, string, pagination.Params) ([]identity.User, error) {
 	return append([]identity.User(nil), s.users...), nil
+}
+
+func (s *fakeDashboardIdentityStore) ListActiveUsers(context.Context, string) ([]identity.User, error) {
+	return append([]identity.User(nil), s.users...), nil
+}
+
+func (s *fakeDashboardIdentityStore) GetUser(_ context.Context, _ string, id string) (identity.User, error) {
+	for _, user := range s.users {
+		if user.ID == id {
+			return user, nil
+		}
+	}
+	return identity.User{}, httpx.ErrNotFound
 }
 
 func (s *fakeDashboardIdentityStore) CreateUser(context.Context, string, identity.UserUpsert) (identity.User, error) {
@@ -3271,8 +3539,21 @@ func (s *fakeDashboardIdentityStore) AuthenticateUser(_ context.Context, _ strin
 	return identity.User{}, identity.Role{}, identity.ErrInvalidCredentials
 }
 
-func (s *fakeDashboardIdentityStore) ListRoles(context.Context, string) ([]identity.Role, error) {
+func (s *fakeDashboardIdentityStore) ListRoles(context.Context, string, pagination.Params) ([]identity.Role, error) {
 	return append([]identity.Role(nil), s.roles...), nil
+}
+
+func (s *fakeDashboardIdentityStore) ListActiveRoles(context.Context, string) ([]identity.Role, error) {
+	return append([]identity.Role(nil), s.roles...), nil
+}
+
+func (s *fakeDashboardIdentityStore) GetRole(_ context.Context, _ string, id string) (identity.Role, error) {
+	for _, role := range s.roles {
+		if role.ID == id {
+			return role, nil
+		}
+	}
+	return identity.Role{}, httpx.ErrNotFound
 }
 
 func (s *fakeDashboardIdentityStore) CreateRole(context.Context, string, identity.RoleUpsert) (identity.Role, error) {

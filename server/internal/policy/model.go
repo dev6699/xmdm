@@ -54,6 +54,12 @@ type PolicyManagedFile struct {
 	ManagedFileID string `json:"managedFileId"`
 }
 
+type OverviewStats struct {
+	Total   int
+	Active  int
+	Retired int
+}
+
 func (p Policy) RecordID() string {
 	return p.ID
 }

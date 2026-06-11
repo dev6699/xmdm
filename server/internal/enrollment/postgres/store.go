@@ -11,6 +11,7 @@ import (
 	"xmdm/server/internal/enrollment"
 	"xmdm/server/internal/httpx"
 	"xmdm/server/internal/mqttdynsec"
+	"xmdm/server/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -170,16 +171,18 @@ func (s *Store) BindDevice(ctx context.Context, tenantID, token, deviceID string
 	return bound, nil
 }
 
-func (s *Store) ListTokens(ctx context.Context, tenantID string) ([]enrollment.Token, error) {
+func (s *Store) ListTokens(ctx context.Context, tenantID string, page pagination.Params) ([]enrollment.Token, error) {
 	if tenantID == "" {
 		return nil, httpx.ErrInvalidInput
 	}
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, status, expires_at, consumed_at, revoked_at, created_at, updated_at
 		 FROM enrollment_tokens
 		 WHERE tenant_id = $1
-		 ORDER BY created_at DESC`,
-		tenantID,
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT $2 OFFSET $3`,
+		tenantID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err

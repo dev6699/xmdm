@@ -50,7 +50,7 @@ func Register(mux httpx.Router, devices device.Repository, store commands.Reposi
 			}
 			return
 		}
-		items, err := store.ListPending(r.Context(), tenantID, authDevice.RecordID())
+		items, err := store.ListPendingForDevice(r.Context(), tenantID, authDevice.RecordID())
 		if err != nil {
 			switch err {
 			case httpx.ErrInvalidInput:

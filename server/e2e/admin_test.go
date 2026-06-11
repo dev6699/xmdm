@@ -34,6 +34,7 @@ import (
 	logspg "xmdm/server/internal/logs/postgres"
 	managedfilespg "xmdm/server/internal/managedfiles/postgres"
 	"xmdm/server/internal/mqttdynsec"
+	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/plugins"
 	policypg "xmdm/server/internal/policy/postgres"
 	"xmdm/server/internal/push"
@@ -210,7 +211,7 @@ func TestAdminE2E(t *testing.T) {
 		t.Fatalf("certificate retire returned status %v", certRetired["status"])
 	}
 
-	events, err := auditStore.List(context.Background(), bootstrap.SeedTenantID)
+	events, err := auditStore.List(context.Background(), bootstrap.SeedTenantID, pagination.Params{Limit: pagination.DefaultLimit})
 	if err != nil {
 		t.Fatalf("audit list failed: %v", err)
 	}

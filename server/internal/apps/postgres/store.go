@@ -8,6 +8,7 @@ import (
 	"xmdm/server/internal/apps"
 	files "xmdm/server/internal/files"
 	"xmdm/server/internal/httpx"
+	"xmdm/server/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -53,13 +54,15 @@ func (s *Store) CreateApp(ctx context.Context, tenantID string, req apps.AppUpse
 	return rec, nil
 }
 
-func (s *Store) ListApps(ctx context.Context, tenantID string) ([]apps.App, error) {
+func (s *Store) ListApps(ctx context.Context, tenantID string, page pagination.Params) ([]apps.App, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at
 		 FROM apps
 		 WHERE tenant_id = $1
-		 ORDER BY created_at`,
-		tenantID,
+		 ORDER BY created_at, id
+		 LIMIT $2 OFFSET $3`,
+		tenantID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -80,12 +83,45 @@ func (s *Store) ListApps(ctx context.Context, tenantID string) ([]apps.App, erro
 	return items, nil
 }
 
+func (s *Store) GetOverviewStats(ctx context.Context, tenantID string) (apps.OverviewStats, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT
+			COUNT(*)::int,
+			COUNT(*) FILTER (WHERE status = $2)::int
+		 FROM apps
+		 WHERE tenant_id = $1`,
+		tenantID, apps.StatusActive,
+	)
+	var stats apps.OverviewStats
+	if err := row.Scan(&stats.Total, &stats.Active); err != nil {
+		return apps.OverviewStats{}, err
+	}
+	return stats, nil
+}
+
 func (s *Store) GetApp(ctx context.Context, tenantID, id string) (apps.App, error) {
 	row := s.pool.QueryRow(ctx,
 		`SELECT id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at
 		 FROM apps
 		 WHERE tenant_id = $1 AND id = $2`,
 		tenantID, id,
+	)
+	rec, err := scanApp(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apps.App{}, httpx.ErrNotFound
+		}
+		return apps.App{}, err
+	}
+	return rec, nil
+}
+
+func (s *Store) GetAppByPackageName(ctx context.Context, tenantID, packageName string) (apps.App, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at
+		 FROM apps
+		 WHERE tenant_id = $1 AND package_name = $2`,
+		tenantID, packageName,
 	)
 	rec, err := scanApp(row)
 	if err != nil {
@@ -139,7 +175,8 @@ func (s *Store) RetireApp(ctx context.Context, tenantID, id string) (apps.App, e
 	return rec, nil
 }
 
-func (s *Store) ListVersions(ctx context.Context, tenantID, appID string) ([]apps.Version, error) {
+func (s *Store) ListVersions(ctx context.Context, tenantID, appID string, page pagination.Params) ([]apps.Version, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	var appExists string
 	if err := s.pool.QueryRow(ctx,
 		`SELECT id::text
@@ -157,8 +194,9 @@ func (s *Store) ListVersions(ctx context.Context, tenantID, appID string) ([]app
 		`SELECT id::text, tenant_id::text, app_id::text, status, version_name, version_code, artifact_id, checksum, published_at, created_at
 		 FROM app_versions
 		 WHERE tenant_id = $1 AND app_id = $2
-		 ORDER BY created_at`,
-		tenantID, appID,
+		 ORDER BY created_at, id
+		 LIMIT $3 OFFSET $4`,
+		tenantID, appID, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -177,6 +215,44 @@ func (s *Store) ListVersions(ctx context.Context, tenantID, appID string) ([]app
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *Store) GetVersionByCode(ctx context.Context, tenantID, appID string, versionCode int64) (apps.Version, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, app_id::text, status, version_name, version_code, artifact_id, checksum, published_at, created_at
+		 FROM app_versions
+		 WHERE tenant_id = $1 AND app_id = $2 AND version_code = $3
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT 1`,
+		tenantID, appID, versionCode,
+	)
+	rec, err := scanVersion(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apps.Version{}, httpx.ErrNotFound
+		}
+		return apps.Version{}, err
+	}
+	return rec, nil
+}
+
+func (s *Store) GetLatestPublishedVersion(ctx context.Context, tenantID, appID string) (apps.Version, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, app_id::text, status, version_name, version_code, artifact_id, checksum, published_at, created_at
+		 FROM app_versions
+		 WHERE tenant_id = $1 AND app_id = $2 AND status = $3
+		 ORDER BY COALESCE(published_at, created_at) DESC, created_at DESC, id DESC
+		 LIMIT 1`,
+		tenantID, appID, apps.VersionStatusPublished,
+	)
+	rec, err := scanVersion(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apps.Version{}, httpx.ErrNotFound
+		}
+		return apps.Version{}, err
+	}
+	return rec, nil
 }
 
 func (s *Store) GetVersion(ctx context.Context, tenantID, appID, versionID string) (apps.Version, error) {
