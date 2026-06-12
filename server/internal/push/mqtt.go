@@ -10,7 +10,7 @@ import (
 
 const mqttProtocolLevel = 4
 
-func publishQoS0(ctx context.Context, cfg MQTTConfig, topic string, payload []byte) error {
+func publishQoS1(ctx context.Context, cfg MQTTConfig, topic string, payload []byte) error {
 	conn, err := dialMQTT(ctx, "tcp", cfg.Address, cfg.DialTimeout)
 	if err != nil {
 		return err
@@ -39,8 +39,16 @@ func publishQoS0(ctx context.Context, cfg MQTTConfig, topic string, payload []by
 		return err
 	}
 
-	if err := writePacket(conn, publishPacket(topic, payload)); err != nil {
+	const packetID uint16 = 1
+	if err := writePacket(conn, publishPacket(topic, payload, 1, packetID)); err != nil {
 		return err
+	}
+	puback, err := readPacket(conn)
+	if err != nil {
+		return err
+	}
+	if len(puback) < 4 || puback[0] != 0x40 || puback[1] != 0x02 || readPacketID(puback[2:]) != packetID {
+		return fmt.Errorf("mqtt publish not acknowledged")
 	}
 	if err := writePacket(conn, []byte{0xE0, 0x00}); err != nil {
 		return err
@@ -83,11 +91,14 @@ func connectPacket(cfg MQTTConfig) []byte {
 	return append(append([]byte{0x10}, encodeRemainingLength(len(body)+len(payload))...), append(body, payload...)...)
 }
 
-func publishPacket(topic string, payload []byte) []byte {
+func publishPacket(topic string, payload []byte, qos byte, packetID uint16) []byte {
 	var body []byte
 	body = append(body, encodeString(topic)...)
+	if qos > 0 {
+		body = append(body, byte(packetID>>8), byte(packetID))
+	}
 	body = append(body, payload...)
-	return append(append([]byte{0x30}, encodeRemainingLength(len(body))...), body...)
+	return append(append([]byte{0x30 | ((qos & 0x03) << 1)}, encodeRemainingLength(len(body))...), body...)
 }
 
 func encodeString(value string) []byte {
@@ -176,4 +187,11 @@ func readMQTTString(data []byte, offset int) (string, int, error) {
 		return "", offset, fmt.Errorf("mqtt string truncated")
 	}
 	return string(data[offset : offset+length]), offset + length, nil
+}
+
+func readPacketID(data []byte) uint16 {
+	if len(data) < 2 {
+		return 0
+	}
+	return uint16(data[0])<<8 | uint16(data[1])
 }

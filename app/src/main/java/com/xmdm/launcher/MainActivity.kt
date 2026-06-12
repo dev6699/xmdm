@@ -38,6 +38,7 @@ import com.xmdm.launcher.commands.DeviceCommandExecutionResult
 import com.xmdm.launcher.commands.HttpDeviceCommandGateway
 import com.xmdm.launcher.commands.MqttDeviceCommandConfig
 import com.xmdm.launcher.commands.MqttDeviceCommandTransport
+import com.xmdm.launcher.commands.DeviceCommandResultStore
 import com.xmdm.launcher.files.ManagedFileInstallCoordinator
 import com.xmdm.launcher.databinding.ActivityMainBinding
 import com.xmdm.launcher.enrollment.EnrollmentCoordinator
@@ -146,6 +147,7 @@ class MainActivity : AppCompatActivity() {
                     requestCompanionAppLaunchFromCommand(command)
                 },
             ),
+            history = DeviceCommandResultStore.from(applicationContext),
         )
     }
     private val companionAppLaunchCoordinator by lazy {

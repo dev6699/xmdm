@@ -77,7 +77,7 @@ func (p *MQTTPublisher) PublishCommand(ctx context.Context, deviceID string, mes
 	if err != nil {
 		return err
 	}
-	return publishQoS0(ctx, p.cfg, deviceCommandTopic(deviceID), payload)
+	return publishQoS1(ctx, p.cfg, deviceCommandTopic(deviceID), payload)
 }
 
 func deviceCommandTopic(deviceID string) string {

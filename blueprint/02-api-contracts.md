@@ -89,6 +89,9 @@
 - The response returns a `commands` array of pending command records.
 - Device acknowledgements use `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack` with the device secret in `X-XMDM-Device-Secret`.
 - The ack body carries a terminal `status` plus optional `message` and `details`.
+- The server and launcher treat `commandId` as the idempotency key across MQTT and polling.
+- Duplicate command delivery must not execute the same device command twice.
+- Repeated acks for the same device and command are idempotent and return the stored terminal record when the command was already handled.
 
 ### Artifact Download
 
@@ -186,6 +189,7 @@
   "id": "string",
   "type": "reboot",
   "status": "queued",
+  "deviceId": "device-123",
   "payload": {},
   "expiresAt": "2026-04-23T00:00:00Z"
 }
@@ -214,6 +218,9 @@ The dashboard-generated QR payload derives `com.xmdm.BASE_URL` from `server.publ
 - Enrollment returns the initial device secret, not a long-lived admin token.
 - Config snapshots are immutable records with version numbers.
 - Commands are append-only until acked or expired.
+- Command delivery is idempotent per `commandId` across MQTT and polling.
+- MQTT publish of a command is only considered accepted after the broker returns PUBACK.
+- The launcher keeps a bounded cache of recently handled command results so duplicate delivery can be acknowledged without re-execution.
 - Plugin command types extend the command catalog, but not the command lifecycle.
 - File and app artifacts are referenced by checksum and version, not by mutable URLs alone.
 - Admin APIs never reuse device authentication headers.

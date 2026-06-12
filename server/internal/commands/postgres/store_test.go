@@ -216,6 +216,55 @@ func TestAcknowledgeUpdatesCommandStatus(t *testing.T) {
 	}
 }
 
+func TestAcknowledgeReturnsAlreadyAckedCommand(t *testing.T) {
+	pool := openCommandsTestPool(t)
+	t.Cleanup(pool.Close)
+	resetCommandsTestDB(t, pool)
+
+	store := New(pool)
+	now := time.Date(2026, 4, 25, 16, 0, 0, 0, time.UTC)
+	store.SetNow(func() time.Time { return now })
+
+	var deviceUUID string
+	deviceID := uuid.NewString()
+	if err := pool.QueryRow(context.Background(), `INSERT INTO devices (id, tenant_id, secret_hash, status, updated_at)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id::text`,
+		deviceID, bootstrap.SeedTenantID, enrollment.HashToken("secret"), "active", now,
+	).Scan(&deviceUUID); err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	var commandID string
+	if err := pool.QueryRow(context.Background(), `INSERT INTO commands (id, tenant_id, device_id, type, payload_json, status, created_at, updated_at)
+		 VALUES (gen_random_uuid(), $1, $2, $3, '{}'::jsonb, $4, $5, $5)
+		 RETURNING id::text`,
+		bootstrap.SeedTenantID, deviceUUID, "reboot", commands.StatusQueued, now,
+	).Scan(&commandID); err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+
+	acked, err := store.Acknowledge(context.Background(), bootstrap.SeedTenantID, deviceUUID, commandID, commands.Ack{
+		Status:  commands.StatusAcked,
+		Message: "done",
+	})
+	if err != nil {
+		t.Fatalf("initial ack: %v", err)
+	}
+	replayed, err := store.Acknowledge(context.Background(), bootstrap.SeedTenantID, deviceUUID, commandID, commands.Ack{
+		Status:  commands.StatusAcked,
+		Message: "done",
+	})
+	if err != nil {
+		t.Fatalf("replayed ack: %v", err)
+	}
+	if replayed.Status != commands.StatusAcked || replayed.AckedAt == nil {
+		t.Fatalf("unexpected replayed ack result: %#v", replayed)
+	}
+	if acked.AckedAt == nil || replayed.ID != acked.ID || !replayed.AckedAt.Equal(*acked.AckedAt) {
+		t.Fatalf("expected replayed ack to return the stored command: %#v %#v", acked, replayed)
+	}
+}
+
 func TestExpiredCommandIsNotPendingOrAckable(t *testing.T) {
 	pool := openCommandsTestPool(t)
 	t.Cleanup(pool.Close)

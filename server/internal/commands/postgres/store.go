@@ -324,12 +324,37 @@ func (s *Store) Acknowledge(ctx context.Context, tenantID, deviceID, commandID s
 	)
 	rec, err := scanCommand(row)
 	if err != nil {
-		return commands.Command{}, err
+		if !errors.Is(err, httpx.ErrNotFound) {
+			return commands.Command{}, err
+		}
+		existing, lookupErr := s.commandForDevice(ctx, tx, tenantID, deviceID, commandID)
+		if lookupErr != nil {
+			if errors.Is(lookupErr, httpx.ErrNotFound) {
+				return commands.Command{}, httpx.ErrNotFound
+			}
+			return commands.Command{}, lookupErr
+		}
+		switch existing.Status {
+		case commands.StatusAcked, commands.StatusFailed:
+			return existing, nil
+		default:
+			return commands.Command{}, httpx.ErrNotFound
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return commands.Command{}, err
 	}
 	return rec, nil
+}
+
+func (s *Store) commandForDevice(ctx context.Context, tx pgx.Tx, tenantID, deviceID, commandID string) (commands.Command, error) {
+	row := tx.QueryRow(ctx,
+		`SELECT id::text, tenant_id::text, device_id, type, payload_json, status, expires_at, acked_at, result_json, created_at, updated_at
+		 FROM commands
+		 WHERE tenant_id = $1 AND device_id = $2 AND id = $3`,
+		tenantID, deviceID, commandID,
+	)
+	return scanCommand(row)
 }
 
 func (s *Store) expireDueCommands(ctx context.Context, tenantID, deviceID string) error {

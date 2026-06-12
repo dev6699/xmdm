@@ -296,6 +296,28 @@ func (e *commandTestEnv) mustIssueDashboardCommand(t *testing.T, commandType, pa
 		t.Fatalf("expected command page, got %d", res.StatusCode)
 	}
 
+	meReq, err := http.NewRequest(http.MethodGet, e.baseURL+"/admin/me", nil)
+	if err != nil {
+		t.Fatalf("build csrf request: %v", err)
+	}
+	meRes, err := e.client.Do(meReq)
+	if err != nil {
+		t.Fatalf("load csrf token: %v", err)
+	}
+	defer meRes.Body.Close()
+	if meRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(meRes.Body)
+		t.Fatalf("expected admin me response, got %d: %s", meRes.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var meData map[string]any
+	if err := json.NewDecoder(meRes.Body).Decode(&meData); err != nil {
+		t.Fatalf("decode csrf token: %v", err)
+	}
+	csrfToken, _ := meData["csrfToken"].(string)
+	if csrfToken == "" {
+		t.Fatalf("expected csrf token in admin me response: %#v", meData)
+	}
+
 	form := url.Values{}
 	form.Set("type", commandType)
 	if payload != "" {
@@ -303,6 +325,7 @@ func (e *commandTestEnv) mustIssueDashboardCommand(t *testing.T, commandType, pa
 	}
 	form.Set("targetType", "device")
 	form.Set("targetDeviceId", e.deviceID)
+	form.Set("csrfToken", csrfToken)
 
 	postReq, err := http.NewRequest(http.MethodPost, e.baseURL+"/admin/commands/create", strings.NewReader(form.Encode()))
 	if err != nil {

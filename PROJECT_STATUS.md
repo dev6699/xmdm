@@ -9,8 +9,8 @@ Focus updated: 2026-06-12
 
 | Item | State |
 | --- | --- |
-| Stage 1 - Command Reliability Hardening | Next |
-| Stage 2 - Reconnect, Replay, And Offline Semantics | Pending |
+| Stage 1 - Command Reliability Hardening | Completed |
+| Stage 2 - Reconnect, Replay, And Offline Semantics | Next |
 | Stage 3 - Security Hardening | Pending |
 | Stage 4 - CI, Release, And Evidence | Pending |
 | Stage 5 - Production Operations | Pending |

@@ -26,7 +26,7 @@ func TestPublishCommand(t *testing.T) {
 	}
 	pub := &MQTTPublisher{cfg: cfg}
 
-	conn := &recordingConn{readBuf: *bytes.NewBuffer([]byte{0x20, 0x02, 0x00, 0x00})}
+	conn := &recordingConn{readBuf: *bytes.NewBuffer([]byte{0x20, 0x02, 0x00, 0x00, 0x40, 0x02, 0x00, 0x01})}
 	oldDial := dialMQTT
 	dialMQTT = func(context.Context, string, string, time.Duration) (net.Conn, error) {
 		return conn, nil
@@ -52,6 +52,12 @@ func TestPublishCommand(t *testing.T) {
 		t.Fatalf("missing publish packet: %x", packet)
 	}
 	publish := extractPublishedPacket(t, packet[offset:])
+	if publish.qos != 1 {
+		t.Fatalf("unexpected qos: %d", publish.qos)
+	}
+	if publish.packetID != 1 {
+		t.Fatalf("unexpected packet id: %d", publish.packetID)
+	}
 	if publish.topic != "devices/device-123/commands" {
 		t.Fatalf("unexpected topic: %s", publish.topic)
 	}
@@ -72,8 +78,10 @@ func TestPublishCommandRejectsEmptyDeviceID(t *testing.T) {
 }
 
 type publishedPacket struct {
-	topic   string
-	payload []byte
+	topic    string
+	packetID uint16
+	qos      byte
+	payload  []byte
 }
 
 type recordingConn struct {
@@ -111,6 +119,7 @@ func extractPublishedPacket(t *testing.T, packet []byte) publishedPacket {
 	if len(packet) < 2 {
 		t.Fatalf("packet too short")
 	}
+	qos := byte(packet[0]>>1) & 0x03
 	remaining, consumed := decodePacketRemainingLength(packet[1:])
 	offset := 1 + consumed
 	if len(packet) < offset+remaining {
@@ -120,9 +129,19 @@ func extractPublishedPacket(t *testing.T, packet []byte) publishedPacket {
 	if err != nil {
 		t.Fatalf("read topic: %v", err)
 	}
+	packetID := uint16(0)
+	if qos > 0 {
+		if len(packet) < next+2 {
+			t.Fatalf("missing packet id")
+		}
+		packetID = uint16(packet[next])<<8 | uint16(packet[next+1])
+		next += 2
+	}
 	return publishedPacket{
-		topic:   topic,
-		payload: packet[next : offset+remaining],
+		topic:    topic,
+		packetID: packetID,
+		qos:      qos,
+		payload:  packet[next : offset+remaining],
 	}
 }
 

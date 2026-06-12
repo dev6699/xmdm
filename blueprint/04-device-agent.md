@@ -139,6 +139,8 @@ flowchart TD
 - HTTP polling is the fallback transport.
 - The agent uses the broker address from the signed config snapshot when present and otherwise keeps polling as the safe path.
 - The agent polls pending commands, executes supported ones, and acks the result back to the server.
+- The agent keeps a bounded cache of recently handled command IDs and terminal results so duplicate MQTT or polling delivery can be acknowledged without re-execution.
+- The agent treats `commandId` as the idempotency key for command execution.
 - The `launch_companion_app` command may start a declared companion package or activity only after the signed managed-app snapshot names the package and the installed package signature matches the command payload.
 - The `exit_kiosk` command temporarily suppresses kiosk enforcement until a newer policy revision arrives.
 - WorkManager keeps telemetry, sync, and retry jobs alive across reboots.

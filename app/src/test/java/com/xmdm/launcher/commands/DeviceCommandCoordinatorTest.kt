@@ -235,6 +235,46 @@ class DeviceCommandCoordinatorTest {
         assertTrue(gateway.acks[0].request.message!!.contains("boom"))
     }
 
+    @Test
+    fun reusesCachedResultsForDuplicateCommands() = runTest {
+        val command = DeviceCommandRecord(
+            id = "cmd-dup",
+            type = "ping",
+            status = "queued",
+            payload = JsonParser.parseString("""{"message":"hello"}""").asJsonObject,
+            expiresAt = null,
+        )
+        var executions = 0
+        val history = RecordingHistory()
+        val gateway = RecordingGateway(commands = listOf(command, command))
+        val coordinator = DeviceCommandCoordinator(
+            gateway = gateway,
+            executor = object : DeviceCommandActionExecutor {
+                override suspend fun execute(command: DeviceCommandRecord): DeviceCommandExecutionResult {
+                    executions += 1
+                    return DeviceCommandExecutionResult(
+                        status = "acked",
+                        message = "pong",
+                        details = mapOf("sequence" to executions),
+                    )
+                }
+            },
+            history = history,
+        )
+
+        val handled = coordinator.pollAndExecute(
+            serverUrl = "https://mdm.example",
+            deviceId = "device-123",
+            deviceSecret = "secret-abc",
+        )
+
+        assertEquals(listOf("cmd-dup", "cmd-dup"), handled.map { it.id })
+        assertEquals(1, executions)
+        assertEquals(2, gateway.acks.size)
+        assertEquals(1, gateway.acks[0].request.details?.get("sequence"))
+        assertEquals(1, gateway.acks[1].request.details?.get("sequence"))
+    }
+
     private class RecordingGateway(
         private val commands: List<DeviceCommandRecord>,
     ) : DeviceCommandGateway {
@@ -265,4 +305,16 @@ class DeviceCommandCoordinatorTest {
         val commandId: String,
         val request: DeviceCommandAckRequest,
     )
+
+    private class RecordingHistory : DeviceCommandResultJournal {
+        private val results = linkedMapOf<String, DeviceCommandExecutionResult>()
+
+        override suspend fun lookup(commandId: String): DeviceCommandExecutionResult? {
+            return results[commandId]
+        }
+
+        override suspend fun record(commandId: String, result: DeviceCommandExecutionResult) {
+            results[commandId] = result
+        }
+    }
 }
