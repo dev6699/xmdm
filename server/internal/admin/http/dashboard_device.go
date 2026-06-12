@@ -62,7 +62,8 @@ func (d *dashboard) devices(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	d.renderForSession(w, r, session, pageData{
-		Title: "Devices",
+		Title:    "Devices",
+		Subtitle: "Track enrolled, pending, and retired devices, then update policy or group assignments.",
 		Forms: []formData{{
 			Title:  "Create device",
 			Action: "/admin/devices/create",
@@ -234,12 +235,12 @@ func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session,
 			b.WriteString(summaryTextItem("Version", strconv.Itoa(rec.Version)))
 			b.WriteString(summaryHTMLItem("Kiosk mode", template.HTML(boolBadge(rec.KioskMode, "enabled", "disabled"))))
 			b.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(rec.Status))))
-			body += string(panelSectionHTML("", "Active policy", template.HTML(b.String())))
+			body += string(collapsiblePanelHTML("Active policy", false, template.HTML(b.String())))
 		} else {
-			body += string(panelMessageHTML("Active policy", policyID))
+			body += string(collapsiblePanelHTML("Active policy", false, template.HTML(`<p class="muted">`+esc(policyID)+`</p>`)))
 		}
 	} else {
-		body += string(panelMessageHTML("Active policy", "No policy linked."))
+		body += string(collapsiblePanelHTML("Active policy", false, template.HTML(`<p class="muted">No policy linked.</p>`)))
 	}
 	if len(found.GroupIDs) > 0 {
 		groupMap := groupNameByID(groups)
@@ -256,11 +257,11 @@ func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session,
 			}
 			b.WriteString(summaryTextItem("Group", label))
 		}
-		body += string(panelSectionHTML("", "Assigned groups", template.HTML(b.String())))
+		body += string(collapsiblePanelHTML("Assigned groups", false, template.HTML(b.String())))
 	} else {
-		body += string(panelMessageHTML("Assigned groups", "No groups linked."))
+		body += string(collapsiblePanelHTML("Assigned groups", false, template.HTML(`<p class="muted">No groups linked.</p>`)))
 	}
-	body += string(d.deviceConfigPreviewSection(r.Context(), found))
+	body += string(collapsiblePanelHTML("Config preview", false, d.deviceConfigPreviewBody(r.Context(), found)))
 	deviceKey := firstNonEmpty(found.ID, found.Name)
 	deviceRowID := found.RecordID()
 	if d.deps.Logs != nil {
@@ -269,7 +270,7 @@ func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session,
 		rows, err := d.deps.Logs.Search(r.Context(), d.deps.TenantID, logs.SearchFilter{DeviceID: deviceKey, Limit: params.Limit, Offset: params.Offset, Pagination: params})
 		if err == nil {
 			items, hasNext := paginateItems(rows, limit)
-			body += string(detailsPanelHTML("Recent logs", withPager(template.HTML(pre(items)), pagerHTMLForKeys(r, "logsPage", "logsLimit", page, limit, hasNext))))
+			body += string(collapsiblePanelHTML("Recent logs", false, withPager(template.HTML(pre(items)), pagerHTMLForKeys(r, "logsPage", "logsLimit", page, limit, hasNext))))
 		}
 	}
 	if d.deps.DeviceInfo != nil {
@@ -278,7 +279,7 @@ func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session,
 		rows, err := d.deps.DeviceInfo.Search(r.Context(), d.deps.TenantID, deviceinfo.SearchFilter{DeviceID: deviceKey, Limit: params.Limit, Offset: params.Offset, Pagination: params})
 		if err == nil {
 			items, hasNext := paginateItems(rows, limit)
-			body += string(detailsPanelHTML("Recent device info", withPager(template.HTML(pre(items)), pagerHTMLForKeys(r, "deviceInfoPage", "deviceInfoLimit", page, limit, hasNext))))
+			body += string(collapsiblePanelHTML("Recent device info", false, withPager(template.HTML(pre(items)), pagerHTMLForKeys(r, "deviceInfoPage", "deviceInfoLimit", page, limit, hasNext))))
 		}
 	}
 	if d.deps.Commands != nil {
@@ -287,7 +288,7 @@ func (d *dashboard) deviceDetailPageData(r *http.Request, session *auth.Session,
 		rows, err := d.deps.Commands.ListPending(r.Context(), d.deps.TenantID, deviceRowID, params)
 		if err == nil {
 			items, hasNext := paginateItems(rows, limit)
-			body += string(detailsPanelHTML("Pending commands", withPager(template.HTML(pre(items)), pagerHTMLForKeys(r, "commandsPage", "commandsLimit", page, limit, hasNext))))
+			body += string(collapsiblePanelHTML("Pending commands", false, withPager(template.HTML(pre(items)), pagerHTMLForKeys(r, "commandsPage", "commandsLimit", page, limit, hasNext))))
 		}
 	}
 	if d.deps.PluginManager != nil {
@@ -595,17 +596,17 @@ func policyIDsForDevices(items []device.Device) []string {
 	return ids
 }
 
-func (d *dashboard) deviceConfigPreviewSection(ctx context.Context, found *device.Device) template.HTML {
+func (d *dashboard) deviceConfigPreviewBody(ctx context.Context, found *device.Device) template.HTML {
 	if found == nil || found.PolicyID == nil || strings.TrimSpace(*found.PolicyID) == "" {
 		return ""
 	}
 	if d.deps.Policies == nil {
-		return panelMessageHTML("Config preview", "Preview unavailable until policy data is configured.")
+		return template.HTML(`<p class="muted">Preview unavailable until policy data is configured.</p>`)
 	}
 	deviceKey := firstNonEmpty(found.ID, found.Name)
 	config, err := enrollmenthttp.BuildConfigSnapshot(ctx, d.deps.Policies, d.deps.Apps, d.deps.ManagedFiles, d.deps.Artifacts, d.deps.Certificates, d.deps.TenantID, deviceKey, found.PolicyID, found.BootstrapExtras, d.deps.Runtime)
 	if err != nil {
-		return panelMessageHTML("Config preview", "Preview unavailable: "+err.Error())
+		return template.HTML(`<p class="muted">Preview unavailable: ` + esc(err.Error()) + `</p>`)
 	}
 	preview := struct {
 		Version      string                           `json:"version"`
@@ -624,7 +625,7 @@ func (d *dashboard) deviceConfigPreviewSection(ctx context.Context, found *devic
 		Files:        config.Files,
 		Certificates: config.Certificates,
 	}
-	return panelSectionHTML("", "Config preview", template.HTML(pre(preview)))
+	return template.HTML(pre(preview))
 }
 
 func (d *dashboard) createDevice(w http.ResponseWriter, r *http.Request) {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"xmdm/server/internal/auth"
 )
@@ -16,30 +17,22 @@ func (d *dashboard) login(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		token := issueCSRFCookie(w, r)
-		d.render(w, pageData{
-			Title:     "Login",
-			CSRFToken: token,
-			Forms: []formData{{
-				Title:  "Enter the control plane",
-				Action: "/admin/login",
-				Fields: []fieldData{
-					{Name: "next", Type: "hidden", Value: nextPath},
-					{Name: "username", Label: "Username", Type: "text", Required: true},
-					{Name: "password", Label: "Password", Type: "password", Required: true},
-				},
-				Submit: "Login",
-			}},
-		})
+		username, errorMessage := consumeLoginFlash(w, r)
+		d.render(w, loginPageData(token, nextPath, username, errorMessage))
 	case http.MethodPost:
 		if err := r.ParseForm(); err != nil {
-			d.renderError(w, http.StatusBadRequest, "Login", "invalid form")
+			setLoginFlash(w, "", "invalid form")
+			http.Redirect(w, r, loginRedirectURL(nextPath), http.StatusSeeOther)
 			return
 		}
 		if hasCSRFCookie(r) && !csrfTokenMatches(r) {
-			d.renderError(w, http.StatusForbidden, "Login", "forbidden")
+			setLoginFlash(w, "", "forbidden")
+			http.Redirect(w, r, loginRedirectURL(nextPath), http.StatusSeeOther)
 			return
 		}
-		session, err := d.svc.Login(r.FormValue("username"), r.FormValue("password"))
+		username := strings.TrimSpace(r.FormValue("username"))
+		password := r.FormValue("password")
+		session, err := d.svc.Login(username, password)
 		if err == nil {
 			http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: session.ID, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: session.ExpiresAt})
 			if next := safeAdminRedirectPath(r.FormValue("next")); next != "" {
@@ -50,20 +43,97 @@ func (d *dashboard) login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !errors.Is(err, auth.ErrInvalidCredentials) || d.deps.Identity == nil {
-			d.renderError(w, http.StatusUnauthorized, "Login", "invalid credentials")
+			setLoginFlash(w, username, "invalid credentials")
+			http.Redirect(w, r, loginRedirectURL(nextPath), http.StatusSeeOther)
 			return
 		}
-		user, role, userErr := d.deps.Identity.AuthenticateUser(r.Context(), d.deps.TenantID, strings.TrimSpace(r.FormValue("username")), r.FormValue("password"))
+		user, role, userErr := d.deps.Identity.AuthenticateUser(r.Context(), d.deps.TenantID, username, password)
 		if userErr != nil {
-			d.renderError(w, http.StatusUnauthorized, "Login", "invalid credentials")
+			setLoginFlash(w, username, "invalid credentials")
+			http.Redirect(w, r, loginRedirectURL(nextPath), http.StatusSeeOther)
 			return
 		}
-		session = d.svc.IssueSession(user.Email, dashboardPermissions(role.Permissions))
+		perms := dashboardPermissions(role.Permissions)
+		if !auth.HasPermission(perms, auth.PermissionAdminRead) {
+			setLoginFlash(w, username, "forbidden")
+			http.Redirect(w, r, loginRedirectURL(nextPath), http.StatusSeeOther)
+			return
+		}
+		session = d.svc.IssueSession(user.Email, perms)
 		http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: session.ID, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: session.ExpiresAt})
 		http.Redirect(w, r, "/admin", http.StatusSeeOther)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func loginPageData(csrfToken, nextPath, username, errorMessage string) pageData {
+	return pageData{
+		Title:     "Login",
+		CSRFToken: csrfToken,
+		Error:     errorMessage,
+		Forms: []formData{{
+			Title:  "Enter the control plane",
+			Action: "/admin/login",
+			Fields: []fieldData{
+				{Name: "next", Type: "hidden", Value: nextPath},
+				{Name: "username", Label: "Username", Type: "text", Value: username, Required: true},
+				{Name: "password", Label: "Password", Type: "password", Required: true},
+			},
+			Submit: "Login",
+		}},
+	}
+}
+
+type loginFlashData struct {
+	Username string `json:"username"`
+	Error    string `json:"error"`
+}
+
+func loginRedirectURL(nextPath string) string {
+	if nextPath == "" {
+		return "/admin/login"
+	}
+	return "/admin/login?next=" + url.QueryEscape(nextPath)
+}
+
+func setLoginFlash(w http.ResponseWriter, username, errorMessage string) {
+	payload, err := json.Marshal(loginFlashData{Username: username, Error: errorMessage})
+	if err != nil {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     loginFlashCookieName,
+		Value:    base64.RawURLEncoding.EncodeToString(payload),
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   60,
+	})
+}
+
+func consumeLoginFlash(w http.ResponseWriter, r *http.Request) (string, string) {
+	cookie, err := r.Cookie(loginFlashCookieName)
+	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+		return "", ""
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     loginFlashCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+	raw, err := base64.RawURLEncoding.DecodeString(cookie.Value)
+	if err != nil {
+		return "", ""
+	}
+	var data loginFlashData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return "", ""
+	}
+	return data.Username, data.Error
 }
 
 func (d *dashboard) me(w http.ResponseWriter, r *http.Request) {
@@ -115,8 +185,9 @@ func safeAdminRedirectPath(next string) string {
 }
 
 const (
-	csrfCookieName = "xmdm_csrf"
-	csrfFieldName  = "csrfToken"
+	csrfCookieName       = "xmdm_csrf"
+	csrfFieldName        = "csrfToken"
+	loginFlashCookieName = "xmdm_login_flash"
 )
 
 func hasCSRFCookie(r *http.Request) bool {

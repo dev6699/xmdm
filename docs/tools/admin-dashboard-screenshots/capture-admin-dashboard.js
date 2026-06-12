@@ -20,7 +20,7 @@ const shots = [
   ['admin-dashboard-policy-detail.png', '/admin/policies/policy-baseline', true],
   ['admin-dashboard-devices.png', '/admin/devices', true],
   ['admin-dashboard-device-detail.png', '/admin/devices/device-008', true],
-  ['admin-dashboard-device-remote-control.png', '/admin/devices/5dcd5e7a-0642-4718-924f-c9bf904ea194', true],
+  // ['admin-dashboard-device-remote-control.png', '/admin/devices/5dcd5e7a-0642-4718-924f-c9bf904ea194', true],
   ['admin-dashboard-device-qr.png', '/admin/devices/device-008', true],
   ['admin-dashboard-apps.png', '/admin/apps', true],
   ['admin-dashboard-app-detail.png', '/admin/apps/app-chrome', true],
@@ -39,9 +39,11 @@ const shots = [
     executablePath,
     args: ['--no-sandbox'],
   });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
 
+  let index = 0
   for (const [name, path, requiresAuth] of shots) {
+    console.log(`[${++index}/${shots.length}] ${name}`)
     if (requiresAuth && !page.url().startsWith(base + '/admin')) {
       await login(page);
     }
@@ -49,9 +51,31 @@ const shots = [
       await login(page);
     }
     await page.goto(base + path, { waitUntil: 'networkidle' });
+    await page.addStyleTag({
+      content: `
+        .sidebar {
+          position: relative !important;
+          top: auto !important;
+          height: auto !important;
+          min-height: calc(100vh - 3rem) !important;
+          align-self: stretch !important;
+        }
+      `,
+    });
     if (requiresAuth && page.url().endsWith('/admin/login')) {
       await login(page);
       await page.goto(base + path, { waitUntil: 'networkidle' });
+      await page.addStyleTag({
+        content: `
+        .sidebar {
+          position: relative !important;
+          top: auto !important;
+          height: auto !important;
+          min-height: calc(100vh - 3rem) !important;
+          align-self: stretch !important;
+        }
+      `,
+      });
     }
     if (name === 'admin-dashboard-device-qr.png') {
       await page.getByRole('button', { name: 'Generate QR' }).click();

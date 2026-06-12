@@ -36,7 +36,7 @@ func (d *dashboard) certificates(w http.ResponseWriter, r *http.Request) {
 	if hasNext {
 		items = items[:limit]
 	}
-	d.renderForSession(w, r, session, pageData{Title: "Certificates", Forms: []formData{certificateUploadForm("/admin/certificates/create")}, Items: withPager(certificatesTable(items), pagerHTML(r, page, limit, hasNext))})
+	d.renderForSession(w, r, session, pageData{Title: "Certificates", Subtitle: "Upload certificate artifacts for policy distribution.", Forms: []formData{certificateUploadForm("/admin/certificates/create")}, Items: withPager(certificatesTable(items), pagerHTML(r, page, limit, hasNext))})
 }
 
 func (d *dashboard) certificateDetail(w http.ResponseWriter, r *http.Request) {

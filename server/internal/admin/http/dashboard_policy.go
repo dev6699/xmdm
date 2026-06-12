@@ -619,7 +619,7 @@ func pluginDeviceActionsSection(actions []plugins.DeviceAction) template.HTML {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(`<section class="panel"><h2>Plugin actions</h2><div class="policy-summary">`)
+	b.WriteString(`<details class="panel"><summary><span class="panel-summary-title">Plugin actions</span></summary><div class="panel-body"><div class="policy-summary">`)
 	for _, action := range actions {
 		title := action.ActionID
 		if strings.TrimSpace(action.PluginID) != "" {
@@ -628,7 +628,7 @@ func pluginDeviceActionsSection(actions []plugins.DeviceAction) template.HTML {
 		button := `<a class="button btn-primary" href="` + escAttr(action.Href) + `" title="` + escAttr(title) + `">` + esc(action.Label) + `</a>`
 		b.WriteString(summaryHTMLItem("Action", template.HTML(button)))
 	}
-	b.WriteString(`</div></section>`)
+	b.WriteString(`</div></div></details>`)
 	return template.HTML(b.String())
 }
 

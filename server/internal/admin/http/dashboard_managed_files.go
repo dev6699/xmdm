@@ -37,7 +37,7 @@ func (d *dashboard) managedFiles(w http.ResponseWriter, r *http.Request) {
 	if hasNext {
 		items = items[:limit]
 	}
-	d.renderForSession(w, r, session, pageData{Title: "Managed Files", Forms: []formData{{Title: "Upload managed file", Action: "/admin/managed-files/create", EncType: "multipart/form-data", Fields: []fieldData{{Name: "path", Label: "Device path", Type: "text", Required: true, Placeholder: "/sdcard/xmdm/device-config.txt"}, {Name: "replaceVariables", Label: "Replace variables", Type: "checkbox", Value: "on"}, {Name: "file", Label: "File", Type: "file", Required: true}}, Submit: "Upload managed file"}}, Items: withPager(managedFilesTable(items), pagerHTML(r, page, limit, hasNext))})
+	d.renderForSession(w, r, session, pageData{Title: "Managed Files", Subtitle: "Upload device-side files and keep them ready for policy binding.", Forms: []formData{{Title: "Upload managed file", Action: "/admin/managed-files/create", EncType: "multipart/form-data", Fields: []fieldData{{Name: "path", Label: "Device path", Type: "text", Required: true, Placeholder: "/sdcard/xmdm/device-config.txt"}, {Name: "replaceVariables", Label: "Replace variables", Type: "checkbox", Value: "on"}, {Name: "file", Label: "File", Type: "file", Required: true}}, Submit: "Upload managed file"}}, Items: withPager(managedFilesTable(items), pagerHTML(r, page, limit, hasNext))})
 }
 
 func (d *dashboard) managedFileDetail(w http.ResponseWriter, r *http.Request) {

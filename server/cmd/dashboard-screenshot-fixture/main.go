@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"time"
 
 	adminhttp "xmdm/server/internal/admin/http"
@@ -66,18 +67,22 @@ func main() {
 type identityStore struct{ now time.Time }
 
 func (s *identityStore) ListUsers(context.Context, string, pagination.Params) ([]identity.User, error) {
-	return []identity.User{
+	items := []identity.User{
 		{RecordBase: identity.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
 		{RecordBase: identity.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
 		{RecordBase: identity.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
-	}, nil
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
 }
 func (s *identityStore) ListActiveUsers(context.Context, string) ([]identity.User, error) {
-	return []identity.User{
+	items := []identity.User{
 		{RecordBase: identity.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
 		{RecordBase: identity.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
 		{RecordBase: identity.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
-	}, nil
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
 }
 func (s *identityStore) GetUser(_ context.Context, _ string, id string) (identity.User, error) {
 	for _, item := range []identity.User{
@@ -104,18 +109,22 @@ func (s *identityStore) AuthenticateUser(context.Context, string, string, string
 	return identity.User{}, identity.Role{}, nil
 }
 func (s *identityStore) ListRoles(context.Context, string, pagination.Params) ([]identity.Role, error) {
-	return []identity.Role{
+	items := []identity.Role{
 		{RecordBase: identity.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
 		{RecordBase: identity.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
 		{RecordBase: identity.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
-	}, nil
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
 }
 func (s *identityStore) ListActiveRoles(context.Context, string) ([]identity.Role, error) {
-	return []identity.Role{
+	items := []identity.Role{
 		{RecordBase: identity.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
 		{RecordBase: identity.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
 		{RecordBase: identity.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
-	}, nil
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
 }
 func (s *identityStore) GetRole(_ context.Context, _ string, id string) (identity.Role, error) {
 	for _, item := range []identity.Role{
@@ -142,20 +151,24 @@ func (s *identityStore) RetireRole(context.Context, string, string) (identity.Ro
 type groupStore struct{ now time.Time }
 
 func (s *groupStore) ListGroups(context.Context, string, pagination.Params) ([]group.Group, error) {
-	return []group.Group{
+	items := []group.Group{
 		{RecordBase: group.RecordBase{ID: "group-field", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -18), UpdatedAt: s.now}, Name: "Field Devices"},
 		{RecordBase: group.RecordBase{ID: "group-kiosk", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -17), UpdatedAt: s.now}, Name: "Kiosk Fleet"},
 		{RecordBase: group.RecordBase{ID: "group-warehouse", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now.Add(-2 * time.Hour)}, Name: "Warehouse"},
 		{RecordBase: group.RecordBase{ID: "group-rugged", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -9), UpdatedAt: s.now.Add(-5 * time.Hour)}, Name: "Rugged Handhelds"},
-	}, nil
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
 }
 func (s *groupStore) ListActiveGroups(context.Context, string) ([]group.Group, error) {
-	return []group.Group{
+	items := []group.Group{
 		{RecordBase: group.RecordBase{ID: "group-field", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -18), UpdatedAt: s.now}, Name: "Field Devices"},
 		{RecordBase: group.RecordBase{ID: "group-kiosk", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -17), UpdatedAt: s.now}, Name: "Kiosk Fleet"},
 		{RecordBase: group.RecordBase{ID: "group-warehouse", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now.Add(-2 * time.Hour)}, Name: "Warehouse"},
 		{RecordBase: group.RecordBase{ID: "group-rugged", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -9), UpdatedAt: s.now.Add(-5 * time.Hour)}, Name: "Rugged Handhelds"},
-	}, nil
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
 }
 func (s *groupStore) GetGroup(_ context.Context, _ string, id string) (group.Group, error) {
 	for _, item := range []group.Group{
@@ -180,6 +193,7 @@ func (s *groupStore) ListGroupDevices(_ context.Context, _ string, groupID strin
 			}
 		}
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].CreatedAt.After(rows[j].CreatedAt) })
 	return rows, nil
 }
 func (s *groupStore) CreateGroup(context.Context, string, group.GroupUpsert) (group.Group, error) {
@@ -195,12 +209,14 @@ func (s *groupStore) RetireGroup(context.Context, string, string) (group.Group, 
 type policyStore struct{ now time.Time }
 
 func fixturePolicies(now time.Time) []policy.Policy {
-	return []policy.Policy{
+	items := []policy.Policy{
 		{RecordBase: policy.RecordBase{ID: "policy-baseline", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -20), UpdatedAt: now.Add(-30 * time.Minute)}, Name: "Baseline", Version: 5, KioskMode: false, Restrictions: []byte(`{"allowPackages":["com.android.chrome","com.example.viewer","com.xmdm.agent"],"stayAwakeWhilePluggedIn":true}`)},
 		{RecordBase: policy.RecordBase{ID: "policy-kiosk", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -18), UpdatedAt: now.Add(-90 * time.Minute)}, Name: "Kiosk", Version: 8, KioskMode: true, KioskAppPackage: "com.xmdm.kiosk", Restrictions: []byte(`{"kioskExitPasscode":"1234","kioskKeepScreenOn":true,"blockPackages":["com.android.settings","com.android.vending"]}`)},
 		{RecordBase: policy.RecordBase{ID: "policy-rugged", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -14), UpdatedAt: now.Add(-3 * time.Hour)}, Name: "Rugged Field Ops", Version: 3, KioskMode: false, Restrictions: []byte(`{"allowPackages":["com.zebra.datawedge","com.xmdm.agent","com.example.viewer"],"stayAwakeWhilePluggedIn":false}`)},
 		{RecordBase: policy.RecordBase{ID: "policy-guest", TenantID: tenantID, Status: "retired", CreatedAt: now.AddDate(0, 0, -30), UpdatedAt: now.AddDate(0, 0, -2)}, Name: "Guest Demo", Version: 1, KioskMode: false, Restrictions: []byte(`{"allowPackages":["com.android.chrome"]}`)},
 	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items
 }
 func (s *policyStore) ListPolicies(context.Context, string, pagination.Params) ([]policy.Policy, error) {
 	return fixturePolicies(s.now), nil
@@ -359,7 +375,7 @@ func fixtureDevices(now time.Time) []device.Device {
 	policyBaseline := "policy-baseline"
 	policyKiosk := "policy-kiosk"
 	policyRugged := "policy-rugged"
-	return []device.Device{
+	items := []device.Device{
 		{RecordBase: device.RecordBase{ID: "device-001", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -15), UpdatedAt: now.Add(-3 * time.Minute)}, Name: "warehouse-tablet-001", PolicyID: &policyBaseline, GroupIDs: []string{"group-warehouse"}},
 		{RecordBase: device.RecordBase{ID: "device-002", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -14), UpdatedAt: now.Add(-12 * time.Minute)}, Name: "warehouse-tablet-002", PolicyID: &policyBaseline, GroupIDs: []string{"group-warehouse"}},
 		{RecordBase: device.RecordBase{ID: "device-003", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -13), UpdatedAt: now.Add(-35 * time.Minute)}, Name: "frontdesk-kiosk-003", PolicyID: &policyKiosk, GroupIDs: []string{"group-kiosk"}},
@@ -376,6 +392,8 @@ func fixtureDevices(now time.Time) []device.Device {
 		{RecordBase: device.RecordBase{ID: "device-014", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -5), UpdatedAt: now.Add(-16 * time.Hour)}, Name: "shared-tablet-014", PolicyID: &policyBaseline, GroupIDs: []string{"group-field"}},
 		{RecordBase: device.RecordBase{ID: "device-015", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -3), UpdatedAt: now.Add(-4 * time.Minute)}, Name: "screening-kiosk-015", PolicyID: &policyKiosk, GroupIDs: []string{"group-kiosk"}},
 	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items
 }
 func (s *deviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return fixtureDevices(s.now), nil
@@ -457,7 +475,7 @@ type appStore struct {
 }
 
 func fixtureApps(now time.Time) []apps.App {
-	return []apps.App{
+	items := []apps.App{
 		{RecordBase: apps.RecordBase{ID: "app-chrome", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -10), UpdatedAt: now}, PackageName: "com.android.chrome", Name: "Chrome"},
 		{RecordBase: apps.RecordBase{ID: "app-viewer", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -8), UpdatedAt: now.Add(-2 * time.Hour)}, PackageName: "com.example.viewer", Name: "Document Viewer"},
 		{RecordBase: apps.RecordBase{ID: "app-agent", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -7), UpdatedAt: now.Add(-30 * time.Minute)}, PackageName: "com.xmdm.agent", Name: "XMDM Agent"},
@@ -465,6 +483,8 @@ func fixtureApps(now time.Time) []apps.App {
 		{RecordBase: apps.RecordBase{ID: "app-datawedge", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -5), UpdatedAt: now.Add(-6 * time.Hour)}, PackageName: "com.zebra.datawedge", Name: "DataWedge"},
 		{RecordBase: apps.RecordBase{ID: "app-old-demo", TenantID: tenantID, Status: "retired", CreatedAt: now.AddDate(0, 0, -20), UpdatedAt: now.AddDate(0, 0, -2)}, PackageName: "com.example.old", Name: "Old Demo App"},
 	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items
 }
 func (s *appStore) ListApps(context.Context, string, pagination.Params) ([]apps.App, error) {
 	return fixtureApps(s.now), nil
@@ -543,14 +563,18 @@ func (s *appStore) ListVersions(_ context.Context, _ string, appID string, _ pag
 	artifactID := s.artifact.ID
 	switch appID {
 	case "app-chrome":
-		return []apps.Version{
+		items := []apps.Version{
 			{ID: "version-100", PublishedAt: timePtr(s.now.AddDate(0, 0, -8)), TenantID: tenantID, AppID: "app-chrome", Status: apps.VersionStatusPublished, VersionName: "1.0.0", VersionCode: 100, ArtifactID: &artifactID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -8)},
 			{ID: "version-120", PublishedAt: timePtr(s.now.AddDate(0, 0, -2)), TenantID: tenantID, AppID: "app-chrome", Status: apps.VersionStatusPublished, VersionName: "1.2.0", VersionCode: 120, ArtifactID: &artifactID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -2)},
-		}, nil
+		}
+		sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+		return items, nil
 	case "app-agent":
-		return []apps.Version{
+		items := []apps.Version{
 			{ID: "version-agent", PublishedAt: timePtr(s.now.AddDate(0, 0, -1)), TenantID: tenantID, AppID: "app-agent", Status: apps.VersionStatusPublished, VersionName: "0.1.0", VersionCode: 1, ArtifactID: &artifactID, Artifact: &s.artifact, Checksum: s.artifact.Checksum, CreatedAt: s.now.AddDate(0, 0, -1)},
-		}, nil
+		}
+		sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+		return items, nil
 	default:
 		return nil, nil
 	}
@@ -568,12 +592,14 @@ type fileStore struct {
 }
 
 func (s *fileStore) ListFiles(context.Context, string, pagination.Params) ([]files.File, error) {
-	return []files.File{
+	items := []files.File{
 		{RecordBase: files.RecordBase{ID: "file-apk", TenantID: tenantID, Status: "active", UpdatedAt: s.now}, Name: "launcher.apk", ArtifactID: s.artifact.ID, Checksum: s.artifact.Checksum, MimeType: s.artifact.MimeType, Artifact: &s.artifact},
 		{RecordBase: files.RecordBase{ID: "file-config", TenantID: tenantID, Status: "active", UpdatedAt: s.now.Add(-2 * time.Hour)}, Name: "device-config.txt", ArtifactID: s.artifact.ID, Checksum: s.artifact.Checksum, MimeType: "text/plain", Artifact: &s.artifact},
 		{RecordBase: files.RecordBase{ID: "file-kiosk", TenantID: tenantID, Status: "active", UpdatedAt: s.now.Add(-4 * time.Hour)}, Name: "kiosk-config.json", ArtifactID: s.artifact.ID, Checksum: s.artifact.Checksum, MimeType: "application/json", Artifact: &s.artifact},
 		{RecordBase: files.RecordBase{ID: "file-field", TenantID: tenantID, Status: "active", UpdatedAt: s.now.Add(-6 * time.Hour)}, Name: "field-rules.json", ArtifactID: s.artifact.ID, Checksum: s.artifact.Checksum, MimeType: "application/json", Artifact: &s.artifact},
-	}, nil
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+	return items, nil
 }
 func (s *fileStore) GetFile(context.Context, string, string) (files.File, error) {
 	return files.File{}, nil
@@ -597,11 +623,13 @@ func fixtureManagedFiles(now time.Time, artifact files.Artifact) []managedfiles.
 	config := base("file-config", "device-config.txt", "text/plain", now.Add(-2*time.Hour))
 	kiosk := base("file-kiosk", "kiosk-config.json", "application/json", now.Add(-4*time.Hour))
 	field := base("file-field", "field-rules.json", "application/json", now.Add(-6*time.Hour))
-	return []managedfiles.ManagedFile{
+	items := []managedfiles.ManagedFile{
 		{RecordBase: managedfiles.RecordBase{ID: "managed-file-config", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -10), UpdatedAt: now}, FileID: config.ID, Path: "/sdcard/xmdm/config.txt", ReplaceVariables: true, File: &config},
 		{RecordBase: managedfiles.RecordBase{ID: "managed-file-kiosk", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -8), UpdatedAt: now.Add(-2 * time.Hour)}, FileID: kiosk.ID, Path: "/sdcard/xmdm/kiosk.json", ReplaceVariables: true, File: &kiosk},
 		{RecordBase: managedfiles.RecordBase{ID: "managed-file-field", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -6), UpdatedAt: now.Add(-4 * time.Hour)}, FileID: field.ID, Path: "/sdcard/xmdm/field-rules.json", ReplaceVariables: false, File: &field},
 	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items
 }
 func (s *managedFileStore) ListManagedFiles(context.Context, string, pagination.Params) ([]managedfiles.ManagedFile, error) {
 	return fixtureManagedFiles(s.now, s.artifact), nil
@@ -637,11 +665,13 @@ type certificateStore struct {
 }
 
 func fixtureCertificates(now time.Time, artifact files.Artifact) []certificates.Certificate {
-	return []certificates.Certificate{
+	items := []certificates.Certificate{
 		{RecordBase: certificates.RecordBase{ID: "cert-root", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -20), UpdatedAt: now}, Name: "MDM Root", ArtifactID: artifact.ID, Checksum: artifact.Checksum, Artifact: &artifact},
 		{RecordBase: certificates.RecordBase{ID: "cert-wifi", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -12), UpdatedAt: now.Add(-3 * time.Hour)}, Name: "Corporate Wi-Fi", ArtifactID: artifact.ID, Checksum: "sha256-wifi-cert", Artifact: &artifact},
 		{RecordBase: certificates.RecordBase{ID: "cert-vpn", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -8), UpdatedAt: now.Add(-6 * time.Hour)}, Name: "VPN Client CA", ArtifactID: artifact.ID, Checksum: "sha256-vpn-cert", Artifact: &artifact},
 	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items
 }
 func (s *certificateStore) ListCertificates(context.Context, string, pagination.Params) ([]certificates.Certificate, error) {
 	return fixtureCertificates(s.now, s.artifact), nil
@@ -706,6 +736,7 @@ func fixtureCommands(now time.Time) []commands.Command {
 			idx++
 		}
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].CreatedAt.After(rows[j].CreatedAt) })
 	return rows
 }
 func commandResult(status string, idx int) map[string]any {
@@ -757,6 +788,7 @@ func (s *commandStore) ListPending(context.Context, string, string, pagination.P
 			rows = append(rows, item)
 		}
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].CreatedAt.After(rows[j].CreatedAt) })
 	return rows, nil
 }
 func (s *commandStore) ListPendingForDevice(context.Context, string, string) ([]commands.Command, error) {
@@ -766,6 +798,7 @@ func (s *commandStore) ListPendingForDevice(context.Context, string, string) ([]
 			rows = append(rows, item)
 		}
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].CreatedAt.After(rows[j].CreatedAt) })
 	return rows, nil
 }
 
@@ -796,6 +829,7 @@ func fixtureLogs(now time.Time) []logs.Record {
 			Message:    messages[i%len(messages)],
 		})
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].ObservedAt.After(rows[j].ObservedAt) })
 	return rows
 }
 func (s *logStore) Search(_ context.Context, _ string, filter logs.SearchFilter) ([]logs.Record, error) {
@@ -900,6 +934,7 @@ func fixtureDeviceInfo(now time.Time) []deviceinfo.Record {
 			seq++
 		}
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].ObservedAt.After(rows[j].ObservedAt) })
 	return rows
 }
 func (s *deviceInfoStore) Search(_ context.Context, _ string, filter deviceinfo.SearchFilter) ([]deviceinfo.Record, error) {
@@ -977,11 +1012,22 @@ func fixtureAuditEvents(now time.Time) []audit.Event {
 			Details:      event.details,
 		})
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].CreatedAt.After(rows[j].CreatedAt) })
 	return rows
 }
 
-func (s *auditStore) List(context.Context, string, pagination.Params) ([]audit.Event, error) {
-	return fixtureAuditEvents(s.now), nil
+func (s *auditStore) List(_ context.Context, _ string, params pagination.Params) ([]audit.Event, error) {
+	items := fixtureAuditEvents(s.now)
+	if params.Offset > 0 {
+		if params.Offset >= len(items) {
+			return []audit.Event{}, nil
+		}
+		items = items[params.Offset:]
+	}
+	if params.Limit > 0 && params.Limit < len(items) {
+		items = items[:params.Limit]
+	}
+	return items, nil
 }
 
 func (s *auditStore) CountSince(context.Context, string, time.Time) (int, error) {
@@ -1003,13 +1049,15 @@ func (s *enrollmentStore) BindDevice(context.Context, string, string, string, ma
 	return enrollment.BoundDevice{}, nil
 }
 func (s *enrollmentStore) ListTokens(context.Context, string, pagination.Params) ([]enrollment.Token, error) {
-	return []enrollment.Token{
+	items := []enrollment.Token{
 		{ID: "token-1", TenantID: tenantID, Status: enrollment.TokenStatusIssued, ExpiresAt: s.now.Add(2 * time.Hour), CreatedAt: s.now.Add(-10 * time.Minute), UpdatedAt: s.now},
 		{ID: "token-2", TenantID: tenantID, Status: enrollment.TokenStatusConsumed, ExpiresAt: s.now.Add(-30 * time.Minute), ConsumedAt: timePtr(s.now.Add(-25 * time.Minute)), CreatedAt: s.now.Add(-90 * time.Minute), UpdatedAt: s.now},
 		{ID: "token-3", TenantID: tenantID, Status: enrollment.TokenStatusRevoked, ExpiresAt: s.now.Add(4 * time.Hour), RevokedAt: timePtr(s.now.Add(-40 * time.Minute)), CreatedAt: s.now.Add(-2 * time.Hour), UpdatedAt: s.now},
 		{ID: "token-4", TenantID: tenantID, Status: enrollment.TokenStatusIssued, ExpiresAt: s.now.Add(8 * time.Hour), CreatedAt: s.now.Add(-3 * time.Hour), UpdatedAt: s.now},
 		{ID: "token-5", TenantID: tenantID, Status: enrollment.TokenStatusConsumed, ExpiresAt: s.now.Add(12 * time.Hour), ConsumedAt: timePtr(s.now.Add(-4 * time.Hour)), CreatedAt: s.now.Add(-5 * time.Hour), UpdatedAt: s.now.Add(-4 * time.Hour)},
-	}, nil
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
 }
 func (s *enrollmentStore) RevokeToken(context.Context, string, string) (enrollment.Token, error) {
 	return enrollment.Token{ID: "token-1", TenantID: tenantID, Status: enrollment.TokenStatusRevoked, ExpiresAt: s.now.Add(2 * time.Hour), CreatedAt: s.now, UpdatedAt: s.now}, nil

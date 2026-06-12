@@ -158,7 +158,7 @@ const dashboardTemplate = `<!doctype html>
       --pre-ink:       #7d9ab5;
       --header-bg:     rgba(11,14,17,.95);
       --nav-bg:        #0e1218;
-      --nav-width:     15rem;
+      --nav-width:     13.75rem;
       --radius-sm:     .4rem;
       --radius:        .6rem;
       --radius-lg:     .9rem;
@@ -223,8 +223,8 @@ const dashboardTemplate = `<!doctype html>
       align-items: center;
       justify-content: space-between;
       gap: 1rem;
-      height: 3.25rem;
-      padding: 0 1.5rem;
+      height: 3rem;
+      padding: 0 1rem;
       background: var(--header-bg);
       border-bottom: 1px solid rgba(255,255,255,.06);
       backdrop-filter: blur(16px);
@@ -268,7 +268,28 @@ const dashboardTemplate = `<!doctype html>
       cursor: pointer; font-size: .95rem; padding: 0;
       transition: background .15s, border-color .15s, color .15s;
     }
+    .btn-icon svg {
+      width: 1rem;
+      height: 1rem;
+      display: block;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.7;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
     .btn-icon:hover { background: rgba(255,255,255,.1); color: #fff; border-color: rgba(255,255,255,.25); box-shadow: none; }
+    [data-theme="light"] .btn-icon {
+      color: var(--ink);
+      border-color: var(--border);
+      background: rgba(255,255,255,.82);
+    }
+    [data-theme="light"] .btn-icon:hover {
+      background: var(--surface2);
+      color: var(--ink);
+      border-color: var(--border);
+      box-shadow: none;
+    }
     .icon-sun  { display: none; }
     .icon-moon { display: block; }
     [data-theme="light"] .icon-sun  { display: block; }
@@ -307,7 +328,7 @@ const dashboardTemplate = `<!doctype html>
     .shell {
       display: grid;
       grid-template-columns: var(--nav-width) 1fr;
-      min-height: calc(100vh - 3.25rem);
+      min-height: calc(100vh - 3rem);
     }
 
     /* ═══════════════════════════════════════════
@@ -315,12 +336,13 @@ const dashboardTemplate = `<!doctype html>
     ═══════════════════════════════════════════ */
     .sidebar {
       position: sticky;
-      top: 3.25rem;
-      height: calc(100vh - 3.25rem);
+      top: 3rem;
+      align-self: start;
+      min-height: calc(100vh - 3rem);
       overflow-y: auto;
       background: var(--nav-bg);
       border-right: 1px solid var(--border);
-      padding: 1rem .75rem 2rem;
+      padding: .75rem .65rem 1.5rem;
       display: flex;
       flex-direction: column;
       gap: 2px;
@@ -345,7 +367,7 @@ const dashboardTemplate = `<!doctype html>
 
     .sidebar a {
       display: flex; align-items: center; gap: .6rem;
-      padding: .5rem .7rem;
+      padding: .4rem .6rem;
       border-radius: var(--radius-sm);
       font-size: .875rem;
       font-weight: 400;
@@ -398,7 +420,7 @@ const dashboardTemplate = `<!doctype html>
     ═══════════════════════════════════════════ */
     .content {
       min-width: 0;
-      padding: 1.75rem 2.25rem 3rem;
+      padding: 1.25rem 1.5rem 2rem;
     }
 
     /* page header row */
@@ -407,11 +429,11 @@ const dashboardTemplate = `<!doctype html>
       align-items: center;
       justify-content: space-between;
       gap: 1rem;
-      margin-bottom: 1.75rem;
+      margin-bottom: 1rem;
       flex-wrap: wrap;
     }
     h1 {
-      font-size: 1.35rem;
+      font-size: 1.2rem;
       font-weight: 600;
       letter-spacing: -.02em;
       color: var(--ink);
@@ -420,7 +442,7 @@ const dashboardTemplate = `<!doctype html>
     .page-subtitle {
       font-size: .825rem;
       color: var(--ink-2);
-      margin-top: .2rem;
+      margin-top: .15rem;
       font-weight: 400;
     }
 
@@ -432,8 +454,8 @@ const dashboardTemplate = `<!doctype html>
       text-transform: uppercase;
       letter-spacing: .1em;
       color: var(--ink-3);
-      margin-bottom: 1.1rem;
-      padding-bottom: .65rem;
+      margin-bottom: .8rem;
+      padding-bottom: .45rem;
       border-bottom: 1px solid var(--border);
     }
 
@@ -447,11 +469,20 @@ const dashboardTemplate = `<!doctype html>
     }
     .login-wrap {
       flex: 1;
+      position: relative;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 2rem 1rem;
+    }
+    .login-notice {
+      position: absolute;
+      top: 1rem;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(100%, 28rem);
+      z-index: 1;
     }
     .login-card {
       width: 100%;
@@ -459,12 +490,12 @@ const dashboardTemplate = `<!doctype html>
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
-      padding: 2.5rem 2.75rem;
+      padding: 2rem 2.25rem;
       box-shadow: var(--shadow);
     }
     .login-logo {
       display: flex; align-items: center; justify-content: center; gap: .5rem;
-      margin-bottom: 2rem;
+      margin-bottom: 1.25rem;
     }
     .login-logo-dot {
       width: 10px; height: 10px; border-radius: 50%;
@@ -491,12 +522,12 @@ const dashboardTemplate = `<!doctype html>
       color: var(--ink-2);
       margin-bottom: 2rem;
     }
-    .login-card label { margin-top: 1.1rem; }
+    .login-card label { margin-top: .85rem; }
     .login-card label:first-of-type { margin-top: 0; }
     .login-card .btn-primary {
       width: 100%;
       justify-content: center;
-      margin-top: 1.5rem;
+      margin-top: 1.1rem;
       padding: .65rem 1rem;
       font-size: .9rem;
     }
@@ -514,8 +545,8 @@ const dashboardTemplate = `<!doctype html>
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
+      padding: 1.1rem 1.2rem;
+      margin-bottom: 1rem;
       box-shadow: var(--shadow-sm);
       transition: border-color .18s, background .2s;
     }
@@ -526,11 +557,21 @@ const dashboardTemplate = `<!doctype html>
     details.panel > summary {
       list-style: none;
       cursor: pointer;
-      padding: 1.5rem;
+      padding: 1.1rem 1.2rem;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 1rem;
+    }
+    details.panel > summary .panel-summary-title {
+      display: inline-flex;
+      align-items: center;
+      font-family: "Space Mono", monospace;
+      font-size: .72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--ink-3);
     }
     details.panel > summary::-webkit-details-marker {
       display: none;
@@ -546,21 +587,21 @@ const dashboardTemplate = `<!doctype html>
       transform: rotate(-90deg);
     }
     details.panel > .panel-body {
-      padding: 0 1.5rem 1.5rem;
+      padding: 0 1.2rem 1.2rem;
     }
 
     /* metric grid */
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
-      gap: 1rem;
-      margin-bottom: 1.5rem;
+      gap: .75rem;
+      margin-bottom: 1rem;
     }
     .metric-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
-      padding: 1.25rem 1.35rem 1.1rem;
+      padding: 1rem 1.1rem .95rem;
       box-shadow: var(--shadow-sm);
       transition: border-color .18s, transform .18s, box-shadow .18s;
     }
@@ -576,7 +617,7 @@ const dashboardTemplate = `<!doctype html>
       text-transform: uppercase;
       letter-spacing: .1em;
       color: var(--ink-3);
-      margin-bottom: .6rem;
+      margin-bottom: .45rem;
     }
     .metric-value {
       font-family: "Space Mono", monospace;
@@ -588,18 +629,18 @@ const dashboardTemplate = `<!doctype html>
     .metric-note {
       font-size: .75rem;
       color: var(--ink-2);
-      margin-top: .5rem;
+      margin-top: .4rem;
     }
     /* --------------------------------------------------
        OVERVIEW - executive dashboard
     -------------------------------------------------- */
     .overview-stack {
       display: grid;
-      gap: 1.25rem;
-      margin-bottom: 1.25rem;
+      gap: 1rem;
+      margin-bottom: 1rem;
     }
     .overview-hero {
-      padding: 1.75rem 2rem;
+      padding: 1.2rem 1.35rem;
       background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
@@ -610,7 +651,7 @@ const dashboardTemplate = `<!doctype html>
       content: '';
       position: absolute;
       top: 0; right: 0;
-      width: 340px; height: 210px;
+      width: 280px; height: 180px;
       background: radial-gradient(ellipse at top right, var(--accent-dim) 0%, transparent 72%);
       pointer-events: none;
     }
@@ -618,7 +659,7 @@ const dashboardTemplate = `<!doctype html>
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      gap: 1.25rem;
+      gap: 1rem;
       flex-wrap: wrap;
       position: relative;
     }
@@ -673,8 +714,8 @@ const dashboardTemplate = `<!doctype html>
       grid-template-columns: auto 1fr;
       gap: .75rem;
       align-items: start;
-      margin-top: 1.35rem;
-      padding: .95rem 1rem;
+      margin-top: 1rem;
+      padding: .75rem .85rem;
       background: var(--surface3);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -685,7 +726,7 @@ const dashboardTemplate = `<!doctype html>
       height: .62rem;
       border-radius: 999px;
       background: var(--ink-3);
-      margin-top: .35rem;
+      margin-top: .2rem;
     }
     .overview-status-title {
       font-weight: 700;
@@ -709,8 +750,8 @@ const dashboardTemplate = `<!doctype html>
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
       gap: .75rem;
-      margin-top: 1.35rem;
-      padding-top: 1.35rem;
+      margin-top: 1rem;
+      padding-top: 1rem;
       border-top: 1px solid var(--border);
       position: relative;
     }
@@ -729,10 +770,10 @@ const dashboardTemplate = `<!doctype html>
     .health-item {
       display: grid;
       grid-template-rows: auto auto 1fr;
-      gap: .3rem;
+      gap: .25rem;
       height: 100%;
-      min-height: 8.1rem;
-      padding: 1rem 1.1rem;
+      min-height: 7rem;
+      padding: .85rem .95rem;
       background: var(--surface3);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -756,8 +797,8 @@ const dashboardTemplate = `<!doctype html>
       gap: .45rem;
     }
     .health-dot {
-      width: .45rem;
-      height: .45rem;
+      width: .4rem;
+      height: .4rem;
       border-radius: 999px;
       background: var(--ink-3);
       flex: 0 0 auto;
@@ -767,7 +808,7 @@ const dashboardTemplate = `<!doctype html>
     .tone-danger .health-dot { background: var(--danger); }
     .health-label {
       font-family: "DM Sans", system-ui, sans-serif;
-      font-size: .74rem;
+      font-size: .72rem;
       font-weight: 700;
       color: var(--ink-2);
       flex: 1;
@@ -781,7 +822,7 @@ const dashboardTemplate = `<!doctype html>
     a.health-item-wrap:hover .health-nav-arrow { opacity: 1; transform: translateX(2px); }
     .health-value {
       font-family: "Space Mono", monospace;
-      font-size: 1.5rem;
+      font-size: 1.35rem;
       font-weight: 700;
       color: var(--ink);
       line-height: 1.1;
@@ -794,8 +835,8 @@ const dashboardTemplate = `<!doctype html>
       color: var(--ink-3);
       font-size: .74rem;
       line-height: 1.4;
-      min-height: 2.1rem;
-      padding-bottom: .35rem;
+      min-height: 1.8rem;
+      padding-bottom: .2rem;
       align-self: end;
     }
 
@@ -803,27 +844,27 @@ const dashboardTemplate = `<!doctype html>
     .overview-metrics-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-      gap: .85rem;
+      gap: .65rem;
     }
     .overview-metric-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
-      padding: 1.1rem 1.2rem;
+      padding: .95rem 1rem;
       box-shadow: var(--shadow-sm);
       display: flex;
       flex-direction: column;
-      min-height: 8.25rem;
+      min-height: 7.2rem;
     }
     .overview-metric-label {
       font-size: .72rem;
       font-weight: 700;
       color: var(--ink-2);
-      margin-bottom: .45rem;
+      margin-bottom: .3rem;
     }
     .overview-metric-value {
       font-family: "Space Mono", monospace;
-      font-size: 1.65rem;
+      font-size: 1.45rem;
       font-weight: 700;
       color: var(--ink);
       line-height: 1;
@@ -831,8 +872,8 @@ const dashboardTemplate = `<!doctype html>
     .overview-metric-detail {
       color: var(--ink-3);
       font-size: .76rem;
-      margin-top: .45rem;
-      margin-bottom: .75rem;
+      margin-top: .35rem;
+      margin-bottom: .5rem;
     }
     .overview-metric-spark {
       margin-top: auto;
@@ -850,14 +891,14 @@ const dashboardTemplate = `<!doctype html>
     }
     .attention-list {
       display: grid;
-      gap: .65rem;
+      gap: .5rem;
     }
     .attention-item {
       display: grid;
       grid-template-columns: auto 1fr auto;
       align-items: start;
-      gap: .75rem;
-      padding: .8rem .9rem;
+      gap: .55rem;
+      padding: .7rem .8rem;
       background: var(--surface2);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -865,11 +906,11 @@ const dashboardTemplate = `<!doctype html>
     }
     .attention-item:hover { border-color: var(--border-hi); background: var(--surface3); }
     .attention-dot {
-      width: .5rem;
-      height: .5rem;
+      width: .45rem;
+      height: .45rem;
       border-radius: 999px;
       background: var(--ink-3);
-      margin-top: .45rem;
+      margin-top: .3rem;
     }
     .tone-good .attention-dot { background: var(--accent); }
     .tone-warn .attention-dot { background: var(--warn); }
@@ -895,40 +936,40 @@ const dashboardTemplate = `<!doctype html>
     .overview-bottom-row {
       display: grid;
       grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
-      gap: 1.25rem;
+      gap: 1rem;
     }
     .overview-bottom-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     .overview-device-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 1.25rem;
+      gap: 1rem;
       align-items: stretch;
     }
     .overview-device-grid .overview-panel {
-      min-height: 23.5rem;
+      min-height: 21rem;
       display: flex;
       flex-direction: column;
     }
     .overview-device-grid .overview-chart {
       flex: 1;
-      min-height: 17rem;
+      min-height: 15rem;
       display: flex;
       align-items: stretch;
     }
     .overview-device-grid .overview-chart svg {
       width: 100%;
       height: 100%;
-      min-height: 17rem;
+      min-height: 15rem;
     }
     .overview-device-grid .chart-empty {
       flex: 1;
-      min-height: 17rem;
+      min-height: 15rem;
     }
     .overview-panel {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
-      padding: 1.35rem 1.5rem;
+      padding: 1rem 1.1rem;
       margin-bottom: 0;
       box-shadow: var(--shadow-sm);
     }
@@ -937,8 +978,8 @@ const dashboardTemplate = `<!doctype html>
       align-items: baseline;
       justify-content: space-between;
       gap: .75rem;
-      margin-bottom: 1.1rem;
-      padding-bottom: .75rem;
+      margin-bottom: .8rem;
+      padding-bottom: .55rem;
       border-bottom: 1px solid var(--border);
     }
     .overview-panel-title {
@@ -977,14 +1018,14 @@ const dashboardTemplate = `<!doctype html>
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: .25rem;
-      min-height: 120px;
+      gap: .2rem;
+      min-height: 110px;
       color: var(--ink-2);
       font-size: .82rem;
       text-align: center;
       border: 1px dashed var(--border);
       border-radius: var(--radius);
-      padding: 1rem;
+      padding: .85rem;
     }
     .chart-empty small {
       color: var(--ink-3);
@@ -1007,7 +1048,7 @@ const dashboardTemplate = `<!doctype html>
     /* command breakdown */
     .cmd-breakdown {
       display: grid;
-      gap: .65rem;
+      gap: .5rem;
       margin-bottom: 1rem;
     }
     .cmd-row {
@@ -1139,7 +1180,7 @@ const dashboardTemplate = `<!doctype html>
     }
     .activity-item {
       display: grid;
-      grid-template-columns: 5.8rem 1fr;
+      grid-template-columns: 11rem minmax(0, 1fr);
       gap: .8rem;
       padding: .7rem .75rem;
       background: var(--surface2);
@@ -1147,10 +1188,14 @@ const dashboardTemplate = `<!doctype html>
       border-radius: var(--radius-sm);
     }
     .activity-time {
+      width: 100%;
+      white-space: nowrap;
       font-family: "Space Mono", monospace;
       color: var(--ink-3);
       font-size: .68rem;
       line-height: 1.45;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .activity-main {
       min-width: 0;
@@ -1188,9 +1233,9 @@ const dashboardTemplate = `<!doctype html>
     ═══════════════════════════════════════════ */
     .alert {
       display: flex; align-items: flex-start; gap: .6rem;
-      padding: .75rem 1rem;
+      padding: .65rem .85rem;
       border-radius: var(--radius);
-      margin-bottom: 1.25rem;
+      margin-bottom: .9rem;
       font-size: .875rem;
       line-height: 1.5;
     }
@@ -1206,21 +1251,21 @@ const dashboardTemplate = `<!doctype html>
       color: var(--danger);
     }
     /* keep old class names working */
-    .flash { display:flex; align-items:flex-start; gap:.6rem; padding:.75rem 1rem; border-radius:var(--radius); margin-bottom:1.25rem; font-size:.875rem; background:var(--flash-bg); border:1px solid var(--flash-border); color:var(--flash-ink); }
-    .error { display:flex; align-items:flex-start; gap:.6rem; padding:.75rem 1rem; border-radius:var(--radius); margin-bottom:1.25rem; font-size:.875rem; background:var(--danger-dim); border:1px solid rgba(248,113,113,.3); color:var(--danger); }
+    .flash { display:flex; align-items:flex-start; gap:.6rem; padding:.65rem .85rem; border-radius:var(--radius); margin-bottom:.9rem; font-size:.875rem; background:var(--flash-bg); border:1px solid var(--flash-border); color:var(--flash-ink); }
+    .error { display:flex; align-items:flex-start; gap:.6rem; padding:.65rem .85rem; border-radius:var(--radius); margin-bottom:.9rem; font-size:.875rem; background:var(--danger-dim); border:1px solid rgba(248,113,113,.3); color:var(--danger); }
 
     /* ═══════════════════════════════════════════
        TABLES
     ═══════════════════════════════════════════ */
-    .table-wrap { overflow-x: auto; margin: 0 -1.5rem; padding: 0 1.5rem; }
+    .table-wrap { overflow-x: auto; margin: 0 -1.1rem; padding: 0 1.1rem; }
     .pager {
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 1rem;
+      gap: .75rem;
       margin: 0;
-      padding: 1rem 0 0;
+      padding: .75rem 0 0;
       border-top: 1px solid var(--border);
       color: var(--ink-2);
       width: 100%;
@@ -1244,12 +1289,12 @@ const dashboardTemplate = `<!doctype html>
       width: 100%;
       border-collapse: collapse;
       font-size: .875rem;
-      min-width: 500px;
+      min-width: 460px;
     }
     thead tr { border-bottom: 1px solid var(--border); }
     th {
       text-align: left;
-      padding: .55rem .75rem;
+      padding: .45rem .6rem;
       font-family: "Space Mono", monospace;
       font-size: .635rem;
       text-transform: uppercase;
@@ -1262,7 +1307,7 @@ const dashboardTemplate = `<!doctype html>
     th:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
     th:last-child  { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
     td {
-      padding: .65rem .75rem;
+      padding: .5rem .6rem;
       border-bottom: 1px solid var(--border);
       vertical-align: middle;
       color: var(--ink);
@@ -1286,7 +1331,7 @@ const dashboardTemplate = `<!doctype html>
     .form-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 0 1.5rem;
+      gap: 0 1rem;
     }
     .form-grid .field-full { grid-column: 1 / -1; }
 
@@ -1298,11 +1343,11 @@ const dashboardTemplate = `<!doctype html>
       text-transform: uppercase;
       letter-spacing: .08em;
       color: var(--ink-3);
-      margin: 1rem 0 .35rem;
+      margin: .75rem 0 .25rem;
     }
     input, textarea, select {
       width: 100%;
-      padding: .6rem .85rem;
+      padding: .5rem .75rem;
       background: var(--surface2);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -1329,7 +1374,7 @@ const dashboardTemplate = `<!doctype html>
       margin-right: .4rem;
       flex: none;
     }
-    textarea { min-height: 7rem; resize: vertical; font-family: "Space Mono", monospace; font-size: .8rem; }
+    textarea { min-height: 5.5rem; resize: vertical; font-family: "Space Mono", monospace; font-size: .8rem; }
     select {
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7a8a' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
       background-repeat: no-repeat;
@@ -1343,7 +1388,7 @@ const dashboardTemplate = `<!doctype html>
     ═══════════════════════════════════════════ */
     button, .button {
       display: inline-flex; align-items: center; gap: .35rem;
-      padding: .5rem 1rem;
+      padding: .4rem .85rem;
       border: 1px solid var(--border);
       border-radius: var(--radius);
       background: var(--surface2);
@@ -1386,8 +1431,8 @@ const dashboardTemplate = `<!doctype html>
       box-shadow: 0 0 12px rgba(220,38,38,.25);
     }
     form.inline { display: inline; }
-    .actions { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
-    p { margin-top: 1.25rem; }
+    .actions { display: flex; gap: .3rem; flex-wrap: wrap; align-items: center; }
+    p { margin-top: .9rem; }
 
     /* ═══════════════════════════════════════════
        CODE / PRE
@@ -1408,7 +1453,7 @@ const dashboardTemplate = `<!doctype html>
       background: var(--pre-bg);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: .85rem 1rem;
+      padding: .7rem .85rem;
       color: var(--pre-ink);
       line-height: 1.6;
       transition: background .2s;
@@ -1425,7 +1470,7 @@ const dashboardTemplate = `<!doctype html>
     ═══════════════════════════════════════════ */
     .structured-data {
       display: grid;
-      gap: .75rem;
+      gap: .5rem;
       min-width: 0;
     }
     .structured-table {
@@ -1470,12 +1515,12 @@ const dashboardTemplate = `<!doctype html>
       border: 1px solid var(--border);
     }
     .structured-key {
-      width: 13rem;
+      width: 11rem;
       color: var(--ink-3);
       background: var(--surface3);
     }
     .structured-empty {
-      padding: .85rem 1rem;
+      padding: .7rem .85rem;
       color: var(--ink-2);
       border: 1px dashed var(--border);
       border-radius: var(--radius);
@@ -1507,20 +1552,21 @@ const dashboardTemplate = `<!doctype html>
     /* audit table layout */
     .audit-table {
       table-layout: fixed;
-      min-width: 760px;
+      width: 100%;
+      min-width: 0;
     }
-    .audit-table .audit-created { width: 12.5rem; }
-    .audit-table .audit-actor { width: 6rem; max-width: 6rem; }
-    .audit-table .audit-action { width: 7rem; }
-    .audit-table .audit-resource { width: 11rem; }
-    .audit-table .audit-details { width: auto; }
+    .audit-table col.audit-created { width: 16%; }
+    .audit-table col.audit-actor { width: 9%; }
+    .audit-table col.audit-action { width: 10%; }
+    .audit-table col.audit-resource { width: 15%; }
+    .audit-table col.audit-details { width: 46%; }
     .audit-table td.audit-actor,
     .audit-table td.audit-action,
     .audit-table td.audit-resource {
       overflow-wrap: anywhere;
     }
     .audit-table td.audit-details {
-      min-width: 30rem;
+      width: 46%;
       overflow-wrap: anywhere;
     }
     .audit-table td.audit-details pre,
@@ -1623,7 +1669,7 @@ const dashboardTemplate = `<!doctype html>
     }
     .policy-summary-item {
       display: grid;
-      grid-template-columns: 13rem minmax(0, 1fr);
+      grid-template-columns: 11rem minmax(0, 1fr);
       min-width: 0;
       border-bottom: 1px solid var(--border);
     }
@@ -1638,26 +1684,26 @@ const dashboardTemplate = `<!doctype html>
       text-transform: uppercase;
       color: var(--ink-3);
       background: var(--surface3);
-      padding: .65rem .75rem;
+      padding: .5rem .65rem;
       overflow-wrap: anywhere;
     }
     .policy-summary-value {
       color: var(--ink);
-      padding: .65rem .75rem;
+      padding: .5rem .65rem;
       overflow-wrap: anywhere;
       min-width: 0;
     }
     .policy-summary-wide {
-      grid-template-columns: 13rem minmax(0, 1fr);
+      grid-template-columns: 11rem minmax(0, 1fr);
     }
     .policy-detail-section {
-      margin-top: 1.5rem;
+      margin-top: 1rem;
     }
     .section-heading {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
-      gap: .75rem;
+      gap: .5rem;
     }
     .section-heading-meta {
       font-family: "DM Sans", system-ui, sans-serif;
@@ -1669,7 +1715,7 @@ const dashboardTemplate = `<!doctype html>
       white-space: nowrap;
     }
     details.raw-data {
-      margin-top: .85rem;
+      margin-top: .65rem;
       border: 1px solid var(--border);
       border-radius: var(--radius);
       background: var(--surface2);
@@ -1678,7 +1724,7 @@ const dashboardTemplate = `<!doctype html>
     }
     details.raw-data summary {
       cursor: pointer;
-      padding: .7rem 4.8rem .7rem .85rem;
+      padding: .55rem 4.2rem .55rem .75rem;
       color: var(--ink-2);
       font-size: .78rem;
       font-weight: 700;
@@ -1687,7 +1733,7 @@ const dashboardTemplate = `<!doctype html>
       display: flex;
       align-items: center;
       gap: .55rem;
-      min-height: 2.55rem;
+      min-height: 2.1rem;
     }
     details.raw-data summary::-webkit-details-marker { display: none; }
     details.raw-data summary::before {
@@ -1704,13 +1750,13 @@ const dashboardTemplate = `<!doctype html>
     .raw-data-header {
       display: inline-flex;
       align-items: center;
-      gap: .55rem;
+      gap: .4rem;
       min-width: 0;
     }
     .raw-copy {
       position: absolute;
-      top: .45rem;
-      right: .65rem;
+      top: .35rem;
+      right: .5rem;
       z-index: 2;
       padding: .25rem .55rem;
       font-size: .72rem;
@@ -1723,22 +1769,22 @@ const dashboardTemplate = `<!doctype html>
       background: transparent;
     }
     details.raw-data .structured-data {
-      padding: .85rem;
+      padding: .7rem;
     }
     .policy-summary + .policy-detail-section {
-      margin-top: 1.75rem;
+      margin-top: 1.2rem;
     }
     .policy-restrictions-value {
-      margin-top: .55rem;
+      margin-top: .4rem;
     }
     .policy-restrictions-value .structured-table {
       background: var(--surface);
     }
     .policy-restrictions-value .structured-key {
-      width: 14rem;
+      width: 11rem;
     }
     .policy-summary-value .structured-data {
-      margin-top: .35rem;
+      margin-top: .25rem;
     }
     .summary-detail-note {
       color: var(--ink-3);
@@ -1757,8 +1803,8 @@ const dashboardTemplate = `<!doctype html>
     .permission-catalog {
       display: flex;
       flex-wrap: wrap;
-      gap: .35rem;
-      margin-top: .45rem;
+      gap: .25rem;
+      margin-top: .3rem;
     }
     .permission-catalog code {
       color: var(--ink);
@@ -1768,14 +1814,14 @@ const dashboardTemplate = `<!doctype html>
     .toggle-group {
       display: flex;
       flex-wrap: wrap;
-      gap: .5rem;
-      margin-top: .35rem;
+      gap: .35rem;
+      margin-top: .25rem;
     }
     .toggle-option {
       display: inline-flex;
       align-items: center;
       gap: .4rem;
-      padding: .4rem .65rem;
+      padding: .3rem .55rem;
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       background: var(--surface2);
@@ -1790,9 +1836,9 @@ const dashboardTemplate = `<!doctype html>
     }
             .checkbox-group {
               display: grid;
-              gap: .28rem;
-              margin-top: .25rem;
-              max-height: 11rem;
+              gap: .22rem;
+              margin-top: .2rem;
+              max-height: 9rem;
               overflow-y: auto;
               padding-right: .25rem;
             }
@@ -1802,8 +1848,8 @@ const dashboardTemplate = `<!doctype html>
               gap: .35rem;
               min-width: 0;
               color: var(--ink-2);
-              font-size: .76rem;
-              line-height: 1.35;
+              font-size: .74rem;
+              line-height: 1.3;
             }
     .checkbox-option input {
       margin: 0;
@@ -1826,9 +1872,9 @@ const dashboardTemplate = `<!doctype html>
         gap: 2px;
       }
       .nav-group-label { display: none; }
-      .sidebar a { font-size: .8rem; padding: .35rem .6rem; }
+      .sidebar a { font-size: .8rem; padding: .3rem .55rem; }
       .sidebar a::before { display: none; }
-      .content { padding: 1.25rem 1rem 2rem; }
+      .content { padding: 1.1rem .85rem 1.75rem; }
       .form-grid { grid-template-columns: 1fr; }
     }
   </style>
@@ -1844,8 +1890,8 @@ const dashboardTemplate = `<!doctype html>
     <div class="header-right">
       {{if .User}}<span class="header-user">{{.User}}</span>{{end}}
       <button class="btn-icon" onclick="toggleTheme()" title="Toggle theme" type="button">
-        <span class="icon-moon">🌙</span>
-        <span class="icon-sun">☀️</span>
+        <span class="icon-moon">{{themeIcon "moon"}}</span>
+        <span class="icon-sun">{{themeIcon "sun"}}</span>
       </button>
       {{if .User}}<form method="post" action="/admin/logout" class="inline"><input type="hidden" name="csrfToken" value="{{.CSRFToken}}"><button type="submit" class="btn-logout">Sign out</button></form>{{end}}
     </div>
@@ -1856,8 +1902,7 @@ const dashboardTemplate = `<!doctype html>
   ══════════════════════════════════════════════ -->
   {{if not .User}}
   <div class="login-wrap">
-    {{if .Flash}}<div class="flash">✓ {{.Flash}}</div>{{end}}
-    {{if .Error}}<div class="error">⚠ {{.Error}}</div>{{end}}
+    {{if or .Flash .Error}}<div class="login-notice">{{if .Flash}}<div class="flash">✓ {{.Flash}}</div>{{end}}{{if .Error}}<div class="error">⚠ {{.Error}}</div>{{end}}</div>{{end}}
     {{range .Forms}}
     <div class="login-card">
       <div class="login-logo">
@@ -1870,7 +1915,7 @@ const dashboardTemplate = `<!doctype html>
         <input type="hidden" name="csrfToken" value="{{$.CSRFToken}}">
         {{range .Fields}}
           <label for="{{.Name}}">{{.Label}}</label>
-          <input id="{{.Name}}" name="{{.Name}}" type="{{.Type}}" value="{{.Value}}" placeholder="{{.Placeholder}}" {{if .Required}}required{{end}} autocomplete="{{if eq .Type "password"}}current-password{{else}}username{{end}}">
+          <input id="{{.Name}}" name="{{.Name}}" type="{{.Type}}" value="{{.Value}}" placeholder="{{.Placeholder}}" {{if .Required}}required{{end}} autocomplete="{{if eq .Type "password"}}current-password{{else}}username{{end}}" {{if eq .Name "username"}}autofocus{{end}}>
         {{end}}
         <button type="submit" class="btn-primary">{{.Submit}}</button>
       </form>
@@ -1991,7 +2036,7 @@ const dashboardTemplate = `<!doctype html>
 </html>`
 
 func RegisterDashboard(mux httpx.Router, svc *auth.Service, deps DashboardDependencies) {
-	d := &dashboard{svc: svc, deps: deps, tmpl: template.Must(template.New("dashboard").Funcs(template.FuncMap{"containsString": containsString, "navIcon": navIcon}).Parse(dashboardTemplate))}
+	d := &dashboard{svc: svc, deps: deps, tmpl: template.Must(template.New("dashboard").Funcs(template.FuncMap{"containsString": containsString, "navIcon": navIcon, "themeIcon": themeIcon}).Parse(dashboardTemplate))}
 	mux.HandleFunc("/admin", d.overview)
 	mux.HandleFunc("/admin/login", d.login)
 	mux.HandleFunc("/admin/me", d.me)
@@ -2159,6 +2204,20 @@ func panelSectionHTML(class, title string, body template.HTML) template.HTML {
 	}
 	b.WriteString(string(body))
 	b.WriteString(`</section>`)
+	return template.HTML(b.String())
+}
+
+func collapsiblePanelHTML(title string, open bool, body template.HTML) template.HTML {
+	var b strings.Builder
+	b.WriteString(`<details class="panel"`)
+	if open {
+		b.WriteString(` open`)
+	}
+	b.WriteString(`><summary><span class="panel-summary-title">`)
+	b.WriteString(esc(title))
+	b.WriteString(`</span></summary><div class="panel-body">`)
+	b.WriteString(string(body))
+	b.WriteString(`</div></details>`)
 	return template.HTML(b.String())
 }
 
@@ -2614,7 +2673,7 @@ func formatDashboardTime(t time.Time) string {
 	if t.IsZero() {
 		return "—"
 	}
-	return t.Local().Format("Jan 2, 2006 15:04 MST")
+	return t.Local().Format("02 Jan 2006, 15:04:05")
 }
 
 func boolBadge(enabled bool, enabledLabel, disabledLabel string) string {
@@ -2672,6 +2731,17 @@ func navIcon(name string) template.HTML {
 		svg = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6"/></svg>`
 	}
 	return template.HTML(svg)
+}
+
+func themeIcon(name string) template.HTML {
+	switch name {
+	case "sun":
+		return template.HTML(`<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="3.25"/><path d="M8 1.75v2.1"/><path d="M8 12.15v2.1"/><path d="M1.75 8h2.1"/><path d="M12.15 8h2.1"/><path d="M3.2 3.2l1.48 1.48"/><path d="M11.32 11.32l1.48 1.48"/><path d="M12.8 3.2l-1.48 1.48"/><path d="M4.68 11.32l-1.48 1.48"/></svg>`)
+	case "moon":
+		return template.HTML(`<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M11.75 9.25A5.5 5.5 0 0 1 6.75 4a5.75 5.75 0 1 0 7 7 5.5 5.5 0 0 1-2-1.75z"/></svg>`)
+	default:
+		return template.HTML(`<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6"/></svg>`)
+	}
 }
 
 func statusBadge(status string) string {

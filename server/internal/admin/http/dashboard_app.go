@@ -44,7 +44,7 @@ func (d *dashboard) apps(w http.ResponseWriter, r *http.Request) {
 			versions[item.ID] = []apps.Version{latest}
 		}
 	}
-	d.renderForSession(w, r, session, pageData{Title: "Apps", Forms: []formData{managedAppForm("/admin/apps/create")}, Items: withPager(appsTable(items, versions), pagerHTML(r, page, limit, hasNext))})
+	d.renderForSession(w, r, session, pageData{Title: "Apps", Subtitle: "Manage approved APKs and their published versions.", Forms: []formData{managedAppForm("/admin/apps/create")}, Items: withPager(appsTable(items, versions), pagerHTML(r, page, limit, hasNext))})
 }
 
 func (d *dashboard) appDetail(w http.ResponseWriter, r *http.Request) {

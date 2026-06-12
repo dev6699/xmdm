@@ -16,6 +16,8 @@ import (
 	"xmdm/server/internal/pagination"
 )
 
+const overviewRecentActivityLimit = 5
+
 type overviewSignal struct {
 	Label  string
 	Value  string
@@ -241,7 +243,7 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		auditLast24h = count
-		items, err := d.deps.Audit.List(ctx, d.deps.TenantID, pagination.Params{Limit: 5})
+		items, err := d.deps.Audit.List(ctx, d.deps.TenantID, pagination.Params{Limit: overviewRecentActivityLimit})
 		if err != nil {
 			d.renderPageError(w, r, session, "Overview", err)
 			return

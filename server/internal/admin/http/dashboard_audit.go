@@ -26,12 +26,12 @@ func (d *dashboard) audit(w http.ResponseWriter, r *http.Request) {
 	if hasNext {
 		items = items[:limit]
 	}
-	d.renderForSession(w, r, session, pageData{Title: "Audit", Items: withPager(auditTable(items), pagerHTML(r, page, limit, hasNext))})
+	d.renderForSession(w, r, session, pageData{Title: "Audit", Subtitle: "Review operator and system activity.", Items: withPager(auditTable(items), pagerHTML(r, page, limit, hasNext))})
 }
 
 func auditTable(items []audit.Event) template.HTML {
 	var b strings.Builder
-	b.WriteString(`<table class="audit-table"><colgroup><col class="audit-created"><col class="audit-actor"><col class="audit-action"><col class="audit-resource"><col class="audit-details"></colgroup><thead><tr><th class="audit-created">Created</th><th class="audit-actor">Actor</th><th class="audit-action">Action</th><th class="audit-resource">Resource</th><th class="audit-details">Details</th></tr></thead><tbody>`)
+	b.WriteString(`<table class="audit-table"><colgroup><col class="audit-created" style="width:16%"><col class="audit-actor" style="width:9%"><col class="audit-action" style="width:10%"><col class="audit-resource" style="width:15%"><col class="audit-details" style="width:46%"></colgroup><thead><tr><th class="audit-created">Created</th><th class="audit-actor">Actor</th><th class="audit-action">Action</th><th class="audit-resource">Resource</th><th class="audit-details">Details</th></tr></thead><tbody>`)
 	for _, item := range items {
 		b.WriteString(`<tr>`)
 		fmt.Fprintf(&b, `<td class="audit-created">%s</td>`, esc(formatDashboardTime(item.CreatedAt)))
