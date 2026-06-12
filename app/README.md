@@ -7,7 +7,7 @@ This directory is reserved for the Kotlin device agent, its app modules, and rel
 For runtime behavior, keep this README as a developer workflow entry point and use:
 
 - [Agent App Lifecycle](../docs/agent-app-lifecycle.md) for enrollment, config sync, managed content, commands, logs, and device info.
-- [Enrollment Contract](../contracts/enrollment.md) for provisioning payloads and device enrollment API shapes.
+- [Blueprint API details](../blueprint/02-api-contracts.md) for provisioning payloads and device enrollment API shapes.
 
 ## How To Work Here
 
@@ -101,7 +101,7 @@ The store has unit coverage that verifies save, reload, and clear behavior.
 ### Bootstrap Parsing
 
 Bootstrap JSON is parsed in `app/src/main/java/com/xmdm/launcher/bootstrap/`.
-The parser accepts the Android provisioning payload shape from `contracts/enrollment.md`; manual and ADB intake should pass that JSON as `base64url:<payload>`.
+The parser accepts the Android provisioning payload shape described in the blueprint; manual and ADB intake should pass that JSON as `base64url:<payload>`.
 
 `MainActivity` accepts `base64url:<payload>` on the launch intent, parses it, and persists the normalized bootstrap state.
 Unit tests cover the canonical Android provisioning JSON and reject bare bootstrap keys.
@@ -135,4 +135,4 @@ This only works on a device that has not already been provisioned. On a normally
 
 - Keep the launcher UI in XML with ViewBinding.
 - Keep Android-specific build outputs ignored by [app/.gitignore](app/.gitignore).
-- Keep package names aligned with the blueprint and contracts, currently `com.xmdm.launcher`.
+- Keep package names aligned with the blueprint, currently `com.xmdm.launcher`.
