@@ -2,10 +2,30 @@
 
 This repository is the working home for XMDM.
 
+## Current Improvement Focus
+
+Improvement guide: [docs/project-improvement-guide.md](docs/project-improvement-guide.md)
+Focus updated: 2026-06-12
+
+| Item | State |
+| --- | --- |
+| Stage 1 - Command Reliability Hardening | Next |
+| Stage 2 - Reconnect, Replay, And Offline Semantics | Pending |
+| Stage 3 - Security Hardening | Pending |
+| Stage 4 - CI, Release, And Evidence | Pending |
+| Stage 5 - Production Operations | Pending |
+| Stage 6 - Device Matrix And Android Reality | Pending |
+| Stage 7 - Dashboard And Operator Experience | Pending |
+| Stage 8 - Data Model And Policy Versioning | Pending |
+| Stage 9 - Scale And Load Evidence | Pending |
+| Stage 10 - Documentation System Polish | Pending |
+
+This focus does not change roadmap item state. The roadmap remains complete or not planned exactly as listed below.
+
 ## Roadmap Snapshot
 
 Roadmap source: [blueprint/09-roadmap-checklist.md](blueprint/09-roadmap-checklist.md)
-Snapshot last updated: 2026-06-11
+Snapshot last updated: 2026-06-12
 
 
 ### M0 - Foundation
