@@ -11,7 +11,9 @@ class DeviceCommandCoordinator(
         serverUrl: String,
         deviceId: String,
         deviceSecret: String,
+        transportSource: String,
         command: DeviceCommandRecord,
+        onCommandExecuted: suspend (DeviceCommandRecord, DeviceCommandExecutionResult) -> Unit = { _, _ -> },
     ): DeviceCommandRecord {
         val result = history.lookup(command.id) ?: try {
             val executed = executor.execute(command)
@@ -33,6 +35,8 @@ class DeviceCommandCoordinator(
             rememberCommandResult(command.id, executed)
             executed
         }
+        onCommandExecuted(command, result)
+        val ackDetails = buildAckDetails(command, result, transportSource)
         return gateway.ack(
             serverUrl = serverUrl,
             deviceId = deviceId,
@@ -41,9 +45,22 @@ class DeviceCommandCoordinator(
             request = DeviceCommandAckRequest(
                 status = result.status,
                 message = result.message,
-                details = result.details,
+                details = ackDetails,
             ),
         )
+    }
+
+    private fun buildAckDetails(
+        command: DeviceCommandRecord,
+        result: DeviceCommandExecutionResult,
+        transportSource: String,
+    ): Map<String, Any>? {
+        val details = linkedMapOf<String, Any>()
+        result.details?.forEach { (key, value) ->
+            details[key] = value
+        }
+        details.putAll(command.commandDetails("transportSource" to transportSource))
+        return if (details.isEmpty()) null else details
     }
 
     private suspend fun rememberCommandResult(commandId: String, result: DeviceCommandExecutionResult) {
@@ -56,11 +73,28 @@ class DeviceCommandCoordinator(
         }
     }
 
-    suspend fun pollAndExecute(serverUrl: String, deviceId: String, deviceSecret: String): List<DeviceCommandRecord> {
+    suspend fun pollAndExecute(
+        serverUrl: String,
+        deviceId: String,
+        deviceSecret: String,
+        transportSource: String = "polling",
+        onCommandReceived: suspend (DeviceCommandRecord) -> Unit = {},
+        onCommandExecuted: suspend (DeviceCommandRecord, DeviceCommandExecutionResult) -> Unit = { _, _ -> },
+        onCommandAcked: suspend (DeviceCommandRecord, DeviceCommandRecord) -> Unit = { _, _ -> },
+    ): List<DeviceCommandRecord> {
         val commands = gateway.poll(serverUrl, deviceId, deviceSecret)
         val handled = mutableListOf<DeviceCommandRecord>()
         for (command in commands) {
-            handleIncomingCommand(serverUrl, deviceId, deviceSecret, command)
+            onCommandReceived(command)
+            val acked = handleIncomingCommand(
+                serverUrl = serverUrl,
+                deviceId = deviceId,
+                deviceSecret = deviceSecret,
+                transportSource = transportSource,
+                command = command,
+                onCommandExecuted = onCommandExecuted,
+            )
+            onCommandAcked(command, acked)
             handled += command
         }
         return handled

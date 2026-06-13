@@ -10,6 +10,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.KeyEvent
+import java.io.EOFException
 import android.text.InputType
 import android.text.method.DigitsKeyListener
 import android.view.inputmethod.EditorInfo
@@ -1057,13 +1058,17 @@ class MainActivity : AppCompatActivity() {
                                 username = identity.deviceId,
                                 password = identity.deviceSecret,
                             ),
-                        ).stream { command ->
-                            deviceCommandCoordinator.handleIncomingCommand(
-                                serverUrl = bootstrap.serverUrl,
-                                deviceId = identity.deviceId,
-                                deviceSecret = identity.deviceSecret,
-                                command = command,
-                            )
+                        ).stream(
+                            onSubscribed = {
+                                recordDeviceLogSafely(
+                                    source = "commands",
+                                    level = "info",
+                                    message = "command transport subscribed",
+                                    payload = mapOf("mqttAddress" to mqtt),
+                                )
+                            },
+                        ) { command ->
+                            handleDeviceCommand(bootstrap, identity, command, "mqtt")
                         }
                     } else {
                         pollCommands(bootstrap, identity)
@@ -1072,13 +1077,23 @@ class MainActivity : AppCompatActivity() {
                     if (t is kotlinx.coroutines.CancellationException) {
                         throw t
                     }
-                    Log.w(TAG, "command transport failed", t)
-                    recordDeviceLogSafely(
-                        source = "commands",
-                        level = "warn",
-                        message = "command transport failed",
-                        payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
-                    )
+                    if (t is EOFException) {
+                        Log.w(TAG, "command transport disconnected", t)
+                        recordDeviceLogSafely(
+                            source = "commands",
+                            level = "info",
+                            message = "command transport disconnected",
+                            payload = mapOf("reason" to (t.message ?: t.javaClass.simpleName)),
+                        )
+                    } else {
+                        Log.w(TAG, "command transport failed", t)
+                        recordDeviceLogSafely(
+                            source = "commands",
+                            level = "warn",
+                            message = "command transport failed",
+                            payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                        )
+                    }
                     if (mqttAddress.isNotBlank()) {
                         try {
                             Log.w(TAG, "command transport falling back to polling instance=$instanceId")
@@ -1176,6 +1191,43 @@ class MainActivity : AppCompatActivity() {
             serverUrl = bootstrap.serverUrl,
             deviceId = identity.deviceId,
             deviceSecret = identity.deviceSecret,
+            transportSource = "polling",
+            onCommandReceived = { command ->
+                recordDeviceLogSafely(
+                    source = "commands",
+                    level = "info",
+                    message = "command received",
+                    payload = mapOf(
+                        "transportSource" to "polling",
+                        "commandId" to command.id,
+                        "commandType" to command.type,
+                    ),
+                )
+            },
+            onCommandExecuted = { command, result ->
+                recordDeviceLogSafely(
+                    source = "commands",
+                    level = "info",
+                    message = "command executed",
+                    payload = mapOf(
+                        "transportSource" to "polling",
+                        "commandId" to command.id,
+                        "status" to result.status,
+                    ),
+                )
+            },
+            onCommandAcked = { command, acked ->
+                recordDeviceLogSafely(
+                    source = "commands",
+                    level = "info",
+                    message = "command ack sent",
+                    payload = mapOf(
+                        "transportSource" to "polling",
+                        "commandId" to command.id,
+                        "status" to acked.status,
+                    ),
+                )
+            },
         )
         if (handled.isNotEmpty()) {
             Log.w(TAG, "command poll handled ${handled.size} commands instance=$instanceId")
@@ -1186,6 +1238,53 @@ class MainActivity : AppCompatActivity() {
                 payload = mapOf("count" to handled.size),
             )
         }
+    }
+
+    private suspend fun handleDeviceCommand(
+        bootstrap: com.xmdm.launcher.state.BootstrapState,
+        identity: com.xmdm.launcher.state.DeviceIdentityState,
+        command: com.xmdm.launcher.commands.DeviceCommandRecord,
+        transportSource: String,
+    ) {
+        recordDeviceLogSafely(
+            source = "commands",
+            level = "info",
+            message = "command received",
+            payload = mapOf(
+                "transportSource" to transportSource,
+                "commandId" to command.id,
+                "commandType" to command.type,
+            ),
+        )
+        val acked = deviceCommandCoordinator.handleIncomingCommand(
+            serverUrl = bootstrap.serverUrl,
+            deviceId = identity.deviceId,
+            deviceSecret = identity.deviceSecret,
+            transportSource = transportSource,
+            command = command,
+            onCommandExecuted = { executedCommand, result ->
+                recordDeviceLogSafely(
+                    source = "commands",
+                    level = "info",
+                    message = "command executed",
+                    payload = mapOf(
+                        "transportSource" to transportSource,
+                        "commandId" to executedCommand.id,
+                        "status" to result.status,
+                    ),
+                )
+            },
+        )
+        recordDeviceLogSafely(
+            source = "commands",
+            level = "info",
+            message = "command ack sent",
+            payload = mapOf(
+                "transportSource" to transportSource,
+                "commandId" to acked.id,
+                "status" to acked.status,
+            ),
+        )
     }
 
     private suspend fun requestConfigSyncFromCommand(): DeviceCommandExecutionResult {

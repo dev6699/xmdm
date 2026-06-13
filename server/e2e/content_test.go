@@ -117,7 +117,7 @@ func TestCommandMQTT(t *testing.T) {
 	waitForCommandTransportWarmup(t)
 
 	commandID := env.mustIssuePingCommand(t)
-	env.waitForCommandAck(t, commandID, "pong")
+	env.waitForCommandAck(t, commandID, "pong", "mqtt")
 	env.requests.assertNever(t, "polling command fetch", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
 			strings.Contains(r.path, "/api/v1/devices/") &&
@@ -145,7 +145,7 @@ func TestCommandMQTTSyncConfig(t *testing.T) {
 
 	initialMarker := env.requests.len()
 	commandID := env.mustIssueSyncConfigCommand(t)
-	env.waitForCommandAck(t, commandID, "config refreshed")
+	env.waitForCommandAck(t, commandID, "config refreshed", "mqtt")
 	env.requests.waitForAfter(t, initialMarker, time.Minute, "config snapshot fetch after sync_config command", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
 			r.path == "/api/v1/devices/"+env.deviceID+"/config"
@@ -181,7 +181,7 @@ func TestCommandPolling(t *testing.T) {
 		return r.method == http.MethodPost &&
 			r.path == "/api/v1/devices/"+env.deviceID+"/commands/"+commandID+"/ack"
 	})
-	env.waitForCommandAck(t, commandID, "pong")
+	env.waitForCommandAck(t, commandID, "pong", "polling")
 }
 
 // TestCommandBrokerOutageRecovery verifies that the launcher falls back to HTTP
@@ -204,7 +204,7 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 	waitForCommandTransportWarmup(t)
 
 	initialCommandID := env.mustIssuePingCommand(t)
-	env.waitForCommandAck(t, initialCommandID, "pong")
+	env.waitForCommandAck(t, initialCommandID, "pong", "mqtt")
 
 	stopMQTTBroker(t)
 	time.Sleep(2 * time.Second)
@@ -218,14 +218,14 @@ func TestCommandBrokerOutageRecovery(t *testing.T) {
 		return r.method == http.MethodPost &&
 			r.path == "/api/v1/devices/"+env.deviceID+"/commands/"+outageCommandID+"/ack"
 	})
-	env.waitForCommandAck(t, outageCommandID, "pong")
+	env.waitForCommandAck(t, outageCommandID, "pong", "polling")
 
 	startMQTTBroker(t)
 	waitForCommandTransportWarmup(t)
 
 	recoveryMarker := env.requests.len()
 	recoveryCommandID := env.mustIssuePingCommand(t)
-	env.waitForCommandAck(t, recoveryCommandID, "pong")
+	env.waitForCommandAck(t, recoveryCommandID, "pong", "mqtt")
 	env.requests.assertNeverAfter(t, recoveryMarker, "HTTP polling after broker recovery", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
 			r.path == "/api/v1/devices/"+env.deviceID+"/commands"
@@ -482,7 +482,7 @@ func TestKioskExitChromeCommand(t *testing.T) {
 	waitForCommandTransportWarmup(t)
 
 	commandID := env.mustIssueExitKioskCommand(t)
-	env.waitForCommandAck(t, commandID, "kiosk exit requested")
+	env.waitForCommandAck(t, commandID, "kiosk exit requested", "mqtt")
 	waitForKioskModeOffOnDevice(t, env.serial)
 	waitForForegroundPackage(t, env.serial, launcherPackage)
 }

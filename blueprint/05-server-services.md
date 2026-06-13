@@ -133,6 +133,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 6. Device acks receipt and execution through `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`.
 7. Server marks the delivery complete when the device ack is accepted.
 8. Repeated MQTT delivery or repeated polling of the same command must not execute the command twice on the device.
+- 9. If a device reconnects after MQTT loss, polling acts as the recovery path for anything that was queued but not yet acknowledged, and replay must preserve the same `commandId`.
 
 - The messaging and audit surface is dashboard-first for operators, with device-facing HTTP endpoints for sync and acknowledgements.
 
@@ -142,6 +143,7 @@ The server must be able to start, serve admin requests, and accept device sync e
 - If broker provisioning fails, enrollment still completes and the device can fall back to polling.
 - The server is the source of truth for command state; MQTT is a delivery channel and HTTP polling is a recovery channel.
 - The command queue must treat `commandId` as the idempotency key for delivery and acknowledgement.
+- A reconnecting device may report transport diagnostics, but transport metadata never changes the stored command state.
 
 ## Sync Processing
 
@@ -189,5 +191,6 @@ The server must be able to start, serve admin requests, and accept device sync e
 - If a plugin is disabled, plugin routes, command types, and device actions must be unavailable while core routes continue.
 - If MQTT fails, polling must still deliver commands.
 - If MQTT and polling both surface the same command, the launcher must acknowledge the cached result without re-running the command handler.
+- If a device reconnects after broker loss, it should see the same pending command set without creating a new command row.
 - If object storage is slow, metadata reads should still work.
 - If a job crashes mid-run, the next run must be able to continue from persisted state.

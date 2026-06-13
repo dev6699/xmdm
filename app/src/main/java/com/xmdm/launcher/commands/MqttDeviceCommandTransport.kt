@@ -25,7 +25,10 @@ data class MqttDeviceCommandConfig(
 class MqttDeviceCommandTransport(
     private val config: MqttDeviceCommandConfig,
 ) {
-    suspend fun stream(onCommand: suspend (DeviceCommandRecord) -> Unit) {
+    suspend fun stream(
+        onSubscribed: suspend () -> Unit = {},
+        onCommand: suspend (DeviceCommandRecord) -> Unit,
+    ) {
         withContext(Dispatchers.IO) {
             val endpoint = parseEndpoint(config.address)
             val socket = Socket()
@@ -38,6 +41,7 @@ class MqttDeviceCommandTransport(
                 readConnack(input)
                 writePacket(output, subscribePacket(deviceTopic(config.deviceId), 1))
                 readSuback(input)
+                onSubscribed()
 
                 var lastActivity = System.currentTimeMillis()
                 while (true) {

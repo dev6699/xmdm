@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/commands"
+	"xmdm/server/internal/device"
 )
 
 func TestLogoutRedirectsForHTMLRequests(t *testing.T) {
@@ -107,6 +109,29 @@ func TestLoginFlashClearsOnReload(t *testing.T) {
 	}
 }
 
+func TestCommandSummaryShowsTransportSource(t *testing.T) {
+	found := commands.Command{
+		ID:        "cmd-1",
+		Type:      "ping",
+		Status:    commands.StatusAcked,
+		CreatedAt: time.Date(2026, 6, 13, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 6, 13, 10, 1, 0, 0, time.UTC),
+		AckedAt:   timePtr(time.Date(2026, 6, 13, 10, 1, 0, 0, time.UTC)),
+		Result: map[string]any{
+			"status":  "acked",
+			"details": map[string]any{"transportSource": "mqtt"},
+		},
+	}
+
+	html := string(commandSummary(found, device.Device{}))
+	if !strings.Contains(html, "Transport") {
+		t.Fatalf("command summary missing transport field: %s", html)
+	}
+	if !strings.Contains(html, "mqtt") {
+		t.Fatalf("command summary missing transport source: %s", html)
+	}
+}
+
 func cookieValue(headers []string, name string) string {
 	for _, header := range headers {
 		if strings.HasPrefix(header, name+"=") {
@@ -114,4 +139,8 @@ func cookieValue(headers []string, name string) string {
 		}
 	}
 	return ""
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
 }

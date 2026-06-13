@@ -74,6 +74,80 @@ class DeviceCommandCoordinatorTest {
         assertEquals("acked", gateway.acks[0].request.status)
         assertEquals("done", gateway.acks[0].request.message)
         assertEquals("ok", gateway.acks[0].request.details?.get("result"))
+        assertEquals("polling", gateway.acks[0].request.details?.get("transportSource"))
+    }
+
+    @Test
+    fun enrichesAckDetailsWithTransportSource() = runTest {
+        val command = DeviceCommandRecord(
+            id = "cmd-mqtt",
+            type = "ping",
+            status = "queued",
+            payload = null,
+            expiresAt = null,
+        )
+        val gateway = RecordingGateway(commands = listOf(command))
+        val coordinator = DeviceCommandCoordinator(
+            gateway = gateway,
+            executor = object : DeviceCommandActionExecutor {
+                override suspend fun execute(command: DeviceCommandRecord): DeviceCommandExecutionResult {
+                    return DeviceCommandExecutionResult(
+                        status = "acked",
+                        message = "pong",
+                        details = mapOf("result" to "ok"),
+                    )
+                }
+            },
+        )
+
+        coordinator.handleIncomingCommand(
+            serverUrl = "https://mdm.example",
+            deviceId = "device-123",
+            deviceSecret = "secret-abc",
+            transportSource = "mqtt",
+            command = command,
+        )
+
+        assertEquals(1, gateway.acks.size)
+        assertEquals("mqtt", gateway.acks[0].request.details?.get("transportSource"))
+    }
+
+    @Test
+    fun reportsCommandExecutionBeforeAck() = runTest {
+        val command = DeviceCommandRecord(
+            id = "cmd-exec",
+            type = "ping",
+            status = "queued",
+            payload = null,
+            expiresAt = null,
+        )
+        val gateway = RecordingGateway(commands = listOf(command))
+        val coordinator = DeviceCommandCoordinator(
+            gateway = gateway,
+            executor = object : DeviceCommandActionExecutor {
+                override suspend fun execute(command: DeviceCommandRecord): DeviceCommandExecutionResult {
+                    return DeviceCommandExecutionResult(
+                        status = "acked",
+                        message = "pong",
+                    )
+                }
+            },
+        )
+        val observed = mutableListOf<String>()
+
+        coordinator.pollAndExecute(
+            serverUrl = "https://mdm.example",
+            deviceId = "device-123",
+            deviceSecret = "secret-abc",
+            onCommandReceived = { observed += "received:${it.id}" },
+            onCommandExecuted = { executed, result -> observed += "executed:${executed.id}:${result.status}" },
+            onCommandAcked = { acked, _ -> observed += "acked:${acked.id}" },
+        )
+
+        assertEquals(
+            listOf("received:cmd-exec", "executed:cmd-exec:acked", "acked:cmd-exec"),
+            observed,
+        )
     }
 
     @Test

@@ -89,9 +89,12 @@
 - The response returns a `commands` array of pending command records.
 - Device acknowledgements use `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack` with the device secret in `X-XMDM-Device-Secret`.
 - The ack body carries a terminal `status` plus optional `message` and `details`.
+- The ack `details` payload may include transport metadata such as `transportSource` so operators can see whether the command was first handled through MQTT or polling.
 - The server and launcher treat `commandId` as the idempotency key across MQTT and polling.
 - Duplicate command delivery must not execute the same device command twice.
 - Repeated acks for the same device and command are idempotent and return the stored terminal record when the command was already handled.
+- A reconnecting device first resumes transport, then drains any pending commands with the same `commandId` contract; the server must not treat reconnect replay as a new command.
+- Expired commands are hidden from the pending list and remain non-replayable for first-time acknowledgements.
 
 ### Artifact Download
 
@@ -191,7 +194,14 @@
   "status": "queued",
   "deviceId": "device-123",
   "payload": {},
-  "expiresAt": "2026-04-23T00:00:00Z"
+  "expiresAt": "2026-04-23T00:00:00Z",
+  "result": {
+    "status": "acked",
+    "message": "pong",
+    "details": {
+      "transportSource": "mqtt"
+    }
+  }
 }
 ```
 
@@ -218,6 +228,7 @@ The dashboard-generated QR payload derives `com.xmdm.BASE_URL` from `server.publ
 - Enrollment returns the initial device secret, not a long-lived admin token.
 - Config snapshots are immutable records with version numbers.
 - Commands are append-only until acked or expired.
+- MQTT and polling are a single delivery model from the device point of view: reconnect replay uses the same command IDs, and the launcher only uses the transport source for diagnostics.
 - Command delivery is idempotent per `commandId` across MQTT and polling.
 - MQTT publish of a command is only considered accepted after the broker returns PUBACK.
 - The launcher keeps a bounded cache of recently handled command results so duplicate delivery can be acknowledged without re-execution.

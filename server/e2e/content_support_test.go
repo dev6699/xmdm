@@ -394,7 +394,7 @@ func mustAdminSessionID(t *testing.T, baseURL string) string {
 	return sessionCookie.Value
 }
 
-func (e *commandTestEnv) waitForCommandAck(t *testing.T, commandID, expectedMessage string) {
+func (e *commandTestEnv) waitForCommandAck(t *testing.T, commandID, expectedMessage string, expectedTransportSource string) {
 	t.Helper()
 	waitForCondition(t, time.Minute, "command ack to reach the server",
 		func() string { return commandStatusSnapshot(t, e.pool, commandID) },
@@ -413,7 +413,17 @@ func (e *commandTestEnv) waitForCommandAck(t *testing.T, commandID, expectedMess
 			if err := json.Unmarshal(resultJSON, &result); err != nil {
 				return false, nil
 			}
-			return result["message"] == expectedMessage, nil
+			if result["message"] != expectedMessage {
+				return false, nil
+			}
+			if expectedTransportSource == "" {
+				return true, nil
+			}
+			details, _ := result["details"].(map[string]any)
+			if details == nil {
+				return false, nil
+			}
+			return details["transportSource"] == expectedTransportSource, nil
 		},
 	)
 }

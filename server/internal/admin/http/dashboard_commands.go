@@ -57,7 +57,7 @@ func (d *dashboard) commands(w http.ResponseWriter, r *http.Request) {
 	}
 	d.renderForSession(w, r, session, pageData{
 		Title:    "Commands",
-		Subtitle: "Send commands to individual devices or device groups. Broadcast is disabled from the dashboard.",
+		Subtitle: "Send commands to individual devices or device groups. Expired commands are shown as terminal records and never replay as fresh work.",
 		Forms:    []formData{{Title: "Send command", Action: "/admin/commands/create", Fields: commandFields(session, d.deps.PluginManager, devices, groups), Submit: "Send command"}},
 		Items:    withPager(commandsTable(items, deviceMap), pagerHTML(r, page, limit, hasNext)),
 	})
@@ -141,6 +141,7 @@ func commandSummary(found commands.Command, deviceRec device.Device) template.HT
 	if found.AckedAt != nil {
 		acked = formatDashboardTime(*found.AckedAt)
 	}
+	transportSource := commandTransportSource(found)
 	var b strings.Builder
 	b.WriteString(`<div class="policy-summary">`)
 	b.WriteString(summaryTextItem("Created", formatDashboardTime(found.CreatedAt)))
@@ -151,6 +152,9 @@ func commandSummary(found commands.Command, deviceRec device.Device) template.HT
 	b.WriteString(summaryHTMLItem("Status", template.HTML(statusBadge(found.Status))))
 	b.WriteString(summaryTextItem("Expires", expires))
 	b.WriteString(summaryTextItem("Acked", acked))
+	if transportSource != "" {
+		b.WriteString(summaryTextItem("Transport", transportSource))
+	}
 	b.WriteString(summaryWideHTMLItem("Payload", preStructuredOnly(found.Payload), ""))
 	if len(found.Result) > 0 {
 		b.WriteString(summaryWideHTMLItem("Result", preStructuredOnly(found.Result), ""))
@@ -160,6 +164,23 @@ func commandSummary(found commands.Command, deviceRec device.Device) template.HT
 	b.WriteString(`</div>`)
 	b.WriteString(string(rawDataDetails("Raw command data", found)))
 	return panelSectionHTML("", "Current command", template.HTML(b.String()))
+}
+
+func commandTransportSource(found commands.Command) string {
+	if len(found.Result) == 0 {
+		return ""
+	}
+	if raw, ok := found.Result["transportSource"].(string); ok && strings.TrimSpace(raw) != "" {
+		return strings.TrimSpace(raw)
+	}
+	details, ok := found.Result["details"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if raw, ok := details["transportSource"].(string); ok {
+		return strings.TrimSpace(raw)
+	}
+	return ""
 }
 
 func commandFields(session *auth.Session, pluginManager *plugins.Manager, devices []device.Device, groups []group.Group) []fieldData {

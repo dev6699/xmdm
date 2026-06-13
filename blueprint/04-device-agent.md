@@ -141,6 +141,9 @@ flowchart TD
 - The agent polls pending commands, executes supported ones, and acks the result back to the server.
 - The agent keeps a bounded cache of recently handled command IDs and terminal results so duplicate MQTT or polling delivery can be acknowledged without re-execution.
 - The agent treats `commandId` as the idempotency key for command execution.
+- The agent records the transport source of each handled command in local diagnostics and in the ack metadata it sends to the server.
+- On reconnect, MQTT resumes first; if the broker stream drops or remains unavailable, polling becomes the recovery path for the same command IDs.
+- Expired commands are not replayed as fresh work after reconnect.
 - The `launch_companion_app` command may start a declared companion package or activity only after the signed managed-app snapshot names the package and the installed package signature matches the command payload.
 - The `exit_kiosk` command temporarily suppresses kiosk enforcement until a newer policy revision arrives.
 - WorkManager keeps telemetry, sync, and retry jobs alive across reboots.
@@ -159,3 +162,4 @@ flowchart TD
 - Upload logs on a schedule and on demand.
 - Preserve the last successful sync metadata locally.
 - Expose enrollment and config failure details through device logs and admin inspection surfaces.
+- Expose command lifecycle hints through device logs, including transport connect, subscribe, disconnect, fallback polling, command receipt, command execution, and ack send events.
