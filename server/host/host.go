@@ -13,9 +13,9 @@ import (
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/config"
-	"xmdm/server/internal/identity"
 	"xmdm/server/internal/pagination"
 	internalplugins "xmdm/server/internal/plugins"
+	"xmdm/server/internal/roles"
 )
 
 type RouteSpec = internalplugins.RouteSpec
@@ -69,7 +69,7 @@ func Run(cfg *config.Config, plugins ...HostedPlugin) error {
 		}
 		if len(defs) > 0 {
 			deps.PluginManager = internalplugins.New(defs...)
-			if err := syncSeedRolePermissions(context.Background(), deps.Identity, deps.TenantID, deps.PluginManager.PermissionCatalog()); err != nil {
+			if err := syncSeedRolePermissions(context.Background(), deps.Roles, deps.TenantID, deps.PluginManager.PermissionCatalog()); err != nil {
 				return err
 			}
 		}
@@ -119,18 +119,18 @@ func mergedAuthPermissions(pluginManager *internalplugins.Manager) []auth.Permis
 	return perms
 }
 
-func syncSeedRolePermissions(ctx context.Context, repo identity.Repository, tenantID string, catalog []auth.Permission) error {
+func syncSeedRolePermissions(ctx context.Context, repo roles.Repository, tenantID string, catalog []auth.Permission) error {
 	if repo == nil || len(catalog) == 0 {
 		return nil
 	}
-	roles, err := repo.ListRoles(ctx, tenantID, pagination.Params{Limit: pagination.DefaultLimit})
+	items, err := repo.ListRoles(ctx, tenantID, pagination.Params{Limit: pagination.DefaultLimit})
 	if err != nil {
 		return err
 	}
-	var seed *identity.Role
-	for i := range roles {
-		if roles[i].ID == bootstrap.SeedAdminRoleID {
-			seed = &roles[i]
+	var seed *roles.Role
+	for i := range items {
+		if items[i].ID == bootstrap.SeedAdminRoleID {
+			seed = &items[i]
 			break
 		}
 	}
@@ -141,7 +141,7 @@ func syncSeedRolePermissions(ctx context.Context, repo identity.Repository, tena
 	if slices.Equal(merged, seed.Permissions) {
 		return nil
 	}
-	_, err = repo.UpdateRole(ctx, tenantID, seed.ID, identity.RoleUpsert{Name: seed.Name, Permissions: merged})
+	_, err = repo.UpdateRole(ctx, tenantID, seed.ID, roles.RoleUpsert{Name: seed.Name, Permissions: merged})
 	return err
 }
 

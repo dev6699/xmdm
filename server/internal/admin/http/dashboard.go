@@ -26,16 +26,18 @@ import (
 	"xmdm/server/internal/files"
 	"xmdm/server/internal/group"
 	"xmdm/server/internal/httpx"
-	"xmdm/server/internal/identity"
 	"xmdm/server/internal/logs"
 	"xmdm/server/internal/managedfiles"
 	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
+	"xmdm/server/internal/roles"
+	"xmdm/server/internal/users"
 )
 
 type DashboardDependencies struct {
-	Identity        identity.Repository
+	Users           users.Repository
+	Roles           roles.Repository
 	Apps            apps.Repository
 	Files           files.Repository
 	ManagedFiles    managedfiles.Repository

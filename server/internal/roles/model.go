@@ -1,12 +1,9 @@
-package identity
+package roles
 
 import (
 	"encoding/json"
-	"errors"
 	"time"
 )
-
-var ErrInvalidCredentials = errors.New("invalid credentials")
 
 type RecordBase struct {
 	ID        string     `json:"id"`
@@ -17,35 +14,15 @@ type RecordBase struct {
 	DeletedAt *time.Time `json:"deletedAt,omitempty"`
 }
 
-type User struct {
-	RecordBase
-	Email  string `json:"email"`
-	RoleID string `json:"roleId"`
-}
-
 type Role struct {
 	RecordBase
 	Name        string   `json:"name"`
 	Permissions []string `json:"permissions"`
 }
 
-type UserUpsert struct {
-	Email        string `json:"email"`
-	PasswordHash string `json:"passwordHash"`
-	RoleID       string `json:"roleId"`
-}
-
 type RoleUpsert struct {
 	Name        string   `json:"name"`
 	Permissions []string `json:"permissions"`
-}
-
-func (u User) RecordID() string {
-	return u.ID
-}
-
-func (u User) RecordStatus() string {
-	return u.Status
 }
 
 func (r Role) RecordID() string {

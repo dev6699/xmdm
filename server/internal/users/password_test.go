@@ -1,4 +1,4 @@
-package identity
+package users
 
 import (
 	"testing"

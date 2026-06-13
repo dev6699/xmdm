@@ -27,8 +27,6 @@ import (
 	"xmdm/server/internal/group"
 	grouphttp "xmdm/server/internal/group/http"
 	"xmdm/server/internal/httpx"
-	"xmdm/server/internal/identity"
-	identityhttp "xmdm/server/internal/identity/http"
 	logs "xmdm/server/internal/logs"
 	loghttp "xmdm/server/internal/logs/http"
 	managedfiles "xmdm/server/internal/managedfiles"
@@ -38,13 +36,18 @@ import (
 	"xmdm/server/internal/policy"
 	policyhttp "xmdm/server/internal/policy/http"
 	"xmdm/server/internal/push"
+	"xmdm/server/internal/roles"
+	roleshttp "xmdm/server/internal/roles/http"
 	"xmdm/server/internal/telemetry"
 	telemetryhttp "xmdm/server/internal/telemetry/http"
+	"xmdm/server/internal/users"
+	usershttp "xmdm/server/internal/users/http"
 )
 
 type Dependencies struct {
 	Database        *pgxpool.Pool
-	Identity        identity.Repository
+	Users           users.Repository
+	Roles           roles.Repository
 	Apps            apps.Repository
 	Files           files.Repository
 	ManagedFiles    managedfiles.Repository
@@ -73,7 +76,8 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
 	adminhttp.RegisterDashboard(mux, svc, adminhttp.DashboardDependencies{
-		Identity:        deps.Identity,
+		Users:           deps.Users,
+		Roles:           deps.Roles,
 		Apps:            deps.Apps,
 		Files:           deps.Files,
 		ManagedFiles:    deps.ManagedFiles,
@@ -102,7 +106,8 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	filehttp.Register(apiMux, svc, deps.Files, deps.Artifacts, deps.Audit, deps.TenantID)
 	managedfilehttp.Register(apiMux, svc, deps.ManagedFiles, deps.Devices, deps.Artifacts, deps.TenantID)
 	certificatehttp.Register(apiMux, svc, deps.Devices, deps.Certificates, deps.Artifacts, deps.Audit, deps.TenantID)
-	identityhttp.Register(apiMux, svc, deps.Identity, deps.Audit, deps.TenantID)
+	usershttp.Register(apiMux, svc, deps.Users, deps.Audit, deps.TenantID)
+	roleshttp.Register(apiMux, svc, deps.Roles, deps.Audit, deps.TenantID)
 	grouphttp.Register(apiMux, svc, deps.Groups, deps.Audit, deps.TenantID)
 	policyhttp.Register(apiMux, svc, deps.Policies, deps.Audit, deps.TenantID)
 	devicehttp.Register(apiMux, svc, deps.Devices, deps.Audit, deps.TenantID)

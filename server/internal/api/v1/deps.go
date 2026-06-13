@@ -20,14 +20,15 @@ import (
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
 	filespg "xmdm/server/internal/files/postgres"
 	grouppg "xmdm/server/internal/group/postgres"
-	identitypg "xmdm/server/internal/identity/postgres"
 	logspg "xmdm/server/internal/logs/postgres"
 	managedfilespg "xmdm/server/internal/managedfiles/postgres"
 	"xmdm/server/internal/mqttdynsec"
 	"xmdm/server/internal/plugins"
 	policypg "xmdm/server/internal/policy/postgres"
 	"xmdm/server/internal/push"
+	rolespg "xmdm/server/internal/roles/postgres"
 	telemetrypg "xmdm/server/internal/telemetry/postgres"
+	userspg "xmdm/server/internal/users/postgres"
 )
 
 // NewDeps initializes all dependencies for the API layer
@@ -57,7 +58,8 @@ func NewDeps(cfg *config.Config) Dependencies {
 	enrollmentStore.SetProvisioner(provisioner)
 	return Dependencies{
 		Database:     pool,
-		Identity:     identitypg.New(pool),
+		Users:        userspg.New(pool),
+		Roles:        rolespg.New(pool),
 		Apps:         appspg.New(pool),
 		Files:        filespg.New(pool),
 		ManagedFiles: managedfilespg.New(pool),

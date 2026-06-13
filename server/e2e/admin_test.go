@@ -30,7 +30,6 @@ import (
 	enrollmentpg "xmdm/server/internal/enrollment/postgres"
 	filespg "xmdm/server/internal/files/postgres"
 	grouppg "xmdm/server/internal/group/postgres"
-	identitypg "xmdm/server/internal/identity/postgres"
 	logspg "xmdm/server/internal/logs/postgres"
 	managedfilespg "xmdm/server/internal/managedfiles/postgres"
 	"xmdm/server/internal/mqttdynsec"
@@ -38,7 +37,9 @@ import (
 	"xmdm/server/internal/plugins"
 	policypg "xmdm/server/internal/policy/postgres"
 	"xmdm/server/internal/push"
+	rolespg "xmdm/server/internal/roles/postgres"
 	telemetrypg "xmdm/server/internal/telemetry/postgres"
+	userspg "xmdm/server/internal/users/postgres"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -400,7 +401,8 @@ func testDeps(t *testing.T, pool *pgxpool.Pool, auditStore audit.Store, pluginMa
 	enrollmentStore := enrollmentpg.New(pool)
 	commandStore := commandspg.New(pool)
 	deps := v1.Dependencies{
-		Identity:      identitypg.New(pool),
+		Users:         userspg.New(pool),
+		Roles:         rolespg.New(pool),
 		Apps:          appspg.New(pool),
 		Files:         filespg.New(pool),
 		ManagedFiles:  managedfilespg.New(pool),

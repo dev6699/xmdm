@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
 	"xmdm/server/internal/auth"
 )
 
@@ -42,12 +43,12 @@ func (d *dashboard) login(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/admin", http.StatusSeeOther)
 			return
 		}
-		if !errors.Is(err, auth.ErrInvalidCredentials) || d.deps.Identity == nil {
+		if !errors.Is(err, auth.ErrInvalidCredentials) || d.deps.Users == nil {
 			setLoginFlash(w, username, "invalid credentials")
 			http.Redirect(w, r, loginRedirectURL(nextPath), http.StatusSeeOther)
 			return
 		}
-		user, role, userErr := d.deps.Identity.AuthenticateUser(r.Context(), d.deps.TenantID, username, password)
+		user, role, userErr := d.deps.Users.AuthenticateUser(r.Context(), d.deps.TenantID, username, password)
 		if userErr != nil {
 			setLoginFlash(w, username, "invalid credentials")
 			http.Redirect(w, r, loginRedirectURL(nextPath), http.StatusSeeOther)

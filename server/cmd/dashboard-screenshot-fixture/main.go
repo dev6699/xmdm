@@ -23,11 +23,12 @@ import (
 	"xmdm/server/internal/files"
 	"xmdm/server/internal/group"
 	"xmdm/server/internal/httpx"
-	"xmdm/server/internal/identity"
 	"xmdm/server/internal/logs"
 	managedfiles "xmdm/server/internal/managedfiles"
 	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/policy"
+	"xmdm/server/internal/roles"
+	"xmdm/server/internal/users"
 )
 
 const tenantID = "00000000-0000-0000-0000-000000000000"
@@ -42,7 +43,8 @@ func main() {
 	svc := auth.NewService("admin", "admin", time.Hour)
 	mux := http.NewServeMux()
 	adminhttp.RegisterDashboard(mux, svc, adminhttp.DashboardDependencies{
-		Identity:        &identityStore{now: now},
+		Users:           &identityStore{now: now},
+		Roles:           &identityStore{now: now},
 		Groups:          &groupStore{now: now},
 		Policies:        &policyStore{now: now},
 		Devices:         &deviceStore{now: now, policyID: policyID},
@@ -66,86 +68,86 @@ func main() {
 
 type identityStore struct{ now time.Time }
 
-func (s *identityStore) ListUsers(context.Context, string, pagination.Params) ([]identity.User, error) {
-	items := []identity.User{
-		{RecordBase: identity.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
-		{RecordBase: identity.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
-		{RecordBase: identity.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
+func (s *identityStore) ListUsers(context.Context, string, pagination.Params) ([]users.User, error) {
+	items := []users.User{
+		{RecordBase: users.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
+		{RecordBase: users.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
+		{RecordBase: users.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	return items, nil
 }
-func (s *identityStore) ListActiveUsers(context.Context, string) ([]identity.User, error) {
-	items := []identity.User{
-		{RecordBase: identity.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
-		{RecordBase: identity.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
-		{RecordBase: identity.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
+func (s *identityStore) ListActiveUsers(context.Context, string) ([]users.User, error) {
+	items := []users.User{
+		{RecordBase: users.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
+		{RecordBase: users.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
+		{RecordBase: users.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	return items, nil
 }
-func (s *identityStore) GetUser(_ context.Context, _ string, id string) (identity.User, error) {
-	for _, item := range []identity.User{
-		{RecordBase: identity.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
-		{RecordBase: identity.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
-		{RecordBase: identity.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
+func (s *identityStore) GetUser(_ context.Context, _ string, id string) (users.User, error) {
+	for _, item := range []users.User{
+		{RecordBase: users.RecordBase{ID: "user-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -14), UpdatedAt: s.now}, Email: "admin@example.com", RoleID: "role-admin"},
+		{RecordBase: users.RecordBase{ID: "user-ops", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -10), UpdatedAt: s.now.Add(-2 * time.Hour)}, Email: "ops@example.com", RoleID: "role-operator"},
+		{RecordBase: users.RecordBase{ID: "user-auditor", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -7), UpdatedAt: s.now.Add(-6 * time.Hour)}, Email: "auditor@example.com", RoleID: "role-read"},
 	} {
 		if item.ID == id {
 			return item, nil
 		}
 	}
-	return identity.User{}, httpx.ErrNotFound
+	return users.User{}, httpx.ErrNotFound
 }
-func (s *identityStore) CreateUser(context.Context, string, identity.UserUpsert) (identity.User, error) {
-	return identity.User{}, nil
+func (s *identityStore) CreateUser(context.Context, string, users.UserUpsert) (users.User, error) {
+	return users.User{}, nil
 }
-func (s *identityStore) UpdateUser(context.Context, string, string, identity.UserUpsert) (identity.User, error) {
-	return identity.User{}, nil
+func (s *identityStore) UpdateUser(context.Context, string, string, users.UserUpsert) (users.User, error) {
+	return users.User{}, nil
 }
-func (s *identityStore) RetireUser(context.Context, string, string) (identity.User, error) {
-	return identity.User{}, nil
+func (s *identityStore) RetireUser(context.Context, string, string) (users.User, error) {
+	return users.User{}, nil
 }
-func (s *identityStore) AuthenticateUser(context.Context, string, string, string) (identity.User, identity.Role, error) {
-	return identity.User{}, identity.Role{}, nil
+func (s *identityStore) AuthenticateUser(context.Context, string, string, string) (users.User, roles.Role, error) {
+	return users.User{}, roles.Role{}, nil
 }
-func (s *identityStore) ListRoles(context.Context, string, pagination.Params) ([]identity.Role, error) {
-	items := []identity.Role{
-		{RecordBase: identity.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
-		{RecordBase: identity.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
-		{RecordBase: identity.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
+func (s *identityStore) ListRoles(context.Context, string, pagination.Params) ([]roles.Role, error) {
+	items := []roles.Role{
+		{RecordBase: roles.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
+		{RecordBase: roles.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
+		{RecordBase: roles.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	return items, nil
 }
-func (s *identityStore) ListActiveRoles(context.Context, string) ([]identity.Role, error) {
-	items := []identity.Role{
-		{RecordBase: identity.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
-		{RecordBase: identity.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
-		{RecordBase: identity.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
+func (s *identityStore) ListActiveRoles(context.Context, string) ([]roles.Role, error) {
+	items := []roles.Role{
+		{RecordBase: roles.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
+		{RecordBase: roles.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
+		{RecordBase: roles.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	return items, nil
 }
-func (s *identityStore) GetRole(_ context.Context, _ string, id string) (identity.Role, error) {
-	for _, item := range []identity.Role{
-		{RecordBase: identity.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
-		{RecordBase: identity.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
-		{RecordBase: identity.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
+func (s *identityStore) GetRole(_ context.Context, _ string, id string) (roles.Role, error) {
+	for _, item := range []roles.Role{
+		{RecordBase: roles.RecordBase{ID: "role-admin", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -20), UpdatedAt: s.now}, Name: "Administrators", Permissions: []string{"admin.read", "admin.write"}},
+		{RecordBase: roles.RecordBase{ID: "role-operator", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -15), UpdatedAt: s.now}, Name: "Operators", Permissions: []string{"admin.read", "admin.write"}},
+		{RecordBase: roles.RecordBase{ID: "role-read", TenantID: tenantID, Status: "active", CreatedAt: s.now.AddDate(0, 0, -12), UpdatedAt: s.now}, Name: "Read Only", Permissions: []string{"admin.read"}},
 	} {
 		if item.ID == id {
 			return item, nil
 		}
 	}
-	return identity.Role{}, httpx.ErrNotFound
+	return roles.Role{}, httpx.ErrNotFound
 }
-func (s *identityStore) CreateRole(context.Context, string, identity.RoleUpsert) (identity.Role, error) {
-	return identity.Role{}, nil
+func (s *identityStore) CreateRole(context.Context, string, roles.RoleUpsert) (roles.Role, error) {
+	return roles.Role{}, nil
 }
-func (s *identityStore) UpdateRole(context.Context, string, string, identity.RoleUpsert) (identity.Role, error) {
-	return identity.Role{}, nil
+func (s *identityStore) UpdateRole(context.Context, string, string, roles.RoleUpsert) (roles.Role, error) {
+	return roles.Role{}, nil
 }
-func (s *identityStore) RetireRole(context.Context, string, string) (identity.Role, error) {
-	return identity.Role{}, nil
+func (s *identityStore) RetireRole(context.Context, string, string) (roles.Role, error) {
+	return roles.Role{}, nil
 }
 
 type groupStore struct{ now time.Time }
@@ -1074,7 +1076,8 @@ func (artifactStore) Get(context.Context, string) (io.ReadCloser, error) {
 }
 func (artifactStore) Delete(context.Context, string) error { return nil }
 
-var _ identity.Repository = (*identityStore)(nil)
+var _ users.Repository = (*identityStore)(nil)
+var _ roles.Repository = (*identityStore)(nil)
 var _ group.Repository = (*groupStore)(nil)
 var _ policy.Repository = (*policyStore)(nil)
 var _ device.Repository = (*deviceStore)(nil)

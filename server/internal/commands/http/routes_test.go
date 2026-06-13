@@ -170,6 +170,22 @@ func TestRegisterRejectsAckWithBadSecret(t *testing.T) {
 	}
 }
 
+func TestRegisterRejectsAckForWrongDeviceID(t *testing.T) {
+	store := &fakeCommandStore{}
+	devices := &fakeDeviceStore{deviceID: "device-123", secret: "secret"}
+	mux := http.NewServeMux()
+	Register(httpx.WithPrefix(mux, "/api/v1"), devices, store, "tenant-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/device-999/commands/cmd-1/ack", strings.NewReader(`{"status":"acked"}`))
+	req.Header.Set(deviceSecretHeader, "secret")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 type fakeCommandStore struct {
 	items  []commands.Command
 	acked  commands.Command

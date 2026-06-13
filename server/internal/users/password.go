@@ -1,12 +1,15 @@
-package identity
+package users
 
 import (
 	"strings"
-
 	"xmdm/server/internal/enrollment"
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+func VerifyPassword(hash, password string) bool {
+	return verifyPassword(hash, password)
+}
 
 func HashPassword(password string) (string, error) {
 	if password == "" {
@@ -19,7 +22,7 @@ func HashPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-func VerifyPassword(hash, password string) bool {
+func verifyPassword(hash, password string) bool {
 	if hash == "" || password == "" {
 		return false
 	}
