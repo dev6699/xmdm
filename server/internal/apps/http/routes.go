@@ -16,37 +16,11 @@ import (
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
-	"xmdm/server/internal/pagination"
 )
 
 const deviceSecretHeader = "X-XMDM-Device-Secret"
 
 func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, devices device.Repository, artifactStore artifacts.Store, auditStore audit.Store, tenantID, agentAppPackage string) {
-	httpx.RegisterCRUDFor(mux, svc, auditStore, tenantID, httpx.ResourceSpec[apps.AppUpsert, apps.App]{
-		Kind:      "apps",
-		ReadPerm:  auth.PermissionAdminRead,
-		WritePerm: auth.PermissionAdminWrite,
-		Decode:    decodeAppRequest,
-		List: func(ctx context.Context, params pagination.Params) ([]apps.App, error) {
-			return store.ListApps(ctx, tenantID, params)
-		},
-		Create: func(ctx context.Context, req apps.AppUpsert) (apps.App, error) {
-			return store.CreateApp(ctx, tenantID, req)
-		},
-		Update: func(ctx context.Context, id string, req apps.AppUpsert) (apps.App, error) {
-			return store.UpdateApp(ctx, tenantID, id, req)
-		},
-		Retire: func(ctx context.Context, id string) (apps.App, error) {
-			return store.RetireApp(ctx, tenantID, id)
-		},
-		Audit: func(rec apps.App) map[string]any {
-			return map[string]any{
-				"packageName": rec.PackageName,
-				"name":        rec.Name,
-			}
-		},
-	})
-
 	mux.HandleFunc("/enrollment/agent.apk", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -267,17 +241,6 @@ func latestPublishedAgentAppVersion(ctx context.Context, store apps.Repository, 
 		return apps.App{}, apps.Version{}, httpx.ErrNotFound
 	}
 	return item, version, nil
-}
-
-func decodeAppRequest(r *http.Request) (apps.AppUpsert, error) {
-	var payload apps.AppUpsert
-	if err := httpx.DecodeJSONBody(r, &payload); err != nil {
-		return apps.AppUpsert{}, err
-	}
-	if payload.PackageName == "" || payload.Name == "" {
-		return apps.AppUpsert{}, httpx.ErrInvalidInput
-	}
-	return payload, nil
 }
 
 func decodeVersionRequest(r *http.Request) (apps.VersionUpsert, error) {

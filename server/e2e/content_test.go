@@ -1,11 +1,15 @@
 package e2e_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	appspg "xmdm/server/internal/apps/postgres"
+	"xmdm/server/internal/bootstrap"
 )
 
 // ── Test cases ───────────────────────────────────────────────────────────────
@@ -65,7 +69,9 @@ func TestManagedAppsAndFilesRemoval(t *testing.T) {
 
 	requestMarker := env.requests.len()
 	deleteJSON(t, env.client, env.baseURL+"/api/v1/managed-files/"+env.managedFile.managedFileID)
-	deleteJSON(t, env.client, env.baseURL+"/api/v1/apps/"+env.chromeAppID)
+	if _, err := appspg.New(env.pool).RetireApp(context.Background(), bootstrap.SeedTenantID, env.chromeAppID); err != nil {
+		t.Fatalf("retire app: %v", err)
+	}
 
 	env.requests.waitForAfter(t, requestMarker, time.Minute, "config sync after managed content removal", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
@@ -170,7 +176,7 @@ func TestCommandPolling(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
-	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForDeviceEnrollment(t, env.pool, env.deviceID)
 
 	commandID := env.mustIssuePingCommand(t)
 	env.requests.waitFor(t, time.Minute, "HTTP polling command fetch", func(r requestRecord) bool {
@@ -238,8 +244,8 @@ func TestKioskModeChrome(t *testing.T) {
 	env := newBaseTestEnv(t, false)
 	artifactStore := newTestArtifactStore(t)
 
-	chromeAppID := mustRegisterChromeApp(t, env.client, env.baseURL, artifactStore)
-	policyResp := mustCreatePolicy(t, env.client, env.baseURL, `{
+	chromeAppID := mustRegisterChromeApp(t, env.pool, env.client, env.baseURL, artifactStore)
+	policyResp := mustCreatePolicy(t, env.pool, `{
 		"name":"kiosk-mode",
 		"version":1,
 		"kioskMode":true,
@@ -274,8 +280,8 @@ func TestKioskModeChrome(t *testing.T) {
 func TestKioskExitChromeLocal(t *testing.T) {
 	env := newBaseTestEnv(t, false)
 	artifactStore := newTestArtifactStore(t)
-	chromeAppID := mustRegisterChromeApp(t, env.client, env.baseURL, artifactStore)
-	policyResp := mustCreatePolicy(t, env.client, env.baseURL, fmt.Sprintf(`{
+	chromeAppID := mustRegisterChromeApp(t, env.pool, env.client, env.baseURL, artifactStore)
+	policyResp := mustCreatePolicy(t, env.pool, fmt.Sprintf(`{
 		"name":"kiosk-exit",
 		"version":1,
 		"kioskMode":true,
@@ -319,64 +325,13 @@ func TestKioskExitChromeLocal(t *testing.T) {
 	tapKioskMenuItem(t, env.serial, "Exit kiosk mode")
 }
 
-// TestKioskAdminConfigSyncStatus verifies that the local kiosk admin menu
-// refreshes the displayed config snapshot after a local sync.
-func TestKioskAdminConfigSyncStatus(t *testing.T) {
-	env := newBaseTestEnv(t, false)
-
-	policyResp := mustCreatePolicy(t, env.client, env.baseURL, `{
-		"name":"kiosk-sync-status",
-		"version":1,
-		"kioskMode":true,
-		"kioskAppPackage":"com.xmdm.launcher",
-		"restrictions":{
-			"kioskExitPasscode":"1234"
-		}
-	}`)
-	policyID, _ := policyResp["id"].(string)
-	if policyID == "" {
-		t.Fatalf("policy create returned empty id: %#v", policyResp)
-	}
-	updateDevicePolicy(t, env.pool, env.deviceID, policyID)
-
-	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
-	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
-	startLauncher(t, env.serial, bootstrapURI)
-
-	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
-		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
-	})
-	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
-	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
-
-	requestMarker := env.requests.len()
-	patchJSON(t, env.client, env.baseURL+"/api/v1/policies/"+policyID, `{
-		"name":"kiosk-sync-status-updated",
-		"version":2,
-		"kioskMode":true,
-		"kioskAppPackage":"com.xmdm.launcher",
-		"restrictions":{
-			"kioskExitPasscode":"1234",
-			"allowCamera":false
-		}
-	}`)
-	waitForKioskModeOnDevice(t, env.serial)
-	tapKioskAdminMenuButton(t, env.serial)
-	tapKioskMenuItem(t, env.serial, "Sync config policy")
-	env.requests.waitForAfter(t, requestMarker, time.Minute, "config snapshot fetch after local sync", func(r requestRecord) bool {
-		return r.method == http.MethodGet &&
-			r.path == "/api/v1/devices/"+env.deviceID+"/config"
-	})
-	waitForUIContains(t, env.serial, `"name": "kiosk-sync-status-updated"`, time.Minute)
-}
-
 // TestKioskAdminConfigSyncTwice verifies that repeated local config syncs do
 // not strand the progress dialog and that the displayed config snapshot updates
 // on each refresh.
 func TestKioskAdminConfigSyncTwice(t *testing.T) {
 	env := newBaseTestEnv(t, false)
 
-	policyResp := mustCreatePolicy(t, env.client, env.baseURL, `{
+	policyResp := mustCreatePolicy(t, env.pool, `{
 		"name":"kiosk-sync-twice",
 		"version":1,
 		"kioskMode":true,
@@ -403,7 +358,7 @@ func TestKioskAdminConfigSyncTwice(t *testing.T) {
 	waitForKioskModeOnDevice(t, env.serial)
 
 	requestMarker := env.requests.len()
-	patchJSON(t, env.client, env.baseURL+"/api/v1/policies/"+policyID, `{
+	mustUpdatePolicy(t, env.pool, policyID, `{
 		"name":"kiosk-sync-twice-v2",
 		"version":2,
 		"kioskMode":true,
@@ -422,7 +377,7 @@ func TestKioskAdminConfigSyncTwice(t *testing.T) {
 	waitForUIContains(t, env.serial, `"name": "kiosk-sync-twice-v2"`, time.Minute)
 
 	requestMarker = env.requests.len()
-	patchJSON(t, env.client, env.baseURL+"/api/v1/policies/"+policyID, `{
+	mustUpdatePolicy(t, env.pool, policyID, `{
 		"name":"kiosk-sync-twice-v3",
 		"version":3,
 		"kioskMode":true,
@@ -450,8 +405,8 @@ func TestKioskExitChromeCommand(t *testing.T) {
 	env.reverseMQTTPort(t)
 
 	artifactStore := newTestArtifactStore(t)
-	chromeAppID := mustRegisterChromeApp(t, env.client, env.baseURL, artifactStore)
-	policyResp := mustCreatePolicy(t, env.client, env.baseURL, `{
+	chromeAppID := mustRegisterChromeApp(t, env.pool, env.client, env.baseURL, artifactStore)
+	policyResp := mustCreatePolicy(t, env.pool, `{
 		"name":"kiosk-exit-command",
 		"version":1,
 		"kioskMode":true,
@@ -496,7 +451,7 @@ func TestKioskStayAwakeWhilePluggedIn(t *testing.T) {
 	})
 	setBatteryPlugged(t, env.serial, true)
 
-	policyResp := mustCreatePolicy(t, env.client, env.baseURL, `{
+	policyResp := mustCreatePolicy(t, env.pool, `{
 		"name":"kiosk-stay-awake",
 		"version":1,
 		"kioskMode":true,
@@ -540,7 +495,7 @@ func TestPackageRules(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
-	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForDeviceEnrollment(t, env.pool, env.deviceID)
 	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
 	waitForChromeInstalled(t, env.serial)
 	waitForPackageSuspendedOnDevice(t, env.serial, chromePackage)
@@ -552,8 +507,8 @@ func TestPolicySync(t *testing.T) {
 	env := newBaseTestEnv(t, false)
 	artifactStore := newTestArtifactStore(t)
 
-	chromeAppID := mustRegisterChromeApp(t, env.client, env.baseURL, artifactStore)
-	policyResp := mustCreatePolicy(t, env.client, env.baseURL, `{
+	chromeAppID := mustRegisterChromeApp(t, env.pool, env.client, env.baseURL, artifactStore)
+	policyResp := mustCreatePolicy(t, env.pool, `{
 		"name":"policy-sync",
 		"version":1,
 		"kioskMode":false,
@@ -574,7 +529,7 @@ func TestPolicySync(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
-	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForDeviceEnrollment(t, env.pool, env.deviceID)
 	env.requests.waitFor(t, time.Minute, "managed app artifact download", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
 			strings.Contains(r.path, "/api/v1/devices/") &&
@@ -584,7 +539,7 @@ func TestPolicySync(t *testing.T) {
 	waitForChromeInstalled(t, env.serial)
 
 	requestMarker := env.requests.len()
-	patchJSON(t, env.client, env.baseURL+"/api/v1/policies/"+policyID, `{
+	mustUpdatePolicy(t, env.pool, policyID, `{
 		"name":"policy-sync",
 		"version":2,
 		"kioskMode":false,
@@ -612,7 +567,7 @@ func TestDeviceLogsUpload(t *testing.T) {
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
-	waitForDeviceEnrollment(t, env.client, env.baseURL, env.deviceID)
+	waitForDeviceEnrollment(t, env.pool, env.deviceID)
 	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
 	waitForDeviceLogsUpload(t, env.requests, env.deviceID)
 	assertDeviceLogsUploadPayload(t, env.requests, env.deviceID)

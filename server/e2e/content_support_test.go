@@ -18,11 +18,15 @@ import (
 	"time"
 
 	v1 "xmdm/server/internal/api/v1"
+	apps "xmdm/server/internal/apps"
+	appspg "xmdm/server/internal/apps/postgres"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/checksum"
 	"xmdm/server/internal/plugins"
+	policy "xmdm/server/internal/policy"
+	policypg "xmdm/server/internal/policy/postgres"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -142,7 +146,7 @@ func newContentTestEnvWithExtras(t *testing.T, extraBootstrapExtras map[string]s
 	artifactStore := newTestArtifactStore(t)
 
 	mf := mustUploadManagedFile(t, base.client, base.baseURL, artifactStore)
-	chromeAppID := mustRegisterChromeApp(t, base.client, base.baseURL, artifactStore)
+	chromeAppID := mustRegisterChromeApp(t, base.pool, base.client, base.baseURL, artifactStore)
 	seedPolicyManagedFile(t, base.pool, base.policyID, mf.managedFileID)
 	seedPolicyApp(t, base.pool, base.policyID, chromeAppID)
 
@@ -166,8 +170,8 @@ func newPackageRulesTestEnv(t *testing.T) packageRulesTestEnv {
 	base := newBaseTestEnv(t, false)
 	artifactStore := newTestArtifactStore(t)
 
-	chromeAppID := mustRegisterChromeApp(t, base.client, base.baseURL, artifactStore)
-	policyResp := mustCreatePolicy(t, base.client, base.baseURL, `{
+	chromeAppID := mustRegisterChromeApp(t, base.pool, base.client, base.baseURL, artifactStore)
+	policyResp := mustCreatePolicy(t, base.pool, `{
 		"name":"package-rules",
 		"version":1,
 		"kioskMode":false,
@@ -231,9 +235,46 @@ func startMQTTBroker(t *testing.T) {
 	runDockerCompose(t, "start", "mqtt")
 }
 
-func mustCreatePolicy(t *testing.T, client *http.Client, baseURL, body string) map[string]any {
+func mustCreatePolicy(t *testing.T, pool *pgxpool.Pool, body string) map[string]any {
 	t.Helper()
-	return postJSON(t, client, baseURL+"/api/v1/policies", body)
+	var req policy.PolicyUpsert
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("decode policy payload: %v", err)
+	}
+	created, err := policypg.New(pool).CreatePolicy(context.Background(), bootstrap.SeedTenantID, req)
+	if err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	return map[string]any{
+		"id":              created.ID,
+		"name":            created.Name,
+		"version":         created.Version,
+		"kioskMode":       created.KioskMode,
+		"kioskAppPackage": created.KioskAppPackage,
+		"restrictions":    created.Restrictions,
+		"status":          created.Status,
+	}
+}
+
+func mustUpdatePolicy(t *testing.T, pool *pgxpool.Pool, policyID, body string) map[string]any {
+	t.Helper()
+	var req policy.PolicyUpsert
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("decode policy payload: %v", err)
+	}
+	updated, err := policypg.New(pool).UpdatePolicy(context.Background(), bootstrap.SeedTenantID, policyID, req)
+	if err != nil {
+		t.Fatalf("update policy: %v", err)
+	}
+	return map[string]any{
+		"id":              updated.ID,
+		"name":            updated.Name,
+		"version":         updated.Version,
+		"kioskMode":       updated.KioskMode,
+		"kioskAppPackage": updated.KioskAppPackage,
+		"restrictions":    updated.Restrictions,
+		"status":          updated.Status,
+	}
 }
 
 // ── commandTestEnv methods ───────────────────────────────────────────────────
@@ -768,11 +809,54 @@ func assertDeviceInfoUploadPayload(t *testing.T, requests *requestRecorder, devi
 		}
 	}
 	if !hasBasic {
-		t.Fatalf("device info upload body did not include expected launcher inventory fields; bodies=%v", payloads)
+		t.Fatalf("device info upload body did not include expected launcher inventory fields; first uploads=%s", deviceInfoUploadDiagnostics(payloads, deviceID))
 	}
 	if !hasConfig {
-		t.Fatalf("device info upload body did not include expected config fields; bodies=%v", payloads)
+		t.Fatalf("device info upload body did not include expected config fields; first uploads=%s", deviceInfoUploadDiagnostics(payloads, deviceID))
 	}
+}
+
+func deviceInfoUploadDiagnostics(payloads []string, deviceID string) string {
+	type deviceInfoUpload struct {
+		ObservedAt string         `json:"observedAt"`
+		Payload    map[string]any `json:"payload"`
+	}
+	parts := make([]string, 0, len(payloads))
+	for i, payloadBody := range payloads {
+		var upload deviceInfoUpload
+		if err := json.Unmarshal([]byte(payloadBody), &upload); err != nil {
+			parts = append(parts, fmt.Sprintf("#%d decode_error=%v body=%q", i+1, err, payloadBody))
+			continue
+		}
+		if upload.Payload == nil {
+			parts = append(parts, fmt.Sprintf("#%d missing_payload body=%q", i+1, payloadBody))
+			continue
+		}
+		missing := make([]string, 0, 6)
+		if upload.Payload["deviceId"] != deviceID {
+			missing = append(missing, "deviceId")
+		}
+		if upload.Payload["model"] == nil {
+			missing = append(missing, "model")
+		}
+		if upload.Payload["appPackage"] != "com.xmdm.launcher" {
+			missing = append(missing, "appPackage")
+		}
+		if upload.Payload["configRevision"] == nil {
+			missing = append(missing, "configRevision")
+		}
+		if upload.Payload["managedAppsVersion"] == nil {
+			missing = append(missing, "managedAppsVersion")
+		}
+		if upload.Payload["managedFilesVersion"] == nil {
+			missing = append(missing, "managedFilesVersion")
+		}
+		if len(missing) == 0 {
+			missing = append(missing, "none")
+		}
+		parts = append(parts, fmt.Sprintf("#%d observedAt=%s missing=%s", i+1, upload.ObservedAt, strings.Join(missing, ",")))
+	}
+	return strings.Join(parts, " | ")
 }
 
 func assertCertificateInstallReportedViaAPI(t *testing.T, requests *requestRecorder, deviceID string) {
@@ -1181,7 +1265,7 @@ func mustUploadCertificate(t *testing.T, client *http.Client, baseURL string, ar
 }
 
 // mustRegisterChromeApp uploads the Chrome APK artifact and publishes it as a managed app version.
-func mustRegisterChromeApp(t *testing.T, client *http.Client, baseURL string, artifactStore interface {
+func mustRegisterChromeApp(t *testing.T, pool *pgxpool.Pool, client *http.Client, baseURL string, artifactStore interface {
 	Delete(context.Context, string) error
 }) string {
 	t.Helper()
@@ -1206,14 +1290,15 @@ func mustRegisterChromeApp(t *testing.T, client *http.Client, baseURL string, ar
 	}
 	t.Cleanup(func() { _ = artifactStore.Delete(context.Background(), storageKey) })
 
-	appResp := postJSON(t, client, baseURL+"/api/v1/apps", fmt.Sprintf(`{
-		"packageName":"%s",
-		"name":"%s"
-	}`, chromePackage, chromeName))
-	appID, _ := appResp["id"].(string)
-	if appID == "" {
-		t.Fatalf("chrome app create returned empty id: %#v", appResp)
+	appStore := appspg.New(pool)
+	appRec, err := appStore.CreateApp(context.Background(), bootstrap.SeedTenantID, apps.AppUpsert{
+		PackageName: chromePackage,
+		Name:        chromeName,
+	})
+	if err != nil {
+		t.Fatalf("create chrome app: %v", err)
 	}
+	appID := appRec.ID
 
 	versionResp := postJSON(t, client, baseURL+"/api/v1/apps/"+appID+"/versions", fmt.Sprintf(`{
 		"versionName":"%s",

@@ -17,7 +17,6 @@ import (
 	"xmdm/server/internal/commands"
 	commandhttp "xmdm/server/internal/commands/http"
 	"xmdm/server/internal/device"
-	devicehttp "xmdm/server/internal/device/http"
 	deviceinfo "xmdm/server/internal/deviceinfo"
 	deviceinfohttp "xmdm/server/internal/deviceinfo/http"
 	"xmdm/server/internal/enrollment"
@@ -25,7 +24,6 @@ import (
 	files "xmdm/server/internal/files"
 	filehttp "xmdm/server/internal/files/http"
 	"xmdm/server/internal/group"
-	grouphttp "xmdm/server/internal/group/http"
 	"xmdm/server/internal/httpx"
 	logs "xmdm/server/internal/logs"
 	loghttp "xmdm/server/internal/logs/http"
@@ -34,14 +32,11 @@ import (
 	"xmdm/server/internal/observability"
 	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
-	policyhttp "xmdm/server/internal/policy/http"
 	"xmdm/server/internal/push"
 	"xmdm/server/internal/roles"
-	roleshttp "xmdm/server/internal/roles/http"
 	"xmdm/server/internal/telemetry"
 	telemetryhttp "xmdm/server/internal/telemetry/http"
 	"xmdm/server/internal/users"
-	usershttp "xmdm/server/internal/users/http"
 )
 
 type Dependencies struct {
@@ -106,11 +101,6 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	filehttp.Register(apiMux, svc, deps.Files, deps.Artifacts, deps.Audit, deps.TenantID)
 	managedfilehttp.Register(apiMux, svc, deps.ManagedFiles, deps.Devices, deps.Artifacts, deps.TenantID)
 	certificatehttp.Register(apiMux, svc, deps.Devices, deps.Certificates, deps.Artifacts, deps.Audit, deps.TenantID)
-	usershttp.Register(apiMux, svc, deps.Users, deps.Audit, deps.TenantID)
-	roleshttp.Register(apiMux, svc, deps.Roles, deps.Audit, deps.TenantID)
-	grouphttp.Register(apiMux, svc, deps.Groups, deps.Audit, deps.TenantID)
-	policyhttp.Register(apiMux, svc, deps.Policies, deps.Audit, deps.TenantID)
-	devicehttp.Register(apiMux, svc, deps.Devices, deps.Audit, deps.TenantID)
 	for _, mount := range deps.ExtraRootMounts {
 		if mount != nil {
 			mount(mux)

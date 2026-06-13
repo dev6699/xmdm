@@ -4,7 +4,6 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 
 ## What Is Covered
 
-- `TestAdminE2E` covers the admin console flow.
 - `TestEnrollmentE2E` covers server-simulated enrollment and first-sync behavior.
 - `TestManagedAppsAndFiles` covers adb-backed managed app and managed file delivery on a physical device.
 - `TestManagedAppsAndFilesRemoval` covers adb-backed managed app and managed file removal on a physical device.
@@ -13,9 +12,8 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 - `TestDeviceInfoReporting` covers adb-backed device-info reporting and admin export on a physical device.
 - `TestKioskModeChrome` covers adb-backed kiosk enforcement using Chrome on a physical device.
 - `TestKioskExitChromeLocal` covers adb-backed local kiosk unlock using the persistent admin menu, passcode prompt, and passcode while Chrome remains foreground on a physical device.
-- `TestKioskAdminConfigSyncStatus` covers adb-backed local kiosk config sync status from the persistent admin menu on a physical device.
-- `TestKioskAdminConfigSyncTwice` covers repeated adb-backed local kiosk config sync from the persistent admin menu on a physical device.
 - `TestKioskExitChromeCommand` covers adb-backed server command kiosk unlock while Chrome remains foreground on a physical device.
+- `TestKioskAdminConfigSyncTwice` covers repeated adb-backed local kiosk config sync from the persistent admin menu on a physical device.
 - `TestKioskStayAwakeWhilePluggedIn` covers adb-backed kiosk stay-awake policy application on a physical device.
 - `TestPackageRules` covers adb-backed package suspension enforcement on a physical device.
 - `TestPolicySync` covers adb-backed policy refresh after an admin update on a physical device.
@@ -28,7 +26,7 @@ This directory holds the root-level end-to-end tests for the Go server. The test
 
 Keep the e2e suite split by intent:
 
-- `Admin API` tests cover pure admin CRUD and session behavior with no adb.
+- `Admin API` tests cover browser session behavior with no adb.
 - `Server-simulated device` tests cover enrollment and related device API behavior through HTTP only.
 - `Real-device launcher` tests cover adb-backed launcher behavior on a physical Android device.
 
@@ -112,7 +110,6 @@ The device-log upload test covers the structured launcher events emitted by the 
 
 ### Recommended Taxonomy
 
-- `TestAdminE2E` for admin API coverage.
 - `TestEnrollmentE2E` for server-simulated device enrollment and sync behavior.
 - `TestManagedAppsAndFiles` for real-device managed file and app delivery.
 - `TestManagedAppsAndFilesRemoval` for real-device managed file and app removal.
@@ -125,18 +122,6 @@ The device-log upload test covers the structured launcher events emitted by the 
 - `TestCommandMQTTSyncConfig` for real-device MQTT command-triggered config sync.
 - `TestCommandPolling` for real-device HTTP polling command transport.
 - `TestCommandBrokerOutageRecovery` for real-device MQTT outage fallback and recovery.
-
-## Admin Flow
-
-The admin E2E verifies:
-
-- admin login and session handling
-- CRUD for users, roles, apps, groups, policies, and devices
-- app version upload and publish
-- multipart file upload and artifact metadata persistence
-- command creation and command audit capture
-- audit event capture for admin mutations
-- logout and session invalidation
 
 ## Enrollment Flow
 
@@ -200,12 +185,6 @@ The admin E2E verifies:
 2. Applies a kiosk policy with a hashed exit passcode.
 3. Taps the persistent admin overlay, chooses `Exit kiosk mode`, and submits the passcode through the launcher UI.
 4. Verifies the launcher remains foreground after kiosk exit and lock-task mode is cleared.
-
-`TestKioskAdminConfigSyncStatus` exercises the local config sync status path:
-
-1. Reuses the same launcher bootstrap and kiosk shell setup.
-2. Opens the persistent admin overlay from the launcher.
-3. Chooses `Sync config policy` and verifies the launcher updates its displayed config snapshot after a refresh.
 
 `TestKioskAdminConfigSyncTwice` exercises repeated local config sync:
 

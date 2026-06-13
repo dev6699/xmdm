@@ -9,13 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	v1 "xmdm/server/internal/api/v1"
 	auditpg "xmdm/server/internal/audit/postgres"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
 	device "xmdm/server/internal/device"
+	devicepg "xmdm/server/internal/device/postgres"
+	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/plugins"
+
+	"github.com/google/uuid"
 )
 
 func TestEnrollmentE2E(t *testing.T) {
@@ -34,7 +37,7 @@ func TestEnrollmentE2E(t *testing.T) {
 
 	login(client, t, baseURL, "admin", "secret")
 
-	policy := postJSON(t, client, baseURL+"/api/v1/policies", `{"name":"enrollment-policy","kioskMode":false,"restrictions":{}}`)
+	policy := mustCreatePolicy(t, pool, `{"name":"enrollment-policy","kioskMode":false,"restrictions":{}}`)
 	policyID, _ := policy["id"].(string)
 	if policyID == "" {
 		t.Fatalf("expected policy id in enrollment policy response: %#v", policy)
@@ -110,19 +113,22 @@ func TestEnrollmentE2E(t *testing.T) {
 		t.Fatalf("expected telemetry device id in response: %#v", rec)
 	}
 
-	devices := getJSONList(t, client, baseURL+"/api/v1/devices")
+	devices, err := devicepg.New(pool).ListDevices(context.Background(), bootstrap.SeedTenantID, pagination.Params{})
+	if err != nil {
+		t.Fatalf("list devices: %v", err)
+	}
 	found := false
 	for _, item := range devices {
-		if item["name"] == deviceID {
+		if item.ID == deviceID {
 			found = true
-			if item["status"] != device.StatusActive {
-				t.Fatalf("expected active status after telemetry, got %#v", item["status"])
+			if item.Status != device.StatusActive {
+				t.Fatalf("expected active status after telemetry, got %#v", item.Status)
 			}
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected enrolled device to appear in admin device list: %#v", devices)
+		t.Fatalf("expected enrolled device to appear in device list: %#v", devices)
 	}
 
 	dupToken := postJSON(t, client, baseURL+"/api/v1/enrollment/tokens", `{"ttlSeconds":3600}`)

@@ -155,37 +155,6 @@ func TestRegisterEnrollmentAgentAPKDownloadRejectsMissingAgent(t *testing.T) {
 	}
 }
 
-func TestRegisterAppsCollectionUsesQueryPagination(t *testing.T) {
-	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionAdminRead})
-	session, err := svc.Login("admin", "secret")
-	if err != nil {
-		t.Fatalf("login failed: %v", err)
-	}
-	store := &fakeAppStore{
-		apps: []apps.App{
-			{RecordBase: apps.RecordBase{ID: "app-1", TenantID: "tenant-1", Status: apps.StatusActive}, Name: "App 1"},
-			{RecordBase: apps.RecordBase{ID: "app-2", TenantID: "tenant-1", Status: apps.StatusActive}, Name: "App 2"},
-		},
-	}
-	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, &fakeDeviceStore{}, &fakeArtifactStore{}, nil, "tenant-1", "com.xmdm.launcher")
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps?page=3&limit=7", nil)
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
-	res := httptest.NewRecorder()
-	mux.ServeHTTP(res, req)
-
-	if res.Code != http.StatusOK {
-		t.Fatalf("unexpected status: %d body=%s", res.Code, res.Body.String())
-	}
-	if store.lastListParams.Limit != 7 {
-		t.Fatalf("unexpected list limit: %+v", store.lastListParams)
-	}
-	if store.lastListParams.Offset != 14 {
-		t.Fatalf("unexpected list offset: %+v", store.lastListParams)
-	}
-}
-
 func TestRegisterAppVersionsUsesQueryPagination(t *testing.T) {
 	svc := auth.NewServiceWithPermissions("admin", "secret", time.Minute, []auth.Permission{auth.PermissionAdminRead})
 	session, err := svc.Login("admin", "secret")
@@ -222,12 +191,10 @@ type fakeAppStore struct {
 	apps               []apps.App
 	versions           map[string][]apps.Version
 	version            apps.Version
-	lastListParams     pagination.Params
 	lastVersionsParams pagination.Params
 }
 
 func (s *fakeAppStore) ListApps(_ context.Context, _ string, params pagination.Params) ([]apps.App, error) {
-	s.lastListParams = params
 	return append([]apps.App(nil), s.apps...), nil
 }
 
