@@ -1,7 +1,6 @@
-import path from 'node:path';
-
 import { expect, test } from '@playwright/test';
 
+import { managedApkPath } from '../support/apps';
 import { dashboardCredentials } from '../support/auth';
 import { dashboardPaths } from '../support/paths';
 
@@ -10,8 +9,6 @@ test('admin can create a managed app in one flow', async ({ page }) => {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   const packageName = `com.example.catalog.${suffix}`;
   const appName = `Catalog ${suffix}`;
-  const apkPath = path.resolve(process.cwd(), '..', 'artifacts', 'chrome.apk');
-
   await page.goto(dashboardPaths.login);
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(password);
@@ -31,7 +28,7 @@ test('admin can create a managed app in one flow', async ({ page }) => {
   await page.getByLabel('Package name').fill(packageName);
   await page.getByLabel('App name').fill(appName);
   await page.getByLabel('Version code').fill('100');
-  await page.getByLabel('APK file').setInputFiles(apkPath);
+  await page.getByLabel('APK file').setInputFiles(managedApkPath());
   await page.getByRole('button', { name: 'Create managed app' }).click();
 
   await expect(page).toHaveURL(/\/admin\/apps\/[^?]+\?ok=/);

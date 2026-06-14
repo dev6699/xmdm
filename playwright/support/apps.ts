@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { expect, type Page } from '@playwright/test';
@@ -8,8 +10,25 @@ export const AGENT_APP_PACKAGE = 'com.xmdm.launcher';
 export const AGENT_APP_NAME = 'XMDM Agent';
 export const AGENT_APP_VERSION_CODE = '999999';
 
+let fakeApkPath: string | null = null;
+
+function ensureFakeApkPath() {
+  if (fakeApkPath) {
+    return fakeApkPath;
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xmdm-playwright-apk-'));
+  fakeApkPath = path.join(dir, 'fixture.apk');
+  fs.writeFileSync(fakeApkPath, Buffer.from('xmdm-playwright-fake-apk\n'));
+  return fakeApkPath;
+}
+
 export function agentApkPath() {
-  return path.resolve(process.cwd(), '..', 'artifacts', 'chrome.apk');
+  return ensureFakeApkPath();
+}
+
+export function managedApkPath() {
+  return ensureFakeApkPath();
 }
 
 async function findAgentAppRow(page: Page) {

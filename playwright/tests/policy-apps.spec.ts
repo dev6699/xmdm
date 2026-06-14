@@ -1,9 +1,7 @@
-import path from 'node:path';
-
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-import { ensureAgentAppPublished } from '../support/apps';
+import { ensureAgentAppPublished, managedApkPath } from '../support/apps';
 import { dashboardCredentials } from '../support/auth';
 import { dashboardPaths } from '../support/paths';
 import { dashboardServerConfig } from '../support/server';
@@ -27,13 +25,11 @@ async function findRowByText(page: Page, text: string) {
 }
 
 async function createManagedApp(page: Page, name: string, packageName: string, versionCode: string) {
-  const apkPath = path.resolve(process.cwd(), '..', 'artifacts', 'chrome.apk');
-
   await page.goto(dashboardPaths.apps);
   await page.getByLabel('Package name').fill(packageName);
   await page.getByLabel('App name').fill(name);
   await page.getByLabel('Version code').fill(versionCode);
-  await page.getByLabel('APK file').setInputFiles(apkPath);
+  await page.getByLabel('APK file').setInputFiles(managedApkPath());
   await page.getByRole('button', { name: 'Create managed app' }).click();
 
   await expect(page).toHaveURL(/\/admin\/apps\/[^?]+\?ok=/);
