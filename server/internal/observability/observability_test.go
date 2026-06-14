@@ -57,6 +57,25 @@ func TestHandlerRecordsRequestMetadataAndMetrics(t *testing.T) {
 	}
 }
 
+func TestHandlerCanDisableRequestLogging(t *testing.T) {
+	var logs bytes.Buffer
+	handler := NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), Config{Logger: log.New(&logs, "", 0), DisableRequestLog: true})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/config", nil)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("unexpected status: %d", res.Code)
+	}
+	if got := logs.String(); got != "" {
+		t.Fatalf("expected no request log output, got %q", got)
+	}
+}
+
 func TestHandlerRejectsMalformedTraceparent(t *testing.T) {
 	handler := NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

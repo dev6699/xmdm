@@ -2,6 +2,7 @@ server:
   address: ":8080"
   publicURL: "http://127.0.0.1:8080"
   sessionTTL: 24h
+  disableRequestLogs: false
 
 postgres:
   dsn: "postgres://xmdm:xmdm@127.0.0.1:5432/xmdm?sslmode=disable"

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -19,10 +20,11 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Address    string        `yaml:"address" env:"XMDM_ADDR"`
-	PublicURL  string        `yaml:"publicURL" env:"XMDM_SERVER_PUBLIC_URL"`
-	Port       string        `yaml:"port"`
-	SessionTTL time.Duration `yaml:"sessionTTL" env:"XMDM_SESSION_TTL"`
+	Address            string        `yaml:"address" env:"XMDM_ADDR"`
+	PublicURL          string        `yaml:"publicURL" env:"XMDM_SERVER_PUBLIC_URL"`
+	Port               string        `yaml:"port"`
+	SessionTTL         time.Duration `yaml:"sessionTTL" env:"XMDM_SESSION_TTL"`
+	DisableRequestLogs bool          `yaml:"disableRequestLogs" env:"XMDM_DISABLE_REQUEST_LOGS"`
 }
 
 type PostgresConfig struct {
@@ -206,6 +208,10 @@ func loadFromEnv(cfg *Config) {
 	}
 	if agentAppPackage := os.Getenv("XMDM_DEVICE_AGENT_APP_PACKAGE"); agentAppPackage != "" {
 		cfg.Device.AgentAppPackage = agentAppPackage
+	}
+
+	if disableRequestLogs := os.Getenv("XMDM_DISABLE_REQUEST_LOGS"); disableRequestLogs != "" {
+		cfg.Server.DisableRequestLogs = disableRequestLogs == "1" || strings.EqualFold(disableRequestLogs, "true")
 	}
 
 	// Object storage config

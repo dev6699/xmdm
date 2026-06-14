@@ -80,10 +80,11 @@ func NewDeps(cfg *config.Config) Dependencies {
 			CommandPollIntervalMs: cfg.Device.CommandPollInterval.Milliseconds(),
 			ConfigSyncIntervalMs:  cfg.Device.ConfigSyncInterval.Milliseconds(),
 		},
-		ServerPublicURL: cfg.Server.PublicURL,
-		AgentAppPackage: cfg.Device.AgentAppPackage,
-		TenantID:        bootstrap.SeedTenantID,
-		PluginManager:   plugins.Disabled(),
+		DisableRequestLogs: cfg.Server.DisableRequestLogs,
+		ServerPublicURL:    cfg.Server.PublicURL,
+		AgentAppPackage:    cfg.Device.AgentAppPackage,
+		TenantID:           bootstrap.SeedTenantID,
+		PluginManager:      plugins.Disabled(),
 	}
 }
 

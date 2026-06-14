@@ -40,30 +40,31 @@ import (
 )
 
 type Dependencies struct {
-	Database        *pgxpool.Pool
-	Users           users.Repository
-	Roles           roles.Repository
-	Apps            apps.Repository
-	Files           files.Repository
-	ManagedFiles    managedfiles.Repository
-	Logs            logs.Repository
-	Commands        commands.Repository
-	DeviceInfo      deviceinfo.Repository
-	Certificates    certificates.Repository
-	Artifacts       artifacts.Store
-	Groups          group.Repository
-	Policies        policy.Repository
-	Devices         device.Repository
-	Enrollment      enrollment.Repository
-	Telemetry       telemetry.Repository
-	Audit           audit.Store
-	Push            push.Publisher
-	Runtime         enrollment.RuntimeSnapshot
-	ServerPublicURL string
-	AgentAppPackage string
-	PluginManager   *plugins.Manager
-	ExtraRootMounts []func(*http.ServeMux)
-	TenantID        string
+	Database           *pgxpool.Pool
+	Users              users.Repository
+	Roles              roles.Repository
+	Apps               apps.Repository
+	Files              files.Repository
+	ManagedFiles       managedfiles.Repository
+	Logs               logs.Repository
+	Commands           commands.Repository
+	DeviceInfo         deviceinfo.Repository
+	Certificates       certificates.Repository
+	Artifacts          artifacts.Store
+	Groups             group.Repository
+	Policies           policy.Repository
+	Devices            device.Repository
+	Enrollment         enrollment.Repository
+	Telemetry          telemetry.Repository
+	Audit              audit.Store
+	Push               push.Publisher
+	Runtime            enrollment.RuntimeSnapshot
+	DisableRequestLogs bool
+	ServerPublicURL    string
+	AgentAppPackage    string
+	PluginManager      *plugins.Manager
+	ExtraRootMounts    []func(*http.ServeMux)
+	TenantID           string
 }
 
 // NewMux builds the versioned HTTP surface under /api/v1.
@@ -106,7 +107,10 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 			mount(mux)
 		}
 	}
-	return observability.NewHandler(httpx.WithRateLimits(mux, defaultRateLimitRules()...), observability.Config{Logger: log.Default()})
+	return observability.NewHandler(httpx.WithRateLimits(mux, defaultRateLimitRules()...), observability.Config{
+		Logger:            log.Default(),
+		DisableRequestLog: deps.DisableRequestLogs,
+	})
 }
 
 func defaultRateLimitRules() []httpx.RateLimitRule {

@@ -13,14 +13,16 @@ import (
 )
 
 type Config struct {
-	Logger *log.Logger
-	Now    func() time.Time
+	Logger            *log.Logger
+	DisableRequestLog bool
+	Now               func() time.Time
 }
 
 type Handler struct {
-	next   http.Handler
-	logger *log.Logger
-	now    func() time.Time
+	next              http.Handler
+	logger            *log.Logger
+	now               func() time.Time
+	disableRequestLog bool
 
 	mu      sync.Mutex
 	metrics map[metricKey]*metricSeries
@@ -53,10 +55,11 @@ func NewHandler(next http.Handler, cfg Config) http.Handler {
 		now = time.Now
 	}
 	return &Handler{
-		next:    next,
-		logger:  logger,
-		now:     now,
-		metrics: make(map[metricKey]*metricSeries),
+		next:              next,
+		logger:            logger,
+		now:               now,
+		disableRequestLog: cfg.DisableRequestLog,
+		metrics:           make(map[metricKey]*metricSeries),
 	}
 }
 
@@ -89,7 +92,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	duration := h.now().Sub(start)
 	route := normalizeRoute(r.URL.Path)
 	h.record(r.Method, route, rec.status, duration)
-	h.logger.Printf("request_completed request_id=%s trace_id=%s method=%s route=%s status=%d duration_ms=%.3f remote_addr=%s", requestID, traceID, r.Method, route, rec.status, float64(duration.Microseconds())/1000.0, r.RemoteAddr)
+	if !h.disableRequestLog {
+		h.logger.Printf("request_completed request_id=%s trace_id=%s method=%s route=%s status=%d duration_ms=%.3f remote_addr=%s", requestID, traceID, r.Method, route, rec.status, float64(duration.Microseconds())/1000.0, r.RemoteAddr)
+	}
 }
 
 func (h *Handler) serveMetrics(w http.ResponseWriter) {
