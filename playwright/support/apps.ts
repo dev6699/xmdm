@@ -12,11 +12,32 @@ export function agentApkPath() {
   return path.resolve(process.cwd(), '..', 'artifacts', 'chrome.apk');
 }
 
-export async function ensureAgentAppPublished(page: Page) {
+async function findAgentAppRow(page: Page) {
   await page.goto(dashboardPaths.apps);
   await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
-  const existing = page.locator('table tbody tr').filter({ hasText: AGENT_APP_PACKAGE }).first();
-  if (await existing.count() > 0) {
+
+  for (;;) {
+    const row = page.locator('table tbody tr').filter({ hasText: AGENT_APP_PACKAGE }).first();
+    if (await row.count() > 0) {
+      await expect(row).toBeVisible();
+      return row;
+    }
+
+    const next = page.getByRole('link', { name: 'Next' });
+    if (await next.count() === 0) {
+      break;
+    }
+
+    await next.click();
+    await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
+  }
+
+  return null;
+}
+
+export async function ensureAgentAppPublished(page: Page) {
+  const existing = await findAgentAppRow(page);
+  if (existing) {
     return;
   }
 
@@ -26,7 +47,15 @@ export async function ensureAgentAppPublished(page: Page) {
   await page.getByLabel('APK file').setInputFiles(agentApkPath());
   await page.getByRole('button', { name: 'Create managed app' }).click();
 
-  await expect(page).toHaveURL(/\/admin\/apps\/[^?]+\?ok=/);
+  if (page.url().includes('error=conflict')) {
+    const row = await findAgentAppRow(page);
+    if (!row) {
+      throw new Error(`agent app ${AGENT_APP_PACKAGE} was created but could not be found in the apps list`);
+    }
+    await row.getByRole('link', { name: AGENT_APP_NAME }).click();
+  } else {
+    await expect(page).toHaveURL(/\/admin\/apps\/[^?]+\?ok=/);
+  }
   await expect(page.getByRole('heading', { name: 'App Detail' })).toBeVisible();
   await expect(page.getByText(AGENT_APP_PACKAGE, { exact: true })).toBeVisible();
 }

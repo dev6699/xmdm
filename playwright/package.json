@@ -2,7 +2,7 @@
   "private": true,
   "name": "xmdm-playwright",
   "scripts": {
-    "test": "playwright test",
+    "test": "sh ./scripts/run-tests.sh",
     "test:headed": "playwright test --headed",
     "test:debug": "playwright test --debug",
     "install-browser": "playwright install chromium"

@@ -30,7 +30,8 @@ Server tests require a dedicated test database and will fail fast unless `XMDM_T
 
 ```sh
 eval "$(../infra/test-db-env.sh)"
-# Run all tests except e2e (requires running server/services):
+# Run all tests except e2e (requires running server/services) with one package at a time,
+# because the suite shares a single test database:
 XMDM_TEST_POSTGRES_DSN="$XMDM_POSTGRES_DSN" go test -p 1 $(go list ./... | grep -v "/e2e")
 # Run all tests including e2e:
 go test ./...

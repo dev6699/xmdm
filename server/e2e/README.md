@@ -1,6 +1,7 @@
 # Server E2E
 
 This directory holds the root-level end-to-end tests for the Go server. The tests run against the HTTP handler stack with a real Postgres database, but they do not start a socket listener.
+When the real server is started for browser-driven tests, request-completion observability logs are disabled so the startup output stays readable.
 
 ## What Is Covered
 
@@ -31,6 +32,8 @@ Keep the e2e suite split by intent:
 - `Real-device launcher` tests cover adb-backed launcher behavior on a physical Android device.
 
 Do not mix these intents in a single test unless the overlap is intentional and clearly documented.
+
+Browser-driven test runs should use the same startup contract as the Playwright workspace: reset the local compose stack, start the real server, and suppress per-request observability logs for that test process only.
 
 ## Test Plan
 

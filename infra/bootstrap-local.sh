@@ -3,7 +3,9 @@ set -eu
 
 cd "$(dirname "$0")"
 
+printf '%s\n' '[infra] docker compose up -d'
 docker compose up -d
+printf '%s\n' '[infra] run migrations'
 sh ./migrate.sh
 
 cat <<'EOF'

@@ -14,6 +14,7 @@ compose() {
 }
 
 wait_for_postgres() {
+  printf '%s\n' '[infra] waiting for postgres'
   attempts=30
   while [ "$attempts" -gt 0 ]; do
     if compose exec -T postgres pg_isready -h 127.0.0.1 -U "$postgres_user" -d "$postgres_db" >/dev/null 2>&1; then
@@ -30,4 +31,6 @@ wait_for_postgres
 
 export XMDM_POSTGRES_DSN="postgres://$postgres_user:$postgres_password@127.0.0.1:5432/$postgres_db?sslmode=disable"
 cd "$server_dir"
+printf '%s\n' '[infra] applying migrations'
 go run ./cmd/server -migrate-only
+printf '%s\n' '[infra] migrations complete'

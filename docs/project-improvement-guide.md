@@ -174,7 +174,8 @@ Tasks:
   - Android debug build
   - Playwright dashboard tests where environment permits
 - Keep release packaging in the release workflow.
-- Add a lightweight CI status section to `PROJECT_STATUS.md` or a dedicated evidence doc.
+- Keep the lightweight CI status section in `PROJECT_STATUS.md`.
+- Record release-candidate evidence outside the repo.
 - Record release-candidate runs with:
   - date
   - commit
@@ -441,4 +442,3 @@ Suggest a save point after each of these:
 - Release-candidate evidence is captured.
 
 Use the repo save prompt pattern before committing a meaningful checkpoint.
-

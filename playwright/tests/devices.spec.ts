@@ -33,7 +33,9 @@ async function issueDeviceEnrollmentQR(page: Page, deviceName: string) {
   await row.getByRole('link', { name: deviceName }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/devices/${deviceId}$`));
   await expect(page.getByRole('heading', { name: 'Device Detail' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Active policy' })).toBeVisible();
+  const activePolicy = page.locator('details.panel').filter({ hasText: 'Active policy' }).first();
+  await expect(activePolicy).toBeVisible();
+  await activePolicy.locator('summary').click();
   await expect(page.getByRole('radiogroup', { name: 'Output format' })).toHaveCount(0);
   const currentDevice = page.getByRole('heading', { name: 'Current device' }).locator('xpath=ancestor::section[1]');
   const device = JSON.parse((await currentDevice.locator('pre').first().textContent()) ?? '{}') as { id: string; name: string };
@@ -272,8 +274,10 @@ test('admin can simulate device enrollment and inspect device info', async ({ pa
     await enrolledRow.getByRole('link', { name: deviceName }).click();
     await expect(page).toHaveURL(new RegExp(`/admin/devices/${deviceRowId}$`));
     const currentDevice = page.getByRole('heading', { name: 'Current device' }).locator('xpath=ancestor::section[1]');
-    const activePolicy = page.getByRole('heading', { name: 'Active policy' }).locator('xpath=ancestor::section[1]');
-    const recentInfo = page.getByRole('heading', { name: 'Recent device info' }).locator('xpath=ancestor::section[1]');
+    const activePolicy = page.locator('details.panel').filter({ hasText: 'Active policy' }).first();
+    const configPreview = page.locator('details.panel').filter({ hasText: 'Config preview' }).first();
+    const recentInfo = page.locator('details.panel').filter({ hasText: 'Recent device info' }).first();
+    await activePolicy.locator('summary').click();
 
     await expect(currentDevice).toContainText(`"id": "${deviceRowId}"`);
     await expect(currentDevice).toContainText(`"status": "active"`);
@@ -284,7 +288,6 @@ test('admin can simulate device enrollment and inspect device info', async ({ pa
     await expect(page.getByLabel(`${deviceName}-field`)).toBeChecked();
     const previewConfig = { ...config } as Record<string, unknown>;
     delete previewConfig.signature;
-    const configPreview = page.getByRole('heading', { name: 'Config preview' }).locator('xpath=ancestor::section[1]');
     await expect(configPreview.locator('pre')).toHaveText(JSON.stringify(previewConfig, null, 2));
     await expect(recentInfo).toContainText(`"model": "${deviceModel}"`);
     await expect(recentInfo).toContainText(`"serialNumber": "${serialNumber}"`);
