@@ -29,8 +29,8 @@ GOCACHE=/tmp/go-build go run ./cmd/dashboard-screenshot-fixture
 Terminal 2:
 
 ```sh
-cd xmdm
-npm --prefix docs/tools/admin-dashboard-screenshots run capture
+cd docs/tools/admin-dashboard-screenshots
+npm run capture
 ```
 
 The screenshots are written to `docs/assets`.

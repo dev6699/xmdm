@@ -123,6 +123,10 @@ func (s *fakeObjectStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 
+func (s *fakeObjectStore) HealthCheck(context.Context) error {
+	return nil
+}
+
 func artifact(id, key, status string) files.Artifact {
 	now := time.Unix(1, 0)
 	return files.Artifact{

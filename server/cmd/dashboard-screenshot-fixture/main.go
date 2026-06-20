@@ -1075,6 +1075,9 @@ func (artifactStore) Get(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader([]byte("artifact"))), nil
 }
 func (artifactStore) Delete(context.Context, string) error { return nil }
+func (artifactStore) HealthCheck(context.Context) error {
+	return nil
+}
 
 var _ users.Repository = (*identityStore)(nil)
 var _ roles.Repository = (*identityStore)(nil)

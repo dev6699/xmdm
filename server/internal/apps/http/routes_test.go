@@ -329,6 +329,10 @@ func (s *fakeArtifactStore) Delete(context.Context, string) error {
 	return nil
 }
 
+func (s *fakeArtifactStore) HealthCheck(context.Context) error {
+	return nil
+}
+
 type fakeAuditStore struct{}
 
 func (fakeAuditStore) Record(context.Context, string, string, string, string, string, map[string]any) (audit.Event, error) {

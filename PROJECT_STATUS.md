@@ -12,8 +12,8 @@ Improvement guide: [docs/project-improvement-guide.md](docs/project-improvement-
 | Stage 2 - Reconnect, Replay, And Offline Semantics | Completed |
 | Stage 3 - Security Hardening | Completed |
 | Stage 4 - CI, Release, And Evidence | Completed |
-| Stage 5 - Production Operations | Next |
-| Stage 6 - Device Matrix And Android Reality | Pending |
+| Stage 5 - Production Operations | Completed |
+| Stage 6 - Device Matrix And Android Reality | Next |
 | Stage 7 - Dashboard And Operator Experience | Pending |
 | Stage 8 - Data Model And Policy Versioning | Pending |
 | Stage 9 - Scale And Load Evidence | Pending |

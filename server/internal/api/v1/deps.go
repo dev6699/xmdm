@@ -5,7 +5,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	appspg "xmdm/server/internal/apps/postgres"
 	"xmdm/server/internal/artifacts"
 	s3store "xmdm/server/internal/artifacts/s3"
@@ -29,6 +28,8 @@ import (
 	rolespg "xmdm/server/internal/roles/postgres"
 	telemetrypg "xmdm/server/internal/telemetry/postgres"
 	userspg "xmdm/server/internal/users/postgres"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // NewDeps initializes all dependencies for the API layer
@@ -49,6 +50,10 @@ func NewDeps(cfg *config.Config) Dependencies {
 	}
 	artifactStore := mustArtifactStore(cfg)
 	pushPublisher := mustPushPublisher(cfg)
+	var pushHealth push.HealthChecker
+	if hc, ok := any(pushPublisher).(push.HealthChecker); ok {
+		pushHealth = hc
+	}
 	devicesStore := devicepg.New(pool)
 	deviceInfoStore := deviceinfopg.New(pool)
 	enrollmentStore := enrollmentpg.New(pool)
@@ -75,6 +80,7 @@ func NewDeps(cfg *config.Config) Dependencies {
 		Telemetry:    telemetrypg.New(pool),
 		Audit:        auditpg.NewDBStore(pool),
 		Push:         pushPublisher,
+		PushHealth:   pushHealth,
 		Runtime: enrollment.RuntimeSnapshot{
 			MqttAddress:           cfg.MQTT.Address,
 			CommandPollIntervalMs: cfg.Device.CommandPollInterval.Milliseconds(),
@@ -126,7 +132,7 @@ func mustMQTTProvisioner(cfg *config.Config) mqttdynsec.Provisioner {
 	return provisioner
 }
 
-func mustPushPublisher(cfg *config.Config) push.Publisher {
+func mustPushPublisher(cfg *config.Config) *push.MQTTPublisher {
 	keepAlive, err := time.ParseDuration(cfg.MQTT.KeepAlive)
 	if err != nil {
 		keepAlive = 30 * time.Second

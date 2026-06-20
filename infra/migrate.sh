@@ -32,5 +32,5 @@ wait_for_postgres
 export XMDM_POSTGRES_DSN="postgres://$postgres_user:$postgres_password@127.0.0.1:5432/$postgres_db?sslmode=disable"
 cd "$server_dir"
 printf '%s\n' '[infra] applying migrations'
-go run ./cmd/server -migrate-only
+go run ./cmd/server --migrate-only
 printf '%s\n' '[infra] migrations complete'

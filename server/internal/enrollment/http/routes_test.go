@@ -1195,6 +1195,10 @@ type fakeArtifactStore struct {
 	content []byte
 }
 
+func (s *fakeArtifactStore) HealthCheck(context.Context) error {
+	return nil
+}
+
 func (s *fakeEnrollmentStore) IssueToken(ctx context.Context, tenantID string, expiresAt time.Time) (enrollment.IssuedToken, error) {
 	s.issueTenant = tenantID
 	s.issueExpiresAt = expiresAt

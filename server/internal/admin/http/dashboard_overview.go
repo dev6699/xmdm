@@ -26,6 +26,11 @@ type overviewSignal struct {
 	Href   string // if set, the card navigates on click
 }
 
+type serviceHealthCheck struct {
+	Label string
+	Tone  string
+}
+
 type overviewMetric struct {
 	Label  string
 	Value  string
@@ -67,6 +72,7 @@ type overviewDashboardData struct {
 	SummaryDetail        string
 	SummaryTone          string
 	CanWrite             bool
+	ServiceHealth        []serviceHealthCheck
 	Signals              []overviewSignal
 	Metrics              []overviewMetric
 	Attention            []overviewAttention
@@ -103,6 +109,8 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 	appendAttention := func(title, detail, tone, href string) {
 		ov.Attention = append(ov.Attention, overviewAttention{Title: title, Detail: detail, Tone: tone, Href: href})
 	}
+
+	ov.ServiceHealth = collectServiceHealthChecks(ctx, d.deps)
 
 	activeDeviceRecords := []device.Device{}
 	totalDevices := 0
@@ -345,9 +353,12 @@ func renderOverviewDashboard(data overviewDashboardData) template.HTML {
 	fmt.Fprintf(&b, `<div class="overview-freshness">%s</div>`, esc(data.Freshness))
 	b.WriteString(`</div>`)
 	b.WriteString(`<div class="overview-actions">`)
-	b.WriteString(`<a class="button btn-primary" href="/admin/devices">Manage devices</a>`)
-	b.WriteString(`<a class="button" href="/admin/policies">Review policies</a>`)
-	b.WriteString(`<a class="button" href="/admin/audit">View audit log</a>`)
+	for _, check := range data.ServiceHealth {
+		tone := signalToneClass(check.Tone)
+		b.WriteString(`<div class="service-health-chip">`)
+		fmt.Fprintf(&b, `<div class="service-health-chip-top"><span class="service-health-dot %s"></span><span class="service-health-chip-label">%s</span></div>`, tone, esc(check.Label))
+		b.WriteString(`</div>`)
+	}
 	b.WriteString(`</div>`)
 	b.WriteString(`</div>`)
 

@@ -73,3 +73,5 @@ func (recordingArtifactStore) Get(context.Context, string) (io.ReadCloser, error
 }
 
 func (recordingArtifactStore) Delete(context.Context, string) error { return nil }
+
+func (recordingArtifactStore) HealthCheck(context.Context) error { return nil }

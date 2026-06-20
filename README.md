@@ -35,7 +35,7 @@ XMDM keeps the day-to-day workflow simple:
 3. Enroll a device.
 4. Manage the device from the dashboard.
 
-For the full walkthrough, see [docs/admin-dashboard.md](docs/admin-dashboard.md).
+For the operator docs index, see [docs/README.md](docs/README.md).
 
 ## Dashboard Preview
 

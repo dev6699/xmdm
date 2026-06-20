@@ -93,6 +93,14 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	return err
 }
 
+func (s *Store) HealthCheck(ctx context.Context) error {
+	if s == nil {
+		return fmt.Errorf("missing object storage store")
+	}
+	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.bucket)})
+	return err
+}
+
 func (s *Store) ensureBucket(ctx context.Context) error {
 	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.bucket)})
 	if err == nil {

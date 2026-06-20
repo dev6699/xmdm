@@ -35,7 +35,7 @@ Main gaps blocking a 10/10 rating:
 - Reconnect/replay behavior should be specified and tested as a contract, not only as expected behavior.
 - CI appears release-focused; routine validation jobs should be restored or expanded.
 - Production readiness needs stronger evidence snapshots: RC result, device matrix, load result, restore result, and security result.
-- Docs should include a single "run the full system" operator path that ties together blueprint, local dev, dashboard, e2e, release, and rollback.
+- Docs should present a clear operator path through the existing docs index and the focused runbooks for local dev, dashboard, observability, release, backup/restore, and rollback.
 
 ## Scorecard
 
@@ -203,9 +203,9 @@ Goal: make the system operable by someone who did not write it.
 
 Tasks:
 
-- Create a single full-system runbook:
+- Maintain a single operator docs index that links the focused procedures needed for:
   - start local stack
-  - migrate database
+  - apply database migrations
   - start server
   - publish launcher APK
   - enroll device

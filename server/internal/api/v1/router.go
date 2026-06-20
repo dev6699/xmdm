@@ -58,6 +58,7 @@ type Dependencies struct {
 	Telemetry          telemetry.Repository
 	Audit              audit.Store
 	Push               push.Publisher
+	PushHealth         push.HealthChecker
 	Runtime            enrollment.RuntimeSnapshot
 	DisableRequestLogs bool
 	ServerPublicURL    string
@@ -72,6 +73,7 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	apiMux := httpx.WithPrefix(mux, "/api/v1")
 	adminhttp.RegisterDashboard(mux, svc, adminhttp.DashboardDependencies{
+		Database:        deps.Database,
 		Users:           deps.Users,
 		Roles:           deps.Roles,
 		Apps:            deps.Apps,
@@ -92,6 +94,7 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 		PluginManager:   deps.PluginManager,
 		Audit:           deps.Audit,
 		TenantID:        deps.TenantID,
+		PushHealth:      deps.PushHealth,
 	})
 	enrollmenthttp.Register(apiMux, svc, deps.Devices, deps.Enrollment, deps.Apps, deps.ManagedFiles, deps.Artifacts, deps.Certificates, deps.Policies, deps.Runtime, deps.TenantID)
 	telemetryhttp.Register(apiMux, deps.Telemetry, deps.TenantID)

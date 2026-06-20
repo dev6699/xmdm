@@ -64,11 +64,6 @@ func NewHandler(next http.Handler, cfg Config) http.Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet && r.URL.Path == "/metrics" {
-		h.serveMetrics(w)
-		return
-	}
-
 	start := h.now()
 	requestID := requestIDFromHeader(r.Header.Get("X-Request-Id"))
 	if requestID == "" {
@@ -84,6 +79,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("traceparent", fmt.Sprintf("00-%s-%s-01", traceID, spanID))
 	if parentSpanID != "" {
 		w.Header().Set("X-Trace-Parent", parentSpanID)
+	}
+
+	if r.Method == http.MethodGet && r.URL.Path == "/health" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok\n"))
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/metrics" {
+		h.serveMetrics(w)
+		return
 	}
 
 	rec := &responseRecorder{ResponseWriter: w, status: http.StatusOK}

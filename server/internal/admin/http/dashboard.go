@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"xmdm/server/internal/apps"
 	"xmdm/server/internal/artifacts"
 	"xmdm/server/internal/audit"
@@ -31,11 +32,13 @@ import (
 	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/plugins"
 	"xmdm/server/internal/policy"
+	"xmdm/server/internal/push"
 	"xmdm/server/internal/roles"
 	"xmdm/server/internal/users"
 )
 
 type DashboardDependencies struct {
+	Database        *pgxpool.Pool
 	Users           users.Repository
 	Roles           roles.Repository
 	Apps            apps.Repository
@@ -56,6 +59,7 @@ type DashboardDependencies struct {
 	PluginManager   *plugins.Manager
 	Audit           audit.Store
 	TenantID        string
+	PushHealth      push.HealthChecker
 }
 
 type logsRepository interface {
@@ -705,10 +709,16 @@ const dashboardTemplate = `<!doctype html>
     }
     .overview-actions {
       display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: .55rem;
       flex-wrap: wrap;
+      align-items: flex-start;
+      gap: .2rem .55rem;
+      width: fit-content;
+      max-width: min(100%, 30rem);
+      margin-left: auto;
+      padding: .4rem .45rem;
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
       position: relative;
     }
     .overview-status {
@@ -1003,6 +1013,40 @@ const dashboardTemplate = `<!doctype html>
       font-weight: 600;
     }
     .overview-panel-link:hover { text-decoration: underline; }
+    .service-health-chip {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      padding: 0;
+      background: transparent;
+      border: 0;
+      min-width: 0;
+    }
+    .service-health-chip-top {
+      display: flex;
+      align-items: center;
+      gap: .3rem;
+      min-width: 0;
+    }
+    .service-health-dot {
+      width: .38rem;
+      height: .38rem;
+      border-radius: 999px;
+      background: var(--ink-3);
+      flex: 0 0 auto;
+    }
+    .service-health-dot.tone-good { background: var(--accent); }
+    .service-health-dot.tone-warn { background: var(--warn); }
+    .service-health-dot.tone-danger { background: var(--danger); }
+    .service-health-chip-label {
+      color: var(--ink);
+      font-weight: 700;
+      font-size: .7rem;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
     /* audit bar chart */
     .overview-chart { display: grid; gap: .5rem; }

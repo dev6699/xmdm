@@ -832,6 +832,10 @@ func (s *loadArtifactStore) Delete(context.Context, string) error {
 	return nil
 }
 
+func (s *loadArtifactStore) HealthCheck(context.Context) error {
+	return nil
+}
+
 func (s *loadArtifactStore) gets() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -57,6 +57,27 @@ func TestHandlerRecordsRequestMetadataAndMetrics(t *testing.T) {
 	}
 }
 
+func TestHandlerServesHealthEndpoint(t *testing.T) {
+	handler := NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), Config{})
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want %d", res.Code, http.StatusOK)
+	}
+	if got := res.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("unexpected content type: %q", got)
+	}
+	if got := strings.TrimSpace(res.Body.String()); got != "ok" {
+		t.Fatalf("unexpected health body: %q", got)
+	}
+}
+
 func TestHandlerCanDisableRequestLogging(t *testing.T) {
 	var logs bytes.Buffer
 	handler := NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

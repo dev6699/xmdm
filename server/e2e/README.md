@@ -81,7 +81,7 @@ Current coverage:
 - `TestDeviceLogsUpload`
 - `TestDeviceInfoReporting`
 - `TestKioskModeChrome`
-- `TestKioskExitChrome`
+- `TestKioskExitChromeCommand`
 - `TestPackageRules`
 - `TestPolicySync`
 - `TestCommandMQTT`

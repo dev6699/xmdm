@@ -199,3 +199,7 @@ func (s *fakeArtifactStore) Get(context.Context, string) (io.ReadCloser, error) 
 func (s *fakeArtifactStore) Delete(context.Context, string) error {
 	return nil
 }
+
+func (s *fakeArtifactStore) HealthCheck(context.Context) error {
+	return nil
+}

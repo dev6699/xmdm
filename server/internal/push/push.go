@@ -24,6 +24,10 @@ type Publisher interface {
 	PublishCommand(ctx context.Context, deviceID string, message CommandMessage) error
 }
 
+type HealthChecker interface {
+	HealthCheck(ctx context.Context) error
+}
+
 type MQTTConfig struct {
 	Address     string
 	ClientID    string
@@ -78,6 +82,13 @@ func (p *MQTTPublisher) PublishCommand(ctx context.Context, deviceID string, mes
 		return err
 	}
 	return publishQoS1(ctx, p.cfg, deviceCommandTopic(deviceID), payload)
+}
+
+func (p *MQTTPublisher) HealthCheck(ctx context.Context) error {
+	if p == nil {
+		return fmt.Errorf("missing mqtt publisher")
+	}
+	return publishQoS1(ctx, p.cfg, deviceCommandTopic("__health__"), []byte(`{"type":"health-check"}`))
 }
 
 func deviceCommandTopic(deviceID string) string {
