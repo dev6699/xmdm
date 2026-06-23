@@ -30,6 +30,13 @@ func TestGroupsPageRender(t *testing.T) {
 			RecordBase: group.RecordBase{ID: "group-1", TenantID: "tenant-1", Status: group.StatusActive},
 			Name:       "Field Devices",
 		},
+		devices: []device.Device{
+			{
+				RecordBase: device.RecordBase{ID: "device-1", TenantID: "tenant-1", Status: device.StatusActive, CreatedAt: time.Date(2026, 6, 23, 8, 0, 0, 0, time.UTC)},
+				Name:       "warehouse-tablet-001",
+				PolicyID:   func() *string { v := "policy-1"; return &v }(),
+			},
+		},
 	}
 	mux := http.NewServeMux()
 	RegisterDashboard(mux, svc, DashboardDependencies{
@@ -65,7 +72,7 @@ func TestGroupsPageRender(t *testing.T) {
 			t.Fatalf("unexpected group detail status: %d body=%s", rr.Code, rr.Body.String())
 		}
 		body := rr.Body.String()
-		for _, want := range []string{"Group Detail", "Review the cohort, then update or retire it from this page.", "Update group", "Retire group", "Field Devices"} {
+		for _, want := range []string{"Group Detail", "Review the cohort, then update or retire it from this page.", "Update group", "Retire group", "Field Devices", "Battery", "Last online", "No telemetry", "warehouse-tablet-001"} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("group detail page missing %q: %s", want, body)
 			}
@@ -142,8 +149,9 @@ func TestGroupMutationsRecordAudit(t *testing.T) {
 }
 
 type recordingGroupStore struct {
-	groups []group.Group
-	group  group.Group
+	groups  []group.Group
+	group   group.Group
+	devices []device.Device
 
 	createdGroup group.Group
 	updatedGroup group.Group
@@ -172,7 +180,7 @@ func (s *recordingGroupStore) GetGroup(_ context.Context, _ string, id string) (
 }
 
 func (s *recordingGroupStore) ListGroupDevices(context.Context, string, string, pagination.Params) ([]device.Device, error) {
-	return nil, nil
+	return append([]device.Device(nil), s.devices...), nil
 }
 
 func (s *recordingGroupStore) CreateGroup(context.Context, string, group.GroupUpsert) (group.Group, error) {

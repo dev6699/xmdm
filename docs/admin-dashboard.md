@@ -310,12 +310,15 @@ Use `/admin/devices` to create the device record that enrollment binds to.
 The device list follows the scan-first pattern:
 
 - `Created`
-- `ID`
 - `Name`
-- `Policy`
 - `Status`
+- `Battery`
+- `Last online`
+- `Policy`
 
 Open the device name to reach the detail page.
+
+Use the search field above the table to narrow the list by device name, then use the filter chips to switch between `All`, `Low battery`, and `Stale online` devices.
 
 #### Create A Device
 

@@ -570,6 +570,10 @@ func (s *loadDeviceStore) ListDevices(context.Context, string, pagination.Params
 	return nil, nil
 }
 
+func (s *loadDeviceStore) ListDevicesByFilter(context.Context, string, pagination.Params, device.DeviceListFilter) ([]device.Device, error) {
+	return nil, nil
+}
+
 func (s *loadDeviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
 	if s.device.Status == device.StatusActive || s.device.Status == device.StatusEnrolled {
 		return []device.Device{s.device}, nil

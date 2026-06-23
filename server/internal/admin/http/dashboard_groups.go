@@ -11,6 +11,7 @@ import (
 	"xmdm/server/internal/group"
 	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/policy"
+	"xmdm/server/internal/telemetry"
 )
 
 func (d *dashboard) groups(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +132,27 @@ func (d *dashboard) groupDetailPageData(r *http.Request, session *auth.Session, 
 	limit := params.Limit - 1
 	items, hasNext := paginateItems(devices, limit)
 	if len(devices) > 0 {
-		body += string(panelSectionHTML("", "Member devices", withPager(devicesTable(items, policies), pagerHTMLForKeys(r, "memberDevicesPage", "memberDevicesLimit", page, limit, hasNext))))
+		var telemetryByDevice map[string]telemetry.Record
+		if d.deps.Telemetry != nil {
+			deviceIDs := make([]string, 0, len(items))
+			for _, item := range items {
+				if strings.TrimSpace(item.ID) != "" {
+					deviceIDs = append(deviceIDs, item.ID)
+				}
+			}
+			if len(deviceIDs) > 0 {
+				var err error
+				telemetryByDevice, err = d.deps.Telemetry.ListLatestByDeviceIDs(r.Context(), d.deps.TenantID, deviceIDs)
+				if err != nil {
+					return pageData{
+						Title:    "Group Detail",
+						Subtitle: "Review the cohort, then update or retire it from this page.",
+						Error:    err.Error(),
+					}
+				}
+			}
+		}
+		body += string(panelSectionHTML("", "Member devices", withPager(devicesTable(items, policies, telemetryByDevice, true), pagerHTMLForKeys(r, "memberDevicesPage", "memberDevicesLimit", page, limit, hasNext))))
 	} else {
 		body += string(panelMessageHTML("Member devices", "No devices are linked to this group."))
 	}

@@ -34,6 +34,7 @@ import (
 	"xmdm/server/internal/policy"
 	"xmdm/server/internal/push"
 	"xmdm/server/internal/roles"
+	"xmdm/server/internal/telemetry"
 	"xmdm/server/internal/users"
 )
 
@@ -47,6 +48,7 @@ type DashboardDependencies struct {
 	Logs            logsRepository
 	Commands        commands.Repository
 	DeviceInfo      deviceInfoRepository
+	Telemetry       telemetryRepository
 	Certificates    certificates.Repository
 	Artifacts       artifacts.Store
 	Groups          group.Repository
@@ -68,6 +70,10 @@ type logsRepository interface {
 
 type deviceInfoRepository interface {
 	Search(ctx context.Context, tenantID string, filter deviceinfo.SearchFilter) ([]deviceinfo.Record, error)
+}
+
+type telemetryRepository interface {
+	ListLatestByDeviceIDs(ctx context.Context, tenantID string, deviceIDs []string) (map[string]telemetry.Record, error)
 }
 
 type dashboard struct {
@@ -1648,6 +1654,16 @@ const dashboardTemplate = `<!doctype html>
       background: var(--accent-dim);
       border-color: var(--border-hi);
     }
+    .status-low {
+      color: var(--warn);
+      background: rgba(251,191,36,.08);
+      border-color: rgba(251,191,36,.28);
+    }
+    .status-stale {
+      color: var(--danger);
+      background: var(--danger-dim);
+      border-color: rgba(248,113,113,.3);
+    }
     .status-enabled {
       color: var(--accent);
       background: var(--accent-dim);
@@ -1687,6 +1703,90 @@ const dashboardTemplate = `<!doctype html>
       color: var(--danger);
       background: var(--danger-dim);
       border-color: rgba(248,113,113,.28);
+    }
+    .device-filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .45rem;
+      margin: 0 0 .7rem;
+    }
+    .device-search-form {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      margin-right: .35rem;
+      padding-right: .55rem;
+      border-right: 1px solid var(--border);
+    }
+    .device-search-label {
+      color: var(--ink-2);
+      font-size: .78rem;
+      font-weight: 600;
+    }
+    .device-search-form input[type="search"] {
+      width: min(18rem, 46vw);
+      min-width: 10rem;
+      padding: .36rem .6rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--ink);
+      font: inherit;
+    }
+    .device-search-form input[type="search"]::placeholder { color: var(--ink-3); }
+    .device-search-form input[type="search"]:focus {
+      outline: none;
+      border-color: var(--border-hi);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+      background: var(--surface3);
+    }
+    .device-search-submit {
+      padding: .34rem .65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--ink-2);
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .device-search-submit:hover {
+      border-color: var(--border-hi);
+      color: var(--ink);
+      background: var(--surface3);
+    }
+    .device-filter-label {
+      color: var(--ink-2);
+      font-size: .78rem;
+      font-weight: 600;
+      margin-right: .1rem;
+    }
+    .device-filter-link {
+      display: inline-flex;
+      align-items: center;
+      padding: .18rem .55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--ink-2);
+      text-decoration: none;
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .device-filter-link:hover {
+      border-color: var(--border-hi);
+      color: var(--ink);
+      background: var(--surface3);
+    }
+    .device-filter-link-active {
+      color: var(--accent);
+      background: var(--accent-dim);
+      border-color: var(--border-hi);
     }
     .field-help {
       margin-top: .5rem;

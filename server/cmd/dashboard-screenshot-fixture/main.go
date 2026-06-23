@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	adminhttp "xmdm/server/internal/admin/http"
@@ -28,6 +29,7 @@ import (
 	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/policy"
 	"xmdm/server/internal/roles"
+	"xmdm/server/internal/telemetry"
 	"xmdm/server/internal/users"
 )
 
@@ -55,6 +57,7 @@ func main() {
 		Commands:        &commandStore{now: now},
 		Logs:            &logStore{now: now},
 		DeviceInfo:      &deviceInfoStore{now: now},
+		Telemetry:       &telemetryStore{now: now},
 		Audit:           &auditStore{now: now},
 		Enrollment:      &enrollmentStore{now: now},
 		Runtime:         enrollment.RuntimeSnapshot{},
@@ -373,6 +376,8 @@ type deviceStore struct {
 	policyID string
 }
 
+type telemetryStore struct{ now time.Time }
+
 func fixtureDevices(now time.Time) []device.Device {
 	policyBaseline := "policy-baseline"
 	policyKiosk := "policy-kiosk"
@@ -399,6 +404,52 @@ func fixtureDevices(now time.Time) []device.Device {
 }
 func (s *deviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {
 	return fixtureDevices(s.now), nil
+}
+func (s *deviceStore) ListDevicesByFilter(_ context.Context, _ string, _ pagination.Params, filter device.DeviceListFilter) ([]device.Device, error) {
+	health := device.HealthFilter(strings.ToLower(strings.TrimSpace(string(filter.Health))))
+	searchQuery := strings.ToLower(strings.TrimSpace(filter.NameQuery))
+	items := fixtureDevices(s.now)
+	if (health == "" || health == "all") && searchQuery == "" {
+		return items, nil
+	}
+	lowOnly := health == device.HealthFilterLowBattery
+	staleOnly := health == device.HealthFilterStale
+	if health != "" && health != "all" && !lowOnly && !staleOnly {
+		return items, nil
+	}
+	latest := map[string]telemetry.Record{}
+	for _, item := range fixtureTelemetry(s.now) {
+		latest[item.DeviceID] = item
+	}
+	filtered := make([]device.Device, 0, len(items))
+	cutoff := s.now.Add(-24 * time.Hour)
+	for _, item := range items {
+		if searchQuery != "" && !strings.Contains(strings.ToLower(item.Name), searchQuery) {
+			continue
+		}
+		record, ok := latest[item.ID]
+		healthMatch := true
+		if !ok {
+			healthMatch = staleOnly
+		} else {
+			battery := telemetryBatteryLevel(record)
+			lowBattery := battery != nil && *battery <= 20
+			stale := record.ObservedAt.IsZero() || !record.ObservedAt.After(cutoff)
+			switch {
+			case lowOnly && staleOnly:
+				healthMatch = lowBattery && stale
+			case lowOnly:
+				healthMatch = lowBattery
+			case staleOnly:
+				healthMatch = stale
+			}
+		}
+		if !healthMatch {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered, nil
 }
 func (s *deviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
 	rows := []device.Device{}
@@ -469,6 +520,87 @@ func (s *deviceStore) RetireDevice(context.Context, string, string) (device.Devi
 }
 func (s *deviceStore) Authenticate(context.Context, string, string, string) (device.Device, error) {
 	return device.Device{}, nil
+}
+
+func telemetryBatteryLevel(record telemetry.Record) *float64 {
+	battery, ok := record.Payload["battery"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	switch value := battery["level"].(type) {
+	case int:
+		level := float64(value)
+		return &level
+	case int32:
+		level := float64(value)
+		return &level
+	case int64:
+		level := float64(value)
+		return &level
+	case float32:
+		level := float64(value)
+		return &level
+	case float64:
+		level := value
+		return &level
+	default:
+		return nil
+	}
+}
+
+func fixtureTelemetry(now time.Time) []telemetry.Record {
+	type sample struct {
+		deviceID string
+		hoursAgo int
+		level    any
+	}
+	samples := []sample{
+		{deviceID: "device-001", hoursAgo: 1, level: 91},
+		{deviceID: "device-002", hoursAgo: 2, level: 78},
+		{deviceID: "device-003", hoursAgo: 3, level: 64},
+		{deviceID: "device-004", hoursAgo: 5, level: 88},
+		{deviceID: "device-005", hoursAgo: 8, level: 52},
+		{deviceID: "device-006", hoursAgo: 2, level: 19},
+		{deviceID: "device-007", hoursAgo: 29, level: 72},
+		{deviceID: "device-008", hoursAgo: 4, level: 73},
+		{deviceID: "device-009", hoursAgo: 6, level: 80},
+		{deviceID: "device-010", hoursAgo: 1, level: 68},
+		{deviceID: "device-012", hoursAgo: 33, level: 88},
+		{deviceID: "device-013", hoursAgo: 7, level: 84},
+		{deviceID: "device-014", hoursAgo: 3, level: 15},
+		{deviceID: "device-015", hoursAgo: 2, level: 96},
+	}
+	rows := make([]telemetry.Record, 0, len(samples))
+	for i, sample := range samples {
+		rows = append(rows, telemetry.Record{
+			ID:         fmt.Sprintf("telemetry-%03d", i+1),
+			TenantID:   tenantID,
+			DeviceID:   sample.deviceID,
+			ObservedAt: now.Add(-time.Duration(sample.hoursAgo) * time.Hour),
+			Payload: map[string]any{
+				"heartbeat": map[string]any{"online": true},
+				"battery":   map[string]any{"level": sample.level},
+			},
+		})
+	}
+	return rows
+}
+
+func (s *telemetryStore) ListLatestByDeviceIDs(_ context.Context, _ string, deviceIDs []string) (map[string]telemetry.Record, error) {
+	deviceSet := map[string]struct{}{}
+	for _, deviceID := range deviceIDs {
+		if deviceID == "" {
+			continue
+		}
+		deviceSet[deviceID] = struct{}{}
+	}
+	rows := map[string]telemetry.Record{}
+	for _, item := range fixtureTelemetry(s.now) {
+		if _, ok := deviceSet[item.DeviceID]; ok {
+			rows[item.DeviceID] = item
+		}
+	}
+	return rows, nil
 }
 
 type appStore struct {

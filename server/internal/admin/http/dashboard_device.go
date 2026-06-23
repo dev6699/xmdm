@@ -23,6 +23,7 @@ import (
 	"xmdm/server/internal/logs"
 	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/policy"
+	"xmdm/server/internal/telemetry"
 
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -32,12 +33,21 @@ func (d *dashboard) devices(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	healthFilter := deviceHealthFilterFromRequest(r)
+	searchQuery := strings.TrimSpace(r.URL.Query().Get("search"))
 	page, params := listPaginationParams(r, pagination.DefaultLimit)
 	limit := params.Limit - 1
-	items, err := d.deps.Devices.ListDevices(r.Context(), d.deps.TenantID, params)
-	if err != nil {
-		d.renderPageError(w, r, session, "Devices", err)
-		return
+	items := []device.Device{}
+	if d.deps.Devices != nil {
+		var err error
+		items, err = d.deps.Devices.ListDevicesByFilter(r.Context(), d.deps.TenantID, params, device.DeviceListFilter{
+			Health:    healthFilter,
+			NameQuery: searchQuery,
+		})
+		if err != nil {
+			d.renderPageError(w, r, session, "Devices", err)
+			return
+		}
 	}
 	hasNext := len(items) > limit
 	if hasNext {
@@ -61,6 +71,22 @@ func (d *dashboard) devices(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var telemetryByDevice map[string]telemetry.Record
+	if d.deps.Telemetry != nil && len(items) > 0 {
+		deviceIDs := make([]string, 0, len(items))
+		for _, item := range items {
+			if strings.TrimSpace(item.ID) != "" {
+				deviceIDs = append(deviceIDs, item.ID)
+			}
+		}
+		if len(deviceIDs) > 0 {
+			telemetryByDevice, err = d.deps.Telemetry.ListLatestByDeviceIDs(r.Context(), d.deps.TenantID, deviceIDs)
+			if err != nil {
+				d.renderPageError(w, r, session, "Devices", err)
+				return
+			}
+		}
+	}
 	d.renderForSession(w, r, session, pageData{
 		Title:    "Devices",
 		Subtitle: "Track enrolled, pending, and retired devices, then update policy or group assignments.",
@@ -75,7 +101,7 @@ func (d *dashboard) devices(w http.ResponseWriter, r *http.Request) {
 			Help:   "",
 			Submit: "Create device",
 		}},
-		Items: withPager(devicesTable(items, policies), pagerHTML(r, page, limit, hasNext)),
+		Items: withPager(template.HTML(deviceFilterBarHTML(r, healthFilter, searchQuery)+string(devicesTable(items, policies, telemetryByDevice, true))), pagerHTML(r, page, limit, hasNext)),
 	})
 }
 
@@ -736,7 +762,12 @@ func hashPlainValue(value string) string {
 	return enrollment.HashToken(value)
 }
 
-func devicesTable(items []device.Device, policies []policy.Policy) template.HTML {
+const (
+	lowBatteryThresholdPercent = 20
+	staleOnlineThreshold       = 24 * time.Hour
+)
+
+func devicesTable(items []device.Device, policies []policy.Policy, telemetryByDevice map[string]telemetry.Record, includeTelemetryColumns bool) template.HTML {
 	var rows strings.Builder
 	policyMap := policyNameByID(policies)
 	for _, item := range items {
@@ -755,6 +786,25 @@ func devicesTable(items []device.Device, policies []policy.Policy) template.HTML
 		if strings.TrimSpace(label) == "" {
 			label = item.ID
 		}
+		if includeTelemetryColumns {
+			lastOnline := template.HTML(esc("No telemetry"))
+			battery := template.HTML(esc("Unknown"))
+			if rec, ok := telemetryByDevice[item.ID]; ok {
+				batteryLevel, batteryClass := batteryLevelInfo(rec.Payload)
+				battery = valueOrPillHTML(batteryLevel, batteryClass)
+				lastOnlineValue, lastOnlineClass := lastOnlineInfo(rec.ObservedAt)
+				lastOnline = valueOrPillHTML(lastOnlineValue, lastOnlineClass)
+			}
+			rows.WriteString(tableRowHTML(
+				template.HTML(esc(formatDashboardTime(item.CreatedAt))),
+				template.HTML(`<a href="/admin/devices/`+escAttr(item.ID)+`">`+esc(label)+`</a>`),
+				template.HTML(statusBadge(item.Status)),
+				battery,
+				lastOnline,
+				template.HTML(esc(policyLabel)),
+			))
+			continue
+		}
 		rows.WriteString(tableRowHTML(
 			template.HTML(esc(formatDashboardTime(item.CreatedAt))),
 			template.HTML(esc(item.ID)),
@@ -763,5 +813,138 @@ func devicesTable(items []device.Device, policies []policy.Policy) template.HTML
 			template.HTML(statusBadge(item.Status)),
 		))
 	}
+	if includeTelemetryColumns {
+		return tableHTML("", []string{"Created", "Name", "Status", "Battery", "Last online", "Policy"}, rows.String())
+	}
 	return tableHTML("", []string{"Created", "ID", "Name", "Policy", "Status"}, rows.String())
+}
+
+func deviceHealthFilterFromRequest(r *http.Request) device.HealthFilter {
+	switch strings.TrimSpace(strings.ToLower(r.URL.Query().Get("health"))) {
+	case "low", "low-battery", "battery-low":
+		return device.HealthFilterLowBattery
+	case "stale", "stale-online", "online-stale":
+		return device.HealthFilterStale
+	default:
+		return device.HealthFilterAll
+	}
+}
+
+func deviceFilterBarHTML(r *http.Request, active device.HealthFilter, searchQuery string) string {
+	var b strings.Builder
+	b.WriteString(`<div class="device-filter-bar">`)
+	b.WriteString(`<form class="device-search-form" method="get" action="` + escAttr(r.URL.Path) + `">`)
+	b.WriteString(`<label class="device-search-label" for="device-search">Search</label>`)
+	fmt.Fprintf(&b, `<input id="device-search" name="search" type="search" value="%s" placeholder="Search name">`, escAttr(searchQuery))
+	if active != device.HealthFilterAll {
+		fmt.Fprintf(&b, `<input type="hidden" name="health" value="%s">`, escAttr(string(active)))
+	}
+	b.WriteString(`<button type="submit" class="device-search-submit">Search</button>`)
+	b.WriteString(`</form>`)
+	b.WriteString(`<span class="device-filter-label">Filter</span>`)
+	b.WriteString(renderDeviceFilterLink(r, "All", device.HealthFilterAll, active))
+	b.WriteString(renderDeviceFilterLink(r, "Low battery", device.HealthFilterLowBattery, active))
+	b.WriteString(renderDeviceFilterLink(r, "Stale online", device.HealthFilterStale, active))
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func renderDeviceFilterLink(r *http.Request, label string, value, active device.HealthFilter) string {
+	class := "device-filter-link"
+	if value == active {
+		class += " device-filter-link-active"
+	}
+	return `<a class="` + class + `" href="` + escAttr(deviceFilterURL(r, value)) + `">` + esc(label) + `</a>`
+}
+
+func deviceFilterURL(r *http.Request, value device.HealthFilter) string {
+	query := cloneQuery(r.URL.Query())
+	if value == device.HealthFilterAll {
+		query.Del("health")
+	} else {
+		query.Set("health", string(value))
+	}
+	query.Del("page")
+	return r.URL.Path + queryString(query)
+}
+
+func queryString(values url.Values) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return "?" + values.Encode()
+}
+
+func batteryLevelInfo(payload map[string]any) (string, string) {
+	battery, ok := payload["battery"].(map[string]any)
+	if !ok {
+		return "Unknown", ""
+	}
+	level, ok := battery["level"]
+	if !ok {
+		return "Unknown", ""
+	}
+	value, ok := parseBatteryLevel(level)
+	if !ok {
+		return "Unknown", ""
+	}
+	label := formatBatteryLevel(value)
+	if value <= float64(lowBatteryThresholdPercent) {
+		return label + "%", "status-pill status-low"
+	}
+	return label + "%", ""
+}
+
+func lastOnlineInfo(observedAt time.Time) (string, string) {
+	if observedAt.IsZero() {
+		return "No telemetry", ""
+	}
+	if time.Since(observedAt) > staleOnlineThreshold {
+		return formatDashboardTime(observedAt), "status-pill status-stale"
+	}
+	return formatDashboardTime(observedAt), ""
+}
+
+func parseBatteryLevel(value any) (float64, bool) {
+	switch v := value.(type) {
+	case int:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case json.Number:
+		n, err := v.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	case string:
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return 0, false
+		}
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
+func formatBatteryLevel(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+func valueOrPillHTML(value, class string) template.HTML {
+	if strings.TrimSpace(class) == "" {
+		return template.HTML(esc(value))
+	}
+	return template.HTML(`<span class="` + class + `">` + esc(value) + `</span>`)
 }

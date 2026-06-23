@@ -1564,6 +1564,10 @@ func (s *fakeDeviceStore) ListDevices(context.Context, string, pagination.Params
 	return []device.Device{s.device}, nil
 }
 
+func (s *fakeDeviceStore) ListDevicesByFilter(context.Context, string, pagination.Params, device.DeviceListFilter) ([]device.Device, error) {
+	return []device.Device{s.device}, nil
+}
+
 func (s *fakeDeviceStore) ListActiveDevices(context.Context, string) ([]device.Device, error) {
 	return []device.Device{s.device}, nil
 }

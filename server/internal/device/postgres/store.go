@@ -32,6 +32,8 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
+const lowBatteryThresholdPercent = 20
+
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool, now: time.Now} }
 
 func (s *Store) SetProvisioner(provisioner mqttdynsec.Provisioner) {
@@ -121,6 +123,63 @@ func (s *Store) ListDevices(ctx context.Context, tenantID string, page paginatio
 		 ORDER BY d.created_at DESC, d.id DESC
 		 LIMIT $2 OFFSET $3`,
 		tenantID, page.Limit, page.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]device.Device, 0)
+	for rows.Next() {
+		rec, err := scanDevice(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) ListDevicesByFilter(ctx context.Context, tenantID string, page pagination.Params, filter device.DeviceListFilter) ([]device.Device, error) {
+	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
+	healthFilter := strings.ToLower(strings.TrimSpace(string(filter.Health)))
+	searchQuery := strings.ToLower(strings.TrimSpace(filter.NameQuery))
+	lowBatteryOnly := healthFilter == string(device.HealthFilterLowBattery)
+	staleOnly := healthFilter == string(device.HealthFilterStale)
+	staleCutoff := s.now().Add(-24 * time.Hour)
+	rows, err := s.pool.Query(ctx,
+		`WITH candidate_devices AS (
+			SELECT d.id, d.tenant_id, d.display_name, d.status, d.created_at, d.updated_at, d.deleted_at, d.policy_id, d.bootstrap_extras
+			FROM devices d
+			WHERE d.tenant_id = $1
+			  AND ($6::text = '' OR lower(d.display_name) LIKE '%' || $6 || '%')
+		)
+		SELECT cd.id::text, cd.tenant_id::text, cd.display_name, cd.status, cd.created_at, cd.updated_at, cd.deleted_at, cd.policy_id::text, cd.bootstrap_extras::text,
+		       COALESCE(array_agg(DISTINCT dg.group_id::text ORDER BY dg.group_id::text) FILTER (WHERE dg.group_id IS NOT NULL), '{}'::text[]) AS group_ids
+		FROM candidate_devices cd
+		LEFT JOIN device_groups dg ON dg.tenant_id = cd.tenant_id AND dg.device_id = cd.id
+		LEFT JOIN LATERAL (
+			SELECT
+				dt.observed_at,
+				CASE
+					WHEN jsonb_typeof(dt.payload_json->'battery'->'level') = 'number' THEN (dt.payload_json->'battery'->>'level')::numeric
+					WHEN jsonb_typeof(dt.payload_json->'battery'->'level') = 'string' AND (dt.payload_json->'battery'->>'level') ~ '^[0-9]+(\.[0-9]+)?$' THEN (dt.payload_json->'battery'->>'level')::numeric
+					ELSE NULL
+				END AS battery_level
+			FROM device_telemetry dt
+			WHERE dt.tenant_id = $1 AND dt.device_id = cd.id
+			ORDER BY dt.observed_at DESC, dt.created_at DESC, dt.id DESC
+			LIMIT 1
+		) lt ON true
+		WHERE ($2::bool = false OR (lt.battery_level IS NOT NULL AND lt.battery_level <= $4))
+		  AND ($3::bool = false OR (lt.observed_at IS NULL OR lt.observed_at <= $5))
+		GROUP BY cd.id, cd.tenant_id, cd.display_name, cd.status, cd.created_at, cd.updated_at, cd.deleted_at, cd.policy_id, cd.bootstrap_extras
+		ORDER BY cd.created_at DESC, cd.id DESC
+		LIMIT $7 OFFSET $8`,
+		tenantID, lowBatteryOnly, staleOnly, lowBatteryThresholdPercent, staleCutoff, searchQuery, page.Limit, page.Offset,
 	)
 	if err != nil {
 		return nil, err

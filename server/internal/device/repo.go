@@ -8,6 +8,7 @@ import (
 
 type Repository interface {
 	ListDevices(ctx context.Context, tenantID string, page pagination.Params) ([]Device, error)
+	ListDevicesByFilter(ctx context.Context, tenantID string, page pagination.Params, filter DeviceListFilter) ([]Device, error)
 	ListActiveDevices(ctx context.Context, tenantID string) ([]Device, error)
 	GetOverviewStats(ctx context.Context, tenantID string) (OverviewStats, error)
 	GetStatusCounts(ctx context.Context, tenantID string) (StatusCounts, error)
@@ -17,3 +18,16 @@ type Repository interface {
 	RetireDevice(ctx context.Context, tenantID, id string) (Device, error)
 	Authenticate(ctx context.Context, tenantID, deviceID, secret string) (Device, error)
 }
+
+type HealthFilter string
+
+type DeviceListFilter struct {
+	Health    HealthFilter
+	NameQuery string
+}
+
+const (
+	HealthFilterAll        HealthFilter = ""
+	HealthFilterLowBattery HealthFilter = "low"
+	HealthFilterStale      HealthFilter = "stale"
+)

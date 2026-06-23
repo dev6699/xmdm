@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,6 +81,41 @@ func (s *Store) Upload(ctx context.Context, tenantID, deviceID, secret string, r
 	return rec, nil
 }
 
+func (s *Store) ListLatestByDeviceIDs(ctx context.Context, tenantID string, deviceIDs []string) (map[string]telemetry.Record, error) {
+	if tenantID == "" {
+		return nil, httpx.ErrInvalidInput
+	}
+	ids := uniqueStrings(deviceIDs)
+	if len(ids) == 0 {
+		return map[string]telemetry.Record{}, nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT ON (i.device_id::text)
+			i.id::text, i.tenant_id::text, i.device_id::text, i.observed_at, i.payload_json
+		 FROM device_telemetry i
+		 WHERE i.tenant_id = $1 AND i.device_id::text = ANY($2::text[])
+		 ORDER BY i.device_id::text, i.observed_at DESC, i.created_at DESC, i.id DESC`,
+		tenantID, ids,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make(map[string]telemetry.Record, len(ids))
+	for rows.Next() {
+		rec, err := scanTelemetry(rows)
+		if err != nil {
+			return nil, err
+		}
+		items[rec.DeviceID] = rec
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 type deviceRow struct {
 	ID         string
 	SecretHash string
@@ -149,4 +185,24 @@ func scanTelemetry(scanner rowScanner) (telemetry.Record, error) {
 		return telemetry.Record{}, err
 	}
 	return rec, nil
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }

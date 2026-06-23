@@ -59,6 +59,48 @@ func TestStoreUploadTelemetry(t *testing.T) {
 	}
 }
 
+func TestStoreListLatestByDeviceIDs(t *testing.T) {
+	pool := openTelemetryTestPool(t)
+	t.Cleanup(pool.Close)
+	resetTelemetryTestDB(t, pool)
+
+	first := time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
+	second := first.Add(15 * time.Minute)
+	store := New(pool)
+	store.SetNow(func() time.Time { return first })
+	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "device-secret", telemetry.UploadRequest{
+		Heartbeat: map[string]any{"online": true},
+		Battery:   map[string]any{"level": 41},
+	}); err != nil {
+		t.Fatalf("upload first telemetry: %v", err)
+	}
+	store.SetNow(func() time.Time { return second })
+	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "device-secret", telemetry.UploadRequest{
+		Heartbeat: map[string]any{"online": true},
+		Battery:   map[string]any{"level": 73},
+	}); err != nil {
+		t.Fatalf("upload second telemetry: %v", err)
+	}
+
+	latest, err := store.ListLatestByDeviceIDs(context.Background(), bootstrap.SeedTenantID, []string{seededDeviceID, "", seededDeviceID})
+	if err != nil {
+		t.Fatalf("list latest telemetry: %v", err)
+	}
+	if len(latest) != 1 {
+		t.Fatalf("expected one latest record, got %#v", latest)
+	}
+	rec, ok := latest[seededDeviceID]
+	if !ok {
+		t.Fatalf("expected latest telemetry for device")
+	}
+	if got := rec.Payload["battery"].(map[string]any)["level"]; got != float64(73) {
+		t.Fatalf("expected latest battery level 73, got %#v", got)
+	}
+	if !rec.ObservedAt.Equal(second) {
+		t.Fatalf("expected latest observed at %s, got %s", second, rec.ObservedAt)
+	}
+}
+
 func openTelemetryTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("XMDM_TEST_POSTGRES_DSN")
