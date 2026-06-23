@@ -23,6 +23,13 @@ async function findRowByText(page: Page, text: string) {
   return row;
 }
 
+async function deviceIdFromRow(row: ReturnType<Page['locator']>, name: string) {
+  const href = await row.getByRole('link', { name }).getAttribute('href');
+  const id = new URL(href ?? '', 'http://127.0.0.1').pathname.split('/').pop() ?? '';
+  expect(id).not.toBe('');
+  return id;
+}
+
 async function issueDeviceEnrollmentQR(page: Page, deviceId: string) {
   const { baseURL } = dashboardServerConfig();
   const response = await page.request.post(new URL('/api/v1/enrollment/tokens', baseURL).toString(), {
@@ -144,10 +151,11 @@ test('admin can edit and retire a device from the detail page', async ({ page })
     await page.goto(dashboardPaths.devices);
     await expect(page.getByRole('heading', { name: 'Devices' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Created' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'ID' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'Policy' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Battery' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Last online' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Policy' })).toBeVisible();
     await expect(page.getByRole('group', { name: 'Groups' })).toBeVisible();
     await page.getByLabel('Display name').fill(deviceName);
     await page.getByLabel('Policy').selectOption(policyId);
@@ -156,8 +164,7 @@ test('admin can edit and retire a device from the detail page', async ({ page })
     await page.getByRole('button', { name: 'Create device' }).click();
     await expect(page).toHaveURL(new RegExp(`${dashboardPaths.devices}(\\?.*)?$`));
     const deviceRow = await findRowByText(page, deviceName);
-    deviceId = (await deviceRow.locator('td').nth(1).textContent() ?? '').trim();
-    expect(deviceId).not.toBe('');
+    deviceId = await deviceIdFromRow(deviceRow, deviceName);
 
     await deviceRow.getByRole('link', { name: deviceName }).click();
     await expect(page).toHaveURL(new RegExp(`/admin/devices/${deviceId}$`));
@@ -220,8 +227,7 @@ test('admin can simulate device enrollment and inspect device info', async ({ pa
     await page.getByLabel(`${deviceName}-field`).check();
     await page.getByRole('button', { name: 'Create device' }).click();
     const deviceRow = await findRowByText(page, deviceName);
-    deviceRowId = (await deviceRow.locator('td').nth(1).textContent() ?? '').trim();
-    expect(deviceRowId).not.toBe('');
+    deviceRowId = await deviceIdFromRow(deviceRow, deviceName);
 
     const { deviceId, token } = await issueDeviceEnrollmentQR(page, deviceRowId);
 
@@ -250,14 +256,14 @@ test('admin can simulate device enrollment and inspect device info', async ({ pa
     await expect(enrolledRow).toContainText(policyName);
 
     await enrolledRow.getByRole('link', { name: deviceName }).click();
-    await expect(page).toHaveURL(new RegExp(`/admin/devices/${deviceRowId}$`));
+    await expect(page).toHaveURL(new RegExp(`/admin/devices/${deviceId}$`));
     const currentDevice = page.getByRole('heading', { name: 'Current device' }).locator('xpath=ancestor::section[1]');
     const activePolicy = page.locator('details.panel').filter({ hasText: 'Active policy' }).first();
     const configPreview = page.locator('details.panel').filter({ hasText: 'Config preview' }).first();
     const recentInfo = page.locator('details.panel').filter({ hasText: 'Recent device info' }).first();
     await activePolicy.locator('summary').click();
 
-    await expect(currentDevice).toContainText(`"id": "${deviceRowId}"`);
+    await expect(currentDevice).toContainText(`"id": "${deviceId}"`);
     await expect(currentDevice).toContainText(`"status": "active"`);
     await expect(currentDevice).toContainText(policyId);
     await expect(activePolicy).toContainText(policyName);
@@ -312,12 +318,10 @@ test('admin can inspect group detail and member devices', async ({ page }) => {
     await page.getByLabel(groupName).check();
     await page.getByRole('button', { name: 'Create device' }).click();
     const deviceRow = await findRowByText(page, deviceName);
-    deviceId = (await deviceRow.locator('td').nth(1).textContent() ?? '').trim();
-    expect(deviceId).not.toBe('');
+    deviceId = await deviceIdFromRow(deviceRow, deviceName);
 
     await page.goto(dashboardPaths.groups);
     await expect(page.getByRole('columnheader', { name: 'Created' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'ID' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();
     const groupRow = await findRowByText(page, groupName);

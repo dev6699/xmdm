@@ -39,6 +39,13 @@ async function findRowByText(page: Page, text: string) {
   return row;
 }
 
+async function idFromRowLink(row: ReturnType<Page['locator']>, name: string) {
+  const href = await row.getByRole('link', { name }).getAttribute('href');
+  const id = new URL(href ?? '', 'http://127.0.0.1').pathname.split('/').pop() ?? '';
+  expect(id).not.toBe('');
+  return id;
+}
+
 async function createPolicy(page: Page, name: string) {
   await page.goto(dashboardPaths.policies);
   await page.getByLabel('Name').fill(name);
@@ -64,7 +71,7 @@ async function issueDeviceEnrollmentQR(page: Page, deviceName: string) {
 
   await page.goto(dashboardPaths.devices);
   const row = await findRowByText(page, deviceName);
-  const deviceRecordId = (await row.locator('td').nth(1).textContent() ?? '').trim();
+  const deviceRecordId = await idFromRowLink(row, deviceName);
   await row.getByRole('link', { name: deviceName }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/devices/${deviceRecordId}$`));
   await expect(page.getByRole('heading', { name: 'Current device' })).toBeVisible();

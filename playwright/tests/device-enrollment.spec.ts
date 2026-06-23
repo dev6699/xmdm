@@ -38,6 +38,13 @@ async function createPolicy(page: Page, name: string) {
   return policyId;
 }
 
+async function idFromRowLink(row: ReturnType<Page['locator']>, name: string) {
+  const href = await row.getByRole('link', { name }).getAttribute('href');
+  const id = new URL(href ?? '', 'http://127.0.0.1').pathname.split('/').pop() ?? '';
+  expect(id).not.toBe('');
+  return id;
+}
+
 async function createPendingDevice(page: Page, name: string, policyId: string) {
   await page.goto(dashboardPaths.devices);
   await page.getByLabel('Display name').fill(name);
@@ -45,7 +52,7 @@ async function createPendingDevice(page: Page, name: string, policyId: string) {
   await page.getByRole('button', { name: 'Create device' }).click();
   const row = page.locator('table tbody tr').filter({ hasText: name }).first();
   await expect(row).toBeVisible();
-  return (await row.locator('td').nth(1).textContent() ?? '').trim();
+  return idFromRowLink(row, name);
 }
 
 async function generateDeviceEnrollmentQR(page: Page, deviceRowId: string, deviceName: string) {

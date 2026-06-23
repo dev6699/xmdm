@@ -24,6 +24,13 @@ async function findRowByText(page: Page, text: string) {
   return row;
 }
 
+async function idFromRowLink(row: ReturnType<Page['locator']>, name: string) {
+  const href = await row.getByRole('link', { name }).getAttribute('href');
+  const id = new URL(href ?? '', 'http://127.0.0.1').pathname.split('/').pop() ?? '';
+  expect(id).not.toBe('');
+  return id;
+}
+
 async function createManagedApp(page: Page, name: string, packageName: string, versionCode: string) {
   await page.goto(dashboardPaths.apps);
   await page.getByLabel('Package name').fill(packageName);
@@ -77,7 +84,7 @@ async function createPendingDevice(page: Page, name: string, policyId: string) {
   await page.getByLabel('Policy').selectOption(policyId);
   await page.getByRole('button', { name: 'Create device' }).click();
   const row = await findRowByText(page, name);
-  return (await row.locator('td').nth(1).textContent() ?? '').trim();
+  return idFromRowLink(row, name);
 }
 
 async function issueEnrollmentToken(page: Page, deviceRowId: string, deviceName: string) {
