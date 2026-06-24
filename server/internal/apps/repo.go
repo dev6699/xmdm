@@ -11,6 +11,7 @@ type Repository interface {
 	GetOverviewStats(ctx context.Context, tenantID string) (OverviewStats, error)
 	GetApp(ctx context.Context, tenantID, id string) (App, error)
 	GetAppByPackageName(ctx context.Context, tenantID, packageName string) (App, error)
+	UpsertSystemOwnedApp(ctx context.Context, tenantID string, req AppUpsert) (App, error)
 	CreateApp(ctx context.Context, tenantID string, req AppUpsert) (App, error)
 	UpdateApp(ctx context.Context, tenantID, id string, req AppUpsert) (App, error)
 	RetireApp(ctx context.Context, tenantID, id string) (App, error)

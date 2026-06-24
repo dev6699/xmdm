@@ -1327,6 +1327,9 @@ func (s *fakeAppStore) GetAppByPackageName(_ context.Context, _ string, packageN
 	}
 	return apps.App{}, httpx.ErrNotFound
 }
+func (s *fakeAppStore) UpsertSystemOwnedApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
+	return apps.App{}, nil
+}
 
 func (s *fakeAppStore) CreateApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
 	return apps.App{}, nil

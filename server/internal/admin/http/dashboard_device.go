@@ -14,6 +14,7 @@ import (
 
 	apps "xmdm/server/internal/apps"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/deviceinfo"
 	"xmdm/server/internal/enrollment"
@@ -402,7 +403,6 @@ type enrollmentQRResult struct {
 
 const (
 	deviceEnrollmentTTL        = "2h"
-	defaultAgentAppPackage     = "com.xmdm.launcher"
 	agentEnrollmentPackagePath = "/api/v1/enrollment/agent.apk"
 )
 
@@ -411,11 +411,10 @@ func (d *dashboard) deviceEnrollmentQRState(ctx context.Context, deviceID string
 	if err != nil {
 		return enrollmentQRFormState{}, err
 	}
-	appPackage := firstNonEmpty(strings.TrimSpace(d.deps.AgentAppPackage), defaultAgentAppPackage)
-	appRecord, latest, err := latestPublishedAgentAppVersion(ctx, d.deps.Apps, d.deps.TenantID, appPackage)
+	appRecord, latest, err := latestPublishedAgentAppVersion(ctx, d.deps.Apps, d.deps.TenantID)
 	if err != nil {
 		if err == httpx.ErrNotFound {
-			return enrollmentQRFormState{}, fmt.Errorf("agent managed app %q must have a latest published APK version", appPackage)
+			return enrollmentQRFormState{}, fmt.Errorf("agent managed app %q must have a latest published APK version", bootstrap.SeedAgentAppPackage)
 		}
 		return enrollmentQRFormState{}, err
 	}
@@ -442,12 +441,11 @@ func normalizedPublicServerURL(raw string) (string, error) {
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
-func latestPublishedAgentAppVersion(ctx context.Context, store apps.Repository, tenantID, agentAppPackage string) (apps.App, apps.Version, error) {
+func latestPublishedAgentAppVersion(ctx context.Context, store apps.Repository, tenantID string) (apps.App, apps.Version, error) {
 	if store == nil {
 		return apps.App{}, apps.Version{}, httpx.ErrNotFound
 	}
-	packageName := firstNonEmpty(strings.TrimSpace(agentAppPackage), defaultAgentAppPackage)
-	item, err := store.GetAppByPackageName(ctx, tenantID, packageName)
+	item, err := store.GetAppByPackageName(ctx, tenantID, bootstrap.SeedAgentAppPackage)
 	if err != nil {
 		return apps.App{}, apps.Version{}, err
 	}

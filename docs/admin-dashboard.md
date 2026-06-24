@@ -189,7 +189,7 @@ Policy detail pages manage the content bindings. Devices only receive the manage
 
 ![Apps page](assets/admin-dashboard-apps.png)
 
-Use `/admin/apps` to create managed apps and review the app catalog in a scan-first list.
+Use `/admin/apps` to review the app catalog and publish versions for predefined managed-app rows in a scan-first list.
 
 The apps list follows the scan-first pattern:
 
@@ -212,10 +212,11 @@ Open the app name to reach the detail page.
 3. Choose the APK file to upload.
 4. Select `Create managed app`.
 
+Use this flow only for the first app record. The dashboard seeds the standard agent app row during bootstrap, so the launcher package already exists on a fresh database and only needs new versions published later.
 The dashboard derives the artifact storage key, checksum, and file record from the uploaded APK on the server.
 The server derives the app version name from the version code for this flow, so operators only need to supply the code.
 The dashboard always publishes the new APK as another version for that app instead of creating a duplicate app row.
-Device enrollment QR generation uses the latest published version of the configured agent app package, default `com.xmdm.launcher`, and serves it from `/api/v1/enrollment/agent.apk`.
+Device enrollment QR generation uses the latest published version of the seeded agent app package, `com.xmdm.launcher`, and serves it from `/api/v1/enrollment/agent.apk`.
 
 #### App Detail
 
@@ -223,9 +224,11 @@ Device enrollment QR generation uses the latest published version of the configu
 
 1. Open the app name in the table.
 2. Review the app summary.
-3. Use `Download latest APK` to retrieve the published artifact.
-4. Review the published versions history.
-5. Select `Update app` or `Retire app` from the detail page as needed.
+3. Use `Publish new version` to upload a new APK without retyping the package or app name. Provide the version code and APK file; the server derives the version name from the code when you leave it blank.
+4. Use `Download latest APK` to retrieve the published artifact.
+5. Review the published versions history.
+6. If the app is system-owned, the detail page is publish-only and hides metadata edits and retire actions.
+7. Select `Update app` or `Retire app` from the detail page only for non-seeded app rows.
 
 ### Managed Files
 

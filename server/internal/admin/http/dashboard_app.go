@@ -95,24 +95,30 @@ func (d *dashboard) appDetailPageData(r *http.Request, session *auth.Session, fo
 	}
 	data := pageData{
 		Title:    "App Detail",
-		Subtitle: "Edit the app metadata or retire it from active use.",
+		Subtitle: "Manage app versions and, for non-seeded apps, the app metadata.",
 		Items:    template.HTML(body),
 	}
+	if found.SystemOwned {
+		data.Callout = panelMessageHTML("Seeded app", "This app is system-owned. Use the Publish new version flow below to add APK releases. The app metadata and lifecycle are locked.")
+	}
 	if d.canWrite(session) && found.Status != apps.StatusRetired {
-		data.Forms = []formData{{
-			Title:  "Update app",
-			Action: "/admin/apps/" + found.ID + "/update",
-			Fields: []fieldData{
-				{Name: "packageName", Label: "Package name", Type: "text", Value: found.PackageName, Placeholder: "com.example.app", Required: true},
-				{Name: "name", Label: "App name", Type: "text", Value: found.Name, Placeholder: "Example App", Required: true},
-			},
-			Submit: "Update app",
-		}, {
-			Title:  "Retire app",
-			Action: "/admin/apps/" + found.ID + "/retire",
-			Submit: "Retire app",
-			Danger: true,
-		}}
+		data.Forms = []formData{publishAppVersionForm("/admin/apps/" + found.ID + "/versions/publish")}
+		if !found.SystemOwned {
+			data.Forms = append(data.Forms, formData{
+				Title:  "Update app",
+				Action: "/admin/apps/" + found.ID + "/update",
+				Fields: []fieldData{
+					{Name: "packageName", Label: "Package name", Type: "text", Value: found.PackageName, Placeholder: "com.example.app", Required: true},
+					{Name: "name", Label: "App name", Type: "text", Value: found.Name, Placeholder: "Example App", Required: true},
+				},
+				Submit: "Update app",
+			}, formData{
+				Title:  "Retire app",
+				Action: "/admin/apps/" + found.ID + "/retire",
+				Submit: "Retire app",
+				Danger: true,
+			})
+		}
 	}
 	return data
 }
@@ -333,11 +339,94 @@ func (d *dashboard) createAppVersion(w http.ResponseWriter, r *http.Request) {
 	d.redirectOK(w, r, "/admin/apps/"+rec.AppID, "app version created")
 }
 
+func (d *dashboard) publishAppVersion(w http.ResponseWriter, r *http.Request) {
+	if !d.requirePostWrite(w, r, "Apps") {
+		return
+	}
+	app, err := d.deps.Apps.GetApp(r.Context(), d.deps.TenantID, r.PathValue("id"))
+	if err != nil {
+		d.redirectError(w, r, "/admin/apps/"+r.PathValue("id"), err.Error())
+		return
+	}
+	if app.Status != apps.StatusActive {
+		d.redirectError(w, r, "/admin/apps/"+r.PathValue("id"), "app is not active")
+		return
+	}
+	req, content, existingVersion, err := managedAppVersionPublishFromMultipart(r, app)
+	if err != nil {
+		d.redirectError(w, r, "/admin/apps/"+app.ID, err.Error())
+		return
+	}
+	if existingVersion == nil {
+		existingVersion, err = d.findManagedAppVersionForPublish(r.Context(), app.ID, req.VersionCode, req.File.Checksum)
+		if err != nil {
+			d.redirectError(w, r, "/admin/apps/"+app.ID, err.Error())
+			return
+		}
+	}
+	if existingVersion != nil && existingVersion.Status == apps.VersionStatusPublished {
+		d.recordAudit(r, "create", "app_versions", existingVersion.ID, map[string]any{
+			"appId":       existingVersion.AppID,
+			"versionName": existingVersion.VersionName,
+			"versionCode": existingVersion.VersionCode,
+			"artifactId":  existingVersion.ArtifactID,
+		})
+		d.redirectOK(w, r, "/admin/apps/"+app.ID, "app version already up to date")
+		return
+	}
+	if len(content) > 0 {
+		if err := d.deps.Artifacts.Put(r.Context(), req.StorageKey, bytes.NewReader(content), req.MimeType, req.SizeBytes); err != nil {
+			d.redirectError(w, r, "/admin/apps/"+app.ID, err.Error())
+			return
+		}
+	}
+	fileRec, err := d.deps.Files.CreateFile(r.Context(), d.deps.TenantID, req.File)
+	if err != nil {
+		_ = d.deps.Artifacts.Delete(r.Context(), req.StorageKey)
+		d.redirectError(w, r, "/admin/apps/"+app.ID, err.Error())
+		return
+	}
+	artifactID := fileRec.ArtifactID
+	versionRec, err := d.deps.Apps.CreateVersion(r.Context(), d.deps.TenantID, app.ID, apps.VersionUpsert{
+		VersionName: req.VersionName,
+		VersionCode: req.VersionCode,
+		ArtifactID:  &artifactID,
+		Checksum:    fileRec.Checksum,
+		Publish:     true,
+	})
+	if err != nil {
+		_, _ = d.deps.Files.RetireFile(r.Context(), d.deps.TenantID, fileRec.ID)
+		_ = d.deps.Artifacts.Delete(r.Context(), req.StorageKey)
+		d.redirectError(w, r, "/admin/apps/"+app.ID, err.Error())
+		return
+	}
+	d.recordAudit(r, "create", "app_versions", versionRec.ID, map[string]any{
+		"appId":       versionRec.AppID,
+		"packageName": app.PackageName,
+		"name":        app.Name,
+		"versionName": versionRec.VersionName,
+		"versionCode": versionRec.VersionCode,
+		"status":      versionRec.Status,
+		"fileName":    fileRec.Name,
+		"artifactId":  fileRec.ArtifactID,
+	})
+	d.redirectOK(w, r, "/admin/apps/"+app.ID, "app version published")
+}
+
 type managedAppCreateRequest struct {
 	App         apps.AppUpsert
 	VersionName string
 	VersionCode int64
 	Publish     bool
+	File        files.FileUpsert
+	StorageKey  string
+	MimeType    string
+	SizeBytes   int64
+}
+
+type managedAppVersionPublishRequest struct {
+	VersionName string
+	VersionCode int64
 	File        files.FileUpsert
 	StorageKey  string
 	MimeType    string
@@ -357,6 +446,20 @@ func managedAppForm(action string) formData {
 		},
 		Help:   template.HTML(`Upload the APK once. The dashboard derives the artifact storage key, checksum, and file record on the server, then creates the app and publishes its first version in one step.`),
 		Submit: "Create managed app",
+	}
+}
+
+func publishAppVersionForm(action string) formData {
+	return formData{
+		Title:   "Publish new version",
+		Action:  action,
+		EncType: "multipart/form-data",
+		Fields: []fieldData{
+			{Name: "versionCode", Label: "Version code", Type: "number", Placeholder: "100", Required: true},
+			{Name: "file", Label: "APK file", Type: "file", Required: true},
+		},
+		Help:   template.HTML(`Upload a new APK for this app. The package name and app name come from the existing app record, so only the version code and file are needed.`),
+		Submit: "Publish version",
 	}
 }
 
@@ -409,6 +512,67 @@ func managedAppUpsertFromMultipart(r *http.Request) (managedAppCreateRequest, []
 	}, content, nil
 }
 
+func managedAppVersionPublishFromMultipart(r *http.Request, app apps.App) (managedAppVersionPublishRequest, []byte, *apps.Version, error) {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		return managedAppVersionPublishRequest{}, nil, nil, err
+	}
+	versionCode, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("versionCode")), 10, 64)
+	if err != nil {
+		return managedAppVersionPublishRequest{}, nil, nil, fmt.Errorf("invalid version code")
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		return managedAppVersionPublishRequest{}, nil, nil, fmt.Errorf("file is required")
+	}
+	defer file.Close()
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return managedAppVersionPublishRequest{}, nil, nil, err
+	}
+	if len(content) == 0 {
+		return managedAppVersionPublishRequest{}, nil, nil, fmt.Errorf("file is empty")
+	}
+	checksumValue := checksum.SHA256Base64URL(content)
+	versionName := strings.TrimSpace(r.FormValue("versionName"))
+	if versionName == "" {
+		versionName = fmt.Sprintf("v%d", versionCode)
+	}
+	fileName := sanitizeArtifactName(fmt.Sprintf("%s-%d.apk", app.PackageName, versionCode))
+	storageKey := "artifacts/apps/" + uuid.NewString() + "/" + fileName
+	req := managedAppVersionPublishRequest{
+		VersionName: versionName,
+		VersionCode: versionCode,
+		File: files.FileUpsert{
+			Name:       fileName,
+			StorageKey: storageKey,
+			Checksum:   checksumValue,
+			SizeBytes:  int64(len(content)),
+			MimeType:   "application/vnd.android.package-archive",
+		},
+		StorageKey: storageKey,
+		MimeType:   "application/vnd.android.package-archive",
+		SizeBytes:  int64(len(content)),
+	}
+	return req, content, nil, nil
+}
+
+func (d *dashboard) findManagedAppVersionForPublish(ctx context.Context, appID string, versionCode int64, checksumValue string) (*apps.Version, error) {
+	version, err := d.deps.Apps.GetVersionByCode(ctx, d.deps.TenantID, appID, versionCode)
+	if err != nil {
+		if err == httpx.ErrNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if version.Status != apps.VersionStatusPublished {
+		return nil, nil
+	}
+	if version.Checksum != checksumValue {
+		return nil, fmt.Errorf("app version already exists with different content")
+	}
+	return &version, nil
+}
+
 func sanitizeArtifactName(value string) string {
 	value = filepath.Base(strings.TrimSpace(value))
 	value = strings.NewReplacer("\\", "_", "/", "_", " ", "_").Replace(value)
@@ -422,16 +586,20 @@ func appsTable(items []apps.App, versions map[string][]apps.Version) template.HT
 	var rows strings.Builder
 	for _, item := range items {
 		latest := appLatestPublishedVersion(versions[item.ID])
+		systemOwned := ""
+		if item.SystemOwned {
+			systemOwned = `<span class="status-pill status-enabled">✓</span>`
+		}
 		rows.WriteString(tableRowHTML(
 			template.HTML(esc(formatDashboardTime(item.CreatedAt))),
-			template.HTML(esc(item.ID)),
 			template.HTML(`<a href="/admin/apps/`+escAttr(item.ID)+`">`+esc(item.Name)+`</a>`),
 			template.HTML(esc(item.PackageName)),
+			template.HTML(systemOwned),
 			template.HTML(esc(appVersionLabel(latest))),
 			template.HTML(statusBadge(item.Status)),
 		))
 	}
-	return tableHTML("", []string{"Created", "ID", "Name", "Package", "Latest published", "Status"}, rows.String())
+	return tableHTML("", []string{"Created", "Name", "Package", "System owned", "Latest published", "Status"}, rows.String())
 }
 
 func appLatestPublishedVersion(items []apps.Version) *apps.Version {
@@ -465,7 +633,11 @@ func appVersionLabel(item *apps.Version) string {
 	if item == nil {
 		return "—"
 	}
-	return item.VersionName + " (#" + strconv.FormatInt(item.VersionCode, 10) + ")"
+	published := item.CreatedAt
+	if item.PublishedAt != nil && !item.PublishedAt.IsZero() {
+		published = *item.PublishedAt
+	}
+	return item.VersionName + " (#" + strconv.FormatInt(item.VersionCode, 10) + ") · " + formatDashboardTime(published)
 }
 
 func appSummary(found apps.App, latest *apps.Version) template.HTML {
@@ -476,6 +648,7 @@ func appSummary(found apps.App, latest *apps.Version) template.HTML {
 	b.WriteString(summaryTextItem("ID", found.ID))
 	b.WriteString(summaryTextItem("Name", found.Name))
 	b.WriteString(summaryTextItem("Package", found.PackageName))
+	b.WriteString(summaryHTMLItem("Locked", template.HTML(boolBadge(found.SystemOwned, "system-owned", "editable"))))
 	if latest != nil && (latest.ArtifactID != nil || latest.Artifact != nil) {
 		b.WriteString(summaryHTMLItem("Download", template.HTML(fmt.Sprintf(`<a class="button btn-primary" href="/admin/apps/%s/download">Download latest APK</a>`, escAttr(found.ID)))))
 	}

@@ -37,9 +37,6 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.Device.ConfigSyncInterval != 15*time.Minute {
 		t.Errorf("Expected Device.ConfigSyncInterval 15m, got %v", cfg.Device.ConfigSyncInterval)
 	}
-	if cfg.Device.AgentAppPackage != "com.xmdm.launcher" {
-		t.Errorf("Expected Device.AgentAppPackage 'com.xmdm.launcher', got '%s'", cfg.Device.AgentAppPackage)
-	}
 }
 
 func TestLoadConfigFromEnv(t *testing.T) {
@@ -52,7 +49,6 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	os.Setenv("XMDM_POSTGRES_DSN", "postgres://custom:custom@localhost:5432/test")
 	os.Setenv("XMDM_DEVICE_COMMAND_POLL_INTERVAL", "5s")
 	os.Setenv("XMDM_DEVICE_CONFIG_SYNC_INTERVAL", "2m")
-	os.Setenv("XMDM_DEVICE_AGENT_APP_PACKAGE", "com.example.agent")
 	defer unsetEnvVars()
 
 	cfg, err := LoadConfig("")
@@ -81,9 +77,6 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	if cfg.Device.ConfigSyncInterval != 2*time.Minute {
 		t.Errorf("Expected Device.ConfigSyncInterval 2m, got %v", cfg.Device.ConfigSyncInterval)
 	}
-	if cfg.Device.AgentAppPackage != "com.example.agent" {
-		t.Errorf("Expected Device.AgentAppPackage 'com.example.agent', got '%s'", cfg.Device.AgentAppPackage)
-	}
 }
 
 func TestLoadConfigFromYAML(t *testing.T) {
@@ -97,8 +90,6 @@ server:
   sessionTTL: 48h
 
 device:
-  agentAppPackage: "com.yaml.agent"
-
 postgres:
   dsn: "postgres://yamluser:yamlpass@localhost:5432/yamltest"
 
@@ -133,9 +124,6 @@ admin:
 	}
 	if cfg.Admin.Username != "yamluser" {
 		t.Errorf("Expected Admin.Username 'yamluser', got '%s'", cfg.Admin.Username)
-	}
-	if cfg.Device.AgentAppPackage != "com.yaml.agent" {
-		t.Errorf("Expected Device.AgentAppPackage 'com.yaml.agent', got '%s'", cfg.Device.AgentAppPackage)
 	}
 }
 
@@ -200,7 +188,6 @@ func unsetEnvVars() {
 		"XMDM_MQTT_DYNSEC_DIAL_TIMEOUT",
 		"XMDM_DEVICE_COMMAND_POLL_INTERVAL",
 		"XMDM_DEVICE_CONFIG_SYNC_INTERVAL",
-		"XMDM_DEVICE_AGENT_APP_PACKAGE",
 		"XMDM_OBJECT_STORAGE_ENDPOINT",
 		"XMDM_OBJECT_STORAGE_REGION",
 		"XMDM_OBJECT_STORAGE_ACCESS_KEY",

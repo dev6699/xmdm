@@ -34,14 +34,59 @@ func (s *Store) SetNow(now func() time.Time) {
 	s.now = now
 }
 
+func (s *Store) UpsertSystemOwnedApp(ctx context.Context, tenantID string, req apps.AppUpsert) (apps.App, error) {
+	if req.PackageName == "" || req.Name == "" {
+		return apps.App{}, httpx.ErrInvalidInput
+	}
+	row := s.pool.QueryRow(ctx,
+		`SELECT id::text, system_owned
+		 FROM apps
+		 WHERE tenant_id = $1 AND package_name = $2`,
+		tenantID, req.PackageName,
+	)
+	var systemOwned bool
+	err := row.Scan(new(string), &systemOwned)
+	switch {
+	case err == nil && !systemOwned:
+		return apps.App{}, httpx.ErrForbidden
+	case err == nil:
+		row = s.pool.QueryRow(ctx,
+			`UPDATE apps
+			 SET name = $3,
+			     status = $4,
+			     updated_at = $5
+			 WHERE tenant_id = $1 AND package_name = $2 AND system_owned = TRUE
+			 RETURNING id::text, tenant_id::text, package_name, name, system_owned, status, created_at, updated_at, deleted_at`,
+			tenantID, req.PackageName, req.Name, apps.StatusActive, s.now(),
+		)
+	case errors.Is(err, pgx.ErrNoRows):
+		row = s.pool.QueryRow(ctx,
+			`INSERT INTO apps (id, tenant_id, package_name, name, system_owned, status, updated_at)
+				 VALUES ($1, $2, $3, $4, TRUE, $5, $6)
+				 RETURNING id::text, tenant_id::text, package_name, name, system_owned, status, created_at, updated_at, deleted_at`,
+			uuid.NewString(), tenantID, req.PackageName, req.Name, apps.StatusActive, s.now(),
+		)
+	default:
+		return apps.App{}, err
+	}
+	rec, err := scanApp(row)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return apps.App{}, httpx.ErrConflict
+		}
+		return apps.App{}, err
+	}
+	return rec, nil
+}
+
 func (s *Store) CreateApp(ctx context.Context, tenantID string, req apps.AppUpsert) (apps.App, error) {
 	if req.PackageName == "" || req.Name == "" {
 		return apps.App{}, httpx.ErrInvalidInput
 	}
 	row := s.pool.QueryRow(ctx,
-		`INSERT INTO apps (id, tenant_id, package_name, name, updated_at)
-		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at`,
+		`INSERT INTO apps (id, tenant_id, package_name, name, system_owned, updated_at)
+		 VALUES ($1, $2, $3, $4, FALSE, $5)
+		 RETURNING id::text, tenant_id::text, package_name, name, system_owned, status, created_at, updated_at, deleted_at`,
 		uuid.NewString(), tenantID, req.PackageName, req.Name, s.now(),
 	)
 	rec, err := scanApp(row)
@@ -57,7 +102,7 @@ func (s *Store) CreateApp(ctx context.Context, tenantID string, req apps.AppUpse
 func (s *Store) ListApps(ctx context.Context, tenantID string, page pagination.Params) ([]apps.App, error) {
 	page = pagination.Normalize(page, pagination.DefaultLimit, 100)
 	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at
+		`SELECT id::text, tenant_id::text, package_name, name, system_owned, status, created_at, updated_at, deleted_at
 		 FROM apps
 		 WHERE tenant_id = $1
 		 ORDER BY created_at DESC, id DESC
@@ -101,7 +146,7 @@ func (s *Store) GetOverviewStats(ctx context.Context, tenantID string) (apps.Ove
 
 func (s *Store) GetApp(ctx context.Context, tenantID, id string) (apps.App, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at
+		`SELECT id::text, tenant_id::text, package_name, name, system_owned, status, created_at, updated_at, deleted_at
 		 FROM apps
 		 WHERE tenant_id = $1 AND id = $2`,
 		tenantID, id,
@@ -118,7 +163,7 @@ func (s *Store) GetApp(ctx context.Context, tenantID, id string) (apps.App, erro
 
 func (s *Store) GetAppByPackageName(ctx context.Context, tenantID, packageName string) (apps.App, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at
+		`SELECT id::text, tenant_id::text, package_name, name, system_owned, status, created_at, updated_at, deleted_at
 		 FROM apps
 		 WHERE tenant_id = $1 AND package_name = $2`,
 		tenantID, packageName,
@@ -140,13 +185,16 @@ func (s *Store) UpdateApp(ctx context.Context, tenantID, id string, req apps.App
 	row := s.pool.QueryRow(ctx,
 		`UPDATE apps
 		 SET package_name = $3, name = $4, updated_at = $5
-		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at`,
+		 WHERE tenant_id = $1 AND id = $2 AND system_owned = FALSE
+		 RETURNING id::text, tenant_id::text, package_name, name, system_owned, status, created_at, updated_at, deleted_at`,
 		tenantID, id, req.PackageName, req.Name, s.now(),
 	)
 	rec, err := scanApp(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			if locked, lockErr := s.isSystemOwnedApp(ctx, tenantID, id); lockErr == nil && locked {
+				return apps.App{}, httpx.ErrForbidden
+			}
 			return apps.App{}, httpx.ErrNotFound
 		}
 		if isUniqueViolation(err) {
@@ -161,13 +209,16 @@ func (s *Store) RetireApp(ctx context.Context, tenantID, id string) (apps.App, e
 	row := s.pool.QueryRow(ctx,
 		`UPDATE apps
 		 SET status = $3, deleted_at = $4, updated_at = $4
-		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id::text, tenant_id::text, package_name, name, status, created_at, updated_at, deleted_at`,
+		 WHERE tenant_id = $1 AND id = $2 AND system_owned = FALSE
+		 RETURNING id::text, tenant_id::text, package_name, name, system_owned, status, created_at, updated_at, deleted_at`,
 		tenantID, id, apps.StatusRetired, s.now(),
 	)
 	rec, err := scanApp(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			if locked, lockErr := s.isSystemOwnedApp(ctx, tenantID, id); lockErr == nil && locked {
+				return apps.App{}, httpx.ErrForbidden
+			}
 			return apps.App{}, httpx.ErrNotFound
 		}
 		return apps.App{}, err
@@ -389,13 +440,30 @@ func (s *Store) CreateVersion(ctx context.Context, tenantID, appID string, req a
 func scanApp(scanner rowScanner) (apps.App, error) {
 	var rec apps.App
 	var deletedAt pgtype.Timestamptz
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.PackageName, &rec.Name, &rec.Status, &rec.CreatedAt, &rec.UpdatedAt, &deletedAt); err != nil {
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.PackageName, &rec.Name, &rec.SystemOwned, &rec.Status, &rec.CreatedAt, &rec.UpdatedAt, &deletedAt); err != nil {
 		return apps.App{}, err
 	}
 	if deletedAt.Valid {
 		rec.DeletedAt = &deletedAt.Time
 	}
 	return rec, nil
+}
+
+func (s *Store) isSystemOwnedApp(ctx context.Context, tenantID, id string) (bool, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT system_owned
+		 FROM apps
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, id,
+	)
+	var locked bool
+	if err := row.Scan(&locked); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, httpx.ErrNotFound
+		}
+		return false, err
+	}
+	return locked, nil
 }
 
 func scanVersion(scanner rowScanner) (apps.Version, error) {

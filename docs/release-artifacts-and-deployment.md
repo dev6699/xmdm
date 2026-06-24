@@ -65,13 +65,13 @@ Use the same alias and passwords in the GitHub Secrets values you set above.
 
 ## Publish The Launcher APK
 
-The release workflow gives you an APK file, but the server serves the launcher from its managed app catalog. To publish the APK for enrollment:
+The release workflow gives you an APK file, but the server serves the launcher from its managed app catalog. The launcher app row is seeded during bootstrap and is locked to version publishing. To publish the APK for enrollment:
 
 1. Open the admin dashboard at `/admin/apps`.
-2. Create or open the managed app whose package name matches `device.agentAppPackage` in the server config. The default is `com.xmdm.launcher`.
+2. Open the seeded managed app whose package name is `com.xmdm.launcher`.
 3. Upload the released `xmdm-launcher-<release-tag>.apk` file.
-4. Set the version code and version name for the release.
-5. Select `Create managed app` for the first release, or update the existing managed app with the new version on later releases.
+4. Set the version code for the release.
+5. Open the app detail page and use `Publish new version` to add a new APK; do not rename or retire the seeded app row.
 6. Confirm the app detail page shows the latest published APK.
 7. Use that app's latest published version checksum in the enrollment QR or bootstrap payload.
 
@@ -93,7 +93,7 @@ cd infra
 docker compose -f docker-compose.yml -f docker-compose.server.yml down
 ```
 
-3. Open `/admin/apps` and upload the released `xmdm-launcher-<release-tag>.apk` as the managed app for `com.xmdm.launcher`.
+3. Open `/admin/apps`, open the seeded `com.xmdm.launcher` app row, and use `Publish new version` to upload the released `xmdm-launcher-<release-tag>.apk`.
 4. Confirm the app detail page shows the new latest published APK.
 5. Generate enrollment QR/bootstrap data from the server and use the published checksum for the launcher download URL.
 

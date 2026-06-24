@@ -49,7 +49,6 @@ type MQTTConfig struct {
 type DeviceConfig struct {
 	CommandPollInterval time.Duration `yaml:"commandPollInterval" env:"XMDM_DEVICE_COMMAND_POLL_INTERVAL"`
 	ConfigSyncInterval  time.Duration `yaml:"configSyncInterval" env:"XMDM_DEVICE_CONFIG_SYNC_INTERVAL"`
-	AgentAppPackage     string        `yaml:"agentAppPackage" env:"XMDM_DEVICE_AGENT_APP_PACKAGE"`
 }
 
 type ObjectStoreConfig struct {
@@ -93,7 +92,6 @@ func LoadConfig(configPath string) (*Config, error) {
 		Device: DeviceConfig{
 			CommandPollInterval: 30 * time.Second,
 			ConfigSyncInterval:  15 * time.Minute,
-			AgentAppPackage:     "com.xmdm.launcher",
 		},
 		ObjectStore: ObjectStoreConfig{
 			Endpoint:        "http://127.0.0.1:8333",
@@ -206,10 +204,6 @@ func loadFromEnv(cfg *Config) {
 			cfg.Device.ConfigSyncInterval = dur
 		}
 	}
-	if agentAppPackage := os.Getenv("XMDM_DEVICE_AGENT_APP_PACKAGE"); agentAppPackage != "" {
-		cfg.Device.AgentAppPackage = agentAppPackage
-	}
-
 	if disableRequestLogs := os.Getenv("XMDM_DISABLE_REQUEST_LOGS"); disableRequestLogs != "" {
 		cfg.Server.DisableRequestLogs = disableRequestLogs == "1" || strings.EqualFold(disableRequestLogs, "true")
 	}

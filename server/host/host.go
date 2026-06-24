@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	coremigrate "xmdm/server"
 	internalv1 "xmdm/server/internal/api/v1"
+	"xmdm/server/internal/apps"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/config"
@@ -23,6 +24,7 @@ type DeviceAction = internalplugins.DeviceAction
 type CommandType = internalplugins.CommandType
 type Plugin = internalplugins.Plugin
 type Config = config.Config
+type AppSeed = bootstrap.AppSeed
 
 type HostedPlugin interface {
 	Mount(*http.ServeMux)
@@ -46,7 +48,14 @@ func Run(cfg *config.Config, plugins ...HostedPlugin) error {
 		return err
 	}
 
+	bootstrap.RegisterAppSeed(bootstrap.AppSeed{
+		PackageName: bootstrap.SeedAgentAppPackage,
+		Name:        bootstrap.SeedAgentAppName,
+	})
 	deps := internalv1.NewDeps(cfg)
+	if err := syncSeedApps(context.Background(), deps.Apps, deps.TenantID); err != nil {
+		return err
+	}
 	if len(plugins) > 0 {
 		defs := make([]internalplugins.Plugin, 0, len(plugins))
 		mounts := make([]func(*http.ServeMux), 0, len(plugins))
@@ -80,6 +89,11 @@ func Run(cfg *config.Config, plugins ...HostedPlugin) error {
 	handler := internalv1.NewMux(svc, deps)
 	log.Printf("xmdm server listening on %s", cfg.Server.Address)
 	return http.ListenAndServe(cfg.Server.Address, handler)
+}
+
+// RegisterAppSeed adds a premium or core app seed that should be reconciled at startup.
+func RegisterAppSeed(seed AppSeed) {
+	bootstrap.RegisterAppSeed(seed)
 }
 
 // LoadConfig loads the core server configuration using the same defaults and
@@ -143,6 +157,21 @@ func syncSeedRolePermissions(ctx context.Context, repo roles.Repository, tenantI
 	}
 	_, err = repo.UpdateRole(ctx, tenantID, seed.ID, roles.RoleUpsert{Name: seed.Name, Permissions: merged})
 	return err
+}
+
+func syncSeedApps(ctx context.Context, repo apps.Repository, tenantID string) error {
+	if repo == nil {
+		return nil
+	}
+	for _, seed := range bootstrap.AppSeeds() {
+		if _, err := repo.UpsertSystemOwnedApp(ctx, tenantID, apps.AppUpsert{
+			PackageName: seed.PackageName,
+			Name:        seed.Name,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func mergePermissions(existing []string, catalog []auth.Permission) []string {

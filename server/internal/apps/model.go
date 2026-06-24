@@ -25,6 +25,7 @@ type App struct {
 	RecordBase
 	PackageName string `json:"packageName"`
 	Name        string `json:"name"`
+	SystemOwned bool   `json:"systemOwned"`
 }
 
 type AppUpsert struct {

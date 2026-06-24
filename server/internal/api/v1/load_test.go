@@ -383,7 +383,7 @@ func newLoadFixture(tb testing.TB) *loadFixture {
 		ConfigSyncIntervalMs:  1000,
 	}, loadTenantID)
 	commandhttp.Register(apiMux, devices, commandStore, loadTenantID)
-	apphttp.Register(apiMux, svc, appsStore, devices, artifactStore, nil, loadTenantID, "com.xmdm.launcher")
+	apphttp.Register(apiMux, svc, appsStore, devices, artifactStore, nil, loadTenantID)
 	certificatehttp.Register(apiMux, svc, devices, certsStore, artifactStore, nil, loadTenantID)
 	managedfilehttp.Register(apiMux, svc, managedFilesStore, devices, artifactStore, loadTenantID)
 	telemetryhttp.Register(apiMux, telemetryStore, loadTenantID)
@@ -702,6 +702,9 @@ func (s *loadAppStore) GetAppByPackageName(_ context.Context, _ string, packageN
 		}
 	}
 	return apps.App{}, httpx.ErrNotFound
+}
+func (s *loadAppStore) UpsertSystemOwnedApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
+	return apps.App{}, nil
 }
 
 func (s *loadAppStore) CreateApp(context.Context, string, apps.AppUpsert) (apps.App, error) {

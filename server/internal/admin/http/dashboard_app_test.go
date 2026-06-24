@@ -18,9 +18,10 @@ import (
 )
 
 func TestAppMutationsRecordAudit(t *testing.T) {
-	svc := auth.NewServiceWithPermissions("admin", "secret", time.Hour, []auth.Permission{auth.PermissionAdminWrite})
-	session := svc.IssueSession("admin", []auth.Permission{auth.PermissionAdminWrite})
+	svc := auth.NewServiceWithPermissions("admin", "secret", time.Hour, []auth.Permission{auth.PermissionAdminRead, auth.PermissionAdminWrite})
+	session := svc.IssueSession("admin", []auth.Permission{auth.PermissionAdminRead, auth.PermissionAdminWrite})
 	auditStore := &recordingAuditStore{}
+	publishedAt := time.Date(2026, 6, 24, 10, 30, 0, 0, time.UTC)
 	appStore := &recordingAppStore{
 		existingApp: apps.App{
 			RecordBase:  apps.RecordBase{ID: "app-1", TenantID: "tenant-1", Status: apps.StatusActive},
@@ -59,6 +60,8 @@ func TestAppMutationsRecordAudit(t *testing.T) {
 			VersionName: "1.0.0",
 			VersionCode: 100,
 			Checksum:    "sha256-app-abc",
+			PublishedAt: &publishedAt,
+			CreatedAt:   publishedAt,
 		},
 	}
 	fileStore := &recordingFileStore{
@@ -123,6 +126,103 @@ func TestAppMutationsRecordAudit(t *testing.T) {
 		assertRedirect(t, rr, "/admin/apps/app-1?ok=app+version+created")
 		assertAuditRecord(t, auditStore, "create", "app_versions", "version-1")
 	})
+
+	t.Run("publish version without retyping app metadata", func(t *testing.T) {
+		auditStore.records = nil
+		appStore.versionByCodeErr = httpx.ErrNotFound
+		rr := postMultipart(t, mux, session.ID, "/admin/apps/app-1/versions/publish", map[string]string{
+			"versionName": "1.1.0",
+			"versionCode": "101",
+			"csrfToken":   "token",
+		}, "file", "example-101.apk", []byte("apk-content-101"))
+		assertRedirect(t, rr, "/admin/apps/app-1?ok=app+version+published")
+		assertAuditRecord(t, auditStore, "create", "app_versions", "version-1")
+		if appStore.versionByCodeErr != httpx.ErrNotFound {
+			t.Fatalf("expected version lookup override to remain set")
+		}
+	})
+
+	t.Run("publish version does not short-circuit uploaded draft", func(t *testing.T) {
+		auditStore.records = nil
+		appStore.versionByCodeErr = nil
+		appStore.versionByCodeVersion = apps.Version{
+			ID:          "version-uploaded",
+			TenantID:    "tenant-1",
+			AppID:       "app-1",
+			Status:      apps.VersionStatusUploaded,
+			VersionName: "1.2.0",
+			VersionCode: 102,
+			Checksum:    "sha256-draft",
+		}
+		appStore.createdVersion = apps.Version{
+			ID:          "version-published",
+			TenantID:    "tenant-1",
+			AppID:       "app-1",
+			Status:      apps.VersionStatusPublished,
+			VersionName: "1.2.0",
+			VersionCode: 102,
+			Checksum:    "sha256-app-abc",
+		}
+		rr := postMultipart(t, mux, session.ID, "/admin/apps/app-1/versions/publish", map[string]string{
+			"versionName": "1.2.0",
+			"versionCode": "102",
+			"csrfToken":   "token",
+		}, "file", "example-102.apk", []byte("apk-content-102"))
+		assertRedirect(t, rr, "/admin/apps/app-1?ok=app+version+published")
+		assertAuditRecord(t, auditStore, "create", "app_versions", "version-published")
+		if appStore.versionByCodeVersion.Status != apps.VersionStatusUploaded {
+			t.Fatalf("expected uploaded fixture to remain uploaded, got %#v", appStore.versionByCodeVersion)
+		}
+	})
+
+	t.Run("app list shows system owned indicator", func(t *testing.T) {
+		appStore.existingApp.SystemOwned = true
+		req := httptest.NewRequest(http.MethodGet, "/admin/apps", nil)
+		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+		}
+		body := rr.Body.String()
+		if strings.Contains(body, ">ID<") || strings.Contains(body, ">app-1<") {
+			t.Fatalf("expected id column to be removed from list, got %s", body)
+		}
+		if !strings.Contains(body, "System owned") {
+			t.Fatalf("expected system owned column, got %s", body)
+		}
+		if !strings.Contains(body, "✓") {
+			t.Fatalf("expected system owned tick, got %s", body)
+		}
+		if strings.Contains(body, "system-owned") {
+			t.Fatalf("expected plain tick instead of badge text, got %s", body)
+		}
+		if !strings.Contains(body, "24 Jun 2026") {
+			t.Fatalf("expected publish date in latest published column, got %s", body)
+		}
+	})
+
+	t.Run("seeded app is publish-only", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/admin/apps/app-1", nil)
+		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+		}
+		body := rr.Body.String()
+		if !strings.Contains(body, "Seeded app") {
+			t.Fatalf("expected seeded app callout, got %s", body)
+		}
+		if !strings.Contains(body, "Publish new version") {
+			t.Fatalf("expected publish form, got %s", body)
+		}
+		if strings.Contains(body, "Update app") || strings.Contains(body, "Retire app") {
+			t.Fatalf("expected locked app to hide metadata forms, got %s", body)
+		}
+	})
 }
 
 func postMultipart(t *testing.T, mux *http.ServeMux, sessionID, path string, fields map[string]string, fileField, fileName string, content []byte) *httptest.ResponseRecorder {
@@ -152,13 +252,15 @@ func postMultipart(t *testing.T, mux *http.ServeMux, sessionID, path string, fie
 }
 
 type recordingAppStore struct {
-	existingApp     apps.App
-	createdApp      apps.App
-	updatedApp      apps.App
-	retiredApp      apps.App
-	createdVersion  apps.Version
-	latestVersion   apps.Version
-	getByPackageErr error
+	existingApp          apps.App
+	createdApp           apps.App
+	updatedApp           apps.App
+	retiredApp           apps.App
+	createdVersion       apps.Version
+	latestVersion        apps.Version
+	getByPackageErr      error
+	versionByCodeErr     error
+	versionByCodeVersion apps.Version
 }
 
 func (s *recordingAppStore) ListApps(context.Context, string, pagination.Params) ([]apps.App, error) {
@@ -179,6 +281,9 @@ func (s *recordingAppStore) GetAppByPackageName(context.Context, string, string)
 	}
 	return s.existingApp, nil
 }
+func (s *recordingAppStore) UpsertSystemOwnedApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
+	return s.createdApp, nil
+}
 
 func (s *recordingAppStore) CreateApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
 	return s.createdApp, nil
@@ -197,6 +302,12 @@ func (s *recordingAppStore) ListVersions(context.Context, string, string, pagina
 }
 
 func (s *recordingAppStore) GetVersionByCode(context.Context, string, string, int64) (apps.Version, error) {
+	if s.versionByCodeErr != nil {
+		return apps.Version{}, s.versionByCodeErr
+	}
+	if s.versionByCodeVersion.ID != "" {
+		return s.versionByCodeVersion, nil
+	}
 	return s.createdVersion, nil
 }
 

@@ -57,6 +57,18 @@ async function findAgentAppRow(page: Page) {
 export async function ensureAgentAppPublished(page: Page) {
   const existing = await findAgentAppRow(page);
   if (existing) {
+    await existing.getByRole('link', { name: AGENT_APP_NAME }).click();
+    await expect(page).toHaveURL(/\/admin\/apps\/[^?]+$/);
+    if (await page.getByRole('link', { name: 'Download latest APK' }).count()) {
+      await expect(page.getByText(AGENT_APP_PACKAGE, { exact: true })).toBeVisible();
+      return;
+    }
+
+    await page.getByLabel('Version code').fill(AGENT_APP_VERSION_CODE);
+    await page.getByLabel('APK file').setInputFiles(agentApkPath());
+    await page.getByRole('button', { name: 'Publish version' }).click();
+    await expect(page).toHaveURL(/\/admin\/apps\/[^?]+(\?ok=|\?error=conflict)/);
+    await expect(page.getByRole('link', { name: 'Download latest APK' })).toBeVisible();
     return;
   }
 
@@ -77,4 +89,5 @@ export async function ensureAgentAppPublished(page: Page) {
   }
   await expect(page.getByRole('heading', { name: 'App Detail' })).toBeVisible();
   await expect(page.getByText(AGENT_APP_PACKAGE, { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Download latest APK' })).toBeVisible();
 }

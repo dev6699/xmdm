@@ -48,7 +48,7 @@ func TestRegisterDeviceArtifactDownload(t *testing.T) {
 				MimeType:   "application/vnd.android.package-archive",
 			},
 		},
-	}, &fakeDeviceStore{}, &fakeArtifactStore{content: artifactBytes}, nil, "tenant-1", "com.xmdm.launcher")
+	}, &fakeDeviceStore{}, &fakeArtifactStore{content: artifactBytes}, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices/device-123/apps/app-1/versions/version-1/artifact", nil)
 	req.Header.Set(deviceSecretHeader, "device-secret")
@@ -114,7 +114,7 @@ func TestRegisterEnrollmentAgentAPKDownloadUsesLatestPublishedVersion(t *testing
 			PublishedAt: &latestPublishedAt,
 			CreatedAt:   latestPublishedAt,
 		},
-	}, &fakeDeviceStore{}, &fakeArtifactStore{content: artifactBytes}, nil, "tenant-1", "com.xmdm.launcher")
+	}, &fakeDeviceStore{}, &fakeArtifactStore{content: artifactBytes}, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/enrollment/agent.apk", nil)
 	res := httptest.NewRecorder()
@@ -143,7 +143,7 @@ func TestRegisterEnrollmentAgentAPKDownloadRejectsMissingAgent(t *testing.T) {
 	mux := http.NewServeMux()
 	Register(httpx.WithPrefix(mux, "/api/v1"), svc, &fakeAppStore{
 		apps: []apps.App{{RecordBase: apps.RecordBase{ID: "app-other", TenantID: "tenant-1", Status: apps.StatusActive}, PackageName: "com.example.other", Name: "Other"}},
-	}, &fakeDeviceStore{}, &fakeArtifactStore{}, nil, "tenant-1", "com.xmdm.launcher")
+	}, &fakeDeviceStore{}, &fakeArtifactStore{}, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/enrollment/agent.apk", nil)
 	res := httptest.NewRecorder()
@@ -169,7 +169,7 @@ func TestRegisterAppVersionsUsesQueryPagination(t *testing.T) {
 		},
 	}
 	mux := http.NewServeMux()
-	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, &fakeDeviceStore{}, &fakeArtifactStore{}, nil, "tenant-1", "com.xmdm.launcher")
+	Register(httpx.WithPrefix(mux, "/api/v1"), svc, store, &fakeDeviceStore{}, &fakeArtifactStore{}, nil, "tenant-1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/versions?page=2&limit=9", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.ID})
@@ -213,6 +213,9 @@ func (s *fakeAppStore) GetAppByPackageName(_ context.Context, _ string, packageN
 		}
 	}
 	return apps.App{}, httpx.ErrNotFound
+}
+func (s *fakeAppStore) UpsertSystemOwnedApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
+	return apps.App{}, nil
 }
 
 func (s *fakeAppStore) CreateApp(context.Context, string, apps.AppUpsert) (apps.App, error) {

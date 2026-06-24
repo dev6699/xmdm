@@ -19,9 +19,9 @@ test('admin can create a managed app in one flow', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Create managed app' })).toBeVisible();
   await expect(page.getByLabel('Publish immediately')).toHaveCount(0);
   await expect(page.getByRole('columnheader', { name: 'Created' })).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: 'ID' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Package' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'System owned' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Latest published' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();
 
@@ -54,14 +54,15 @@ test('admin can create a managed app in one flow', async ({ page }) => {
 
   await page.goto(dashboardPaths.apps);
   await expect(page.getByRole('columnheader', { name: 'Created' })).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: 'ID' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Package' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'System owned' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Latest published' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();
   const appRow = await page.locator('table tbody tr').filter({ hasText: appName }).first();
   await expect(appRow.getByRole('link', { name: appName, exact: true })).toHaveAttribute('href', dashboardPaths.appDetail(appId));
   await expect(appRow.getByRole('cell', { name: packageName, exact: true })).toBeVisible();
+  await expect(appRow).not.toContainText('✓');
   await expect(appRow).toContainText('v100 (#100)');
   await expect(page.getByRole('button', { name: 'Update app' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Retire app' })).toHaveCount(0);

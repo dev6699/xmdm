@@ -24,7 +24,6 @@ mqtt:
 device:
   commandPollInterval: 30s
   configSyncInterval: 15m
-  agentAppPackage: "com.xmdm.launcher"
 
 objectStorage:
   endpoint: "http://127.0.0.1:8333"

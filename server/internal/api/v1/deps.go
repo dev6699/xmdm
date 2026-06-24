@@ -88,7 +88,6 @@ func NewDeps(cfg *config.Config) Dependencies {
 		},
 		DisableRequestLogs: cfg.Server.DisableRequestLogs,
 		ServerPublicURL:    cfg.Server.PublicURL,
-		AgentAppPackage:    cfg.Device.AgentAppPackage,
 		TenantID:           bootstrap.SeedTenantID,
 		PluginManager:      plugins.Disabled(),
 	}

@@ -5,3 +5,4 @@ import "errors"
 var ErrNotFound = errors.New("not found")
 var ErrInvalidInput = errors.New("invalid input")
 var ErrConflict = errors.New("conflict")
+var ErrForbidden = errors.New("forbidden")

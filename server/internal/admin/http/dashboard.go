@@ -57,7 +57,6 @@ type DashboardDependencies struct {
 	Enrollment      enrollment.Repository
 	Runtime         enrollment.RuntimeSnapshot
 	ServerPublicURL string
-	AgentAppPackage string
 	PluginManager   *plugins.Manager
 	Audit           audit.Store
 	TenantID        string
@@ -2223,6 +2222,7 @@ func RegisterDashboard(mux httpx.Router, svc *auth.Service, deps DashboardDepend
 	mux.HandleFunc("/admin/apps/{id}/update", d.updateApp)
 	mux.HandleFunc("/admin/apps/{id}/retire", d.retireApp)
 	mux.HandleFunc("/admin/apps/{id}/versions/create", d.createAppVersion)
+	mux.HandleFunc("/admin/apps/{id}/versions/publish", d.publishAppVersion)
 	mux.HandleFunc("/admin/managed-files", d.managedFiles)
 	mux.HandleFunc("/admin/managed-files/{id}", d.managedFileDetail)
 	mux.HandleFunc("/admin/managed-files/{id}/download", d.downloadManagedFile)

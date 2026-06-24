@@ -63,7 +63,6 @@ func main() {
 		Runtime:         enrollment.RuntimeSnapshot{},
 		Artifacts:       artifactStore{},
 		ServerPublicURL: "http://127.0.0.1:39091",
-		AgentAppPackage: "com.xmdm.agent",
 		TenantID:        tenantID,
 	})
 	log.Fatal(http.ListenAndServe("127.0.0.1:39091", mux))
@@ -612,7 +611,7 @@ func fixtureApps(now time.Time) []apps.App {
 	items := []apps.App{
 		{RecordBase: apps.RecordBase{ID: "app-chrome", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -10), UpdatedAt: now}, PackageName: "com.android.chrome", Name: "Chrome"},
 		{RecordBase: apps.RecordBase{ID: "app-viewer", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -8), UpdatedAt: now.Add(-2 * time.Hour)}, PackageName: "com.example.viewer", Name: "Document Viewer"},
-		{RecordBase: apps.RecordBase{ID: "app-agent", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -7), UpdatedAt: now.Add(-30 * time.Minute)}, PackageName: "com.xmdm.agent", Name: "XMDM Agent"},
+		{RecordBase: apps.RecordBase{ID: "app-agent", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -7), UpdatedAt: now.Add(-30 * time.Minute)}, PackageName: "com.xmdm.agent", Name: "XMDM Agent", SystemOwned: true},
 		{RecordBase: apps.RecordBase{ID: "app-kiosk", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -6), UpdatedAt: now.Add(-90 * time.Minute)}, PackageName: "com.xmdm.kiosk", Name: "Kiosk Launcher"},
 		{RecordBase: apps.RecordBase{ID: "app-datawedge", TenantID: tenantID, Status: "active", CreatedAt: now.AddDate(0, 0, -5), UpdatedAt: now.Add(-6 * time.Hour)}, PackageName: "com.zebra.datawedge", Name: "DataWedge"},
 		{RecordBase: apps.RecordBase{ID: "app-old-demo", TenantID: tenantID, Status: "retired", CreatedAt: now.AddDate(0, 0, -20), UpdatedAt: now.AddDate(0, 0, -2)}, PackageName: "com.example.old", Name: "Old Demo App"},
@@ -643,6 +642,9 @@ func (s *appStore) GetAppByPackageName(_ context.Context, _ string, packageName 
 		}
 	}
 	return apps.App{}, httpx.ErrNotFound
+}
+func (s *appStore) UpsertSystemOwnedApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
+	return apps.App{}, nil
 }
 func (s *appStore) CreateApp(context.Context, string, apps.AppUpsert) (apps.App, error) {
 	return apps.App{}, nil

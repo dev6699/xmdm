@@ -62,7 +62,6 @@ type Dependencies struct {
 	Runtime            enrollment.RuntimeSnapshot
 	DisableRequestLogs bool
 	ServerPublicURL    string
-	AgentAppPackage    string
 	PluginManager      *plugins.Manager
 	ExtraRootMounts    []func(*http.ServeMux)
 	TenantID           string
@@ -90,7 +89,6 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 		Enrollment:      deps.Enrollment,
 		Runtime:         deps.Runtime,
 		ServerPublicURL: deps.ServerPublicURL,
-		AgentAppPackage: deps.AgentAppPackage,
 		PluginManager:   deps.PluginManager,
 		Audit:           deps.Audit,
 		TenantID:        deps.TenantID,
@@ -101,7 +99,7 @@ func NewMux(svc *auth.Service, deps Dependencies) http.Handler {
 	loghttp.Register(apiMux, svc, deps.Devices, deps.Logs, deps.TenantID)
 	deviceinfohttp.Register(apiMux, svc, deps.Devices, deps.DeviceInfo, deps.TenantID)
 	commandhttp.Register(apiMux, deps.Devices, deps.Commands, deps.TenantID)
-	apphttp.Register(apiMux, svc, deps.Apps, deps.Devices, deps.Artifacts, deps.Audit, deps.TenantID, deps.AgentAppPackage)
+	apphttp.Register(apiMux, svc, deps.Apps, deps.Devices, deps.Artifacts, deps.Audit, deps.TenantID)
 	filehttp.Register(apiMux, svc, deps.Files, deps.Artifacts, deps.Audit, deps.TenantID)
 	managedfilehttp.Register(apiMux, svc, deps.ManagedFiles, deps.Devices, deps.Artifacts, deps.TenantID)
 	certificatehttp.Register(apiMux, svc, deps.Devices, deps.Certificates, deps.Artifacts, deps.Audit, deps.TenantID)

@@ -14,13 +14,14 @@ import (
 	"xmdm/server/internal/artifacts"
 	"xmdm/server/internal/audit"
 	"xmdm/server/internal/auth"
+	"xmdm/server/internal/bootstrap"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
 )
 
 const deviceSecretHeader = "X-XMDM-Device-Secret"
 
-func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, devices device.Repository, artifactStore artifacts.Store, auditStore audit.Store, tenantID, agentAppPackage string) {
+func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, devices device.Repository, artifactStore artifacts.Store, auditStore audit.Store, tenantID string) {
 	mux.HandleFunc("/enrollment/agent.apk", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -30,13 +31,13 @@ func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, device
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		appRecord, version, err := latestPublishedAgentAppVersion(r.Context(), store, tenantID, agentAppPackage)
+		appRecord, version, err := latestPublishedAgentAppVersion(r.Context(), store, tenantID)
 		if err != nil {
 			if err == httpx.ErrNotFound {
 				http.NotFound(w, r)
 				return
 			}
-			log.Printf("agent app version lookup failed: package=%s err=%v", strings.TrimSpace(agentAppPackage), err)
+			log.Printf("agent app version lookup failed: package=%s err=%v", bootstrap.SeedAgentAppPackage, err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -221,12 +222,8 @@ func Register(mux httpx.Router, svc *auth.Service, store apps.Repository, device
 	})
 }
 
-func latestPublishedAgentAppVersion(ctx context.Context, store apps.Repository, tenantID, agentAppPackage string) (apps.App, apps.Version, error) {
-	packageName := strings.TrimSpace(agentAppPackage)
-	if packageName == "" {
-		packageName = "com.xmdm.launcher"
-	}
-	item, err := store.GetAppByPackageName(ctx, tenantID, packageName)
+func latestPublishedAgentAppVersion(ctx context.Context, store apps.Repository, tenantID string) (apps.App, apps.Version, error) {
+	item, err := store.GetAppByPackageName(ctx, tenantID, bootstrap.SeedAgentAppPackage)
 	if err != nil {
 		return apps.App{}, apps.Version{}, err
 	}
