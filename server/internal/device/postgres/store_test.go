@@ -88,15 +88,15 @@ func TestStoreListDevicesByFilterSearchBatteryAndStale(t *testing.T) {
 		`, item.id, bootstrap.SeedTenantID, item.name, enrollment.HashToken("secret-"+item.id), now)
 	}
 	mustExec(t, pool, `
-		INSERT INTO device_telemetry (id, tenant_id, device_id, observed_at, payload_json, created_at, updated_at)
+		INSERT INTO device_info (id, tenant_id, device_id, observed_at, payload_json, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5::jsonb, $4, $4);
 	`, "11111111-1111-1111-1111-111111111101", bootstrap.SeedTenantID, devices[0].id, now.Add(-2*time.Hour), `{"battery":{"level":84}}`)
 	mustExec(t, pool, `
-		INSERT INTO device_telemetry (id, tenant_id, device_id, observed_at, payload_json, created_at, updated_at)
+		INSERT INTO device_info (id, tenant_id, device_id, observed_at, payload_json, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5::jsonb, $4, $4);
 	`, "11111111-1111-1111-1111-111111111102", bootstrap.SeedTenantID, devices[1].id, now.Add(-2*time.Hour), `{"battery":{"level":"19.5"}}`)
 	mustExec(t, pool, `
-		INSERT INTO device_telemetry (id, tenant_id, device_id, observed_at, payload_json, created_at, updated_at)
+		INSERT INTO device_info (id, tenant_id, device_id, observed_at, payload_json, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5::jsonb, $4, $4);
 	`, "11111111-1111-1111-1111-111111111103", bootstrap.SeedTenantID, devices[2].id, now.Add(-26*time.Hour), `{"battery":{"level":71}}`)
 
@@ -154,7 +154,7 @@ func openDeviceTestPool(t *testing.T) *pgxpool.Pool {
 func resetDeviceTestDB(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	mustExec(t, pool, `
-		TRUNCATE TABLE device_telemetry, enrollment_tokens, audit_events, device_groups, devices, policies, groups, users, roles, tenants RESTART IDENTITY CASCADE;
+		TRUNCATE TABLE device_info, device_telemetry, enrollment_tokens, audit_events, device_groups, devices, policies, groups, users, roles, tenants RESTART IDENTITY CASCADE;
 	`)
 }
 
