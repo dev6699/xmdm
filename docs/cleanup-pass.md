@@ -2,7 +2,7 @@
 
 The cleanup pass is the last hardening maintenance sweep before release.
 
-It addresses the known backlog debris called out in the roadmap:
+It addresses cleanup candidates in the runtime data model:
 
 - stale enrollment tokens
 - stuck commands that are past their expiry time

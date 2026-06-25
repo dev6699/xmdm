@@ -1,12 +1,12 @@
 # App
 
-Android agent implementation lives here.
+Android launcher implementation lives here.
 
-This directory is reserved for the Kotlin device agent, its app modules, and related Android-specific build assets.
+The Kotlin launcher app and Android-specific build assets live here.
 
 For runtime behavior, keep this README as a developer workflow entry point and use:
 
-- [Agent App Lifecycle](../docs/agent-app-lifecycle.md) for enrollment, config sync, managed content, commands, logs, and device info.
+- [Launcher Lifecycle](../docs/launcher-lifecycle.md) for enrollment, config sync, managed content, commands, logs, and device info.
 - [Blueprint API details](../blueprint/02-api-contracts.md) for provisioning payloads and device enrollment API shapes.
 
 ## How To Work Here
@@ -78,48 +78,47 @@ The current scaffold uses:
 
 ### Layout
 
-The app uses a single-module Android project:
-
-- `app/build.gradle.kts` for the Android module build
-- `app/settings.gradle.kts` for Gradle setup
-- `app/src/main/AndroidManifest.xml` for app entry points
-- `app/src/main/java/com/xmdm/launcher/` for Kotlin sources
-- `app/src/main/res/` for XML layouts, strings, colors, and theme resources
+The app uses a single-module Android project with Kotlin sources, XML layouts,
+launcher entry points, and Gradle build configuration.
 
 ### Persistence
 
-The first local state store lives in `app/src/main/java/com/xmdm/launcher/state/`.
-It uses DataStore preferences to keep:
+The launcher uses DataStore preferences to keep:
 
 - bootstrap data
 - device identity and secret
 - policy snapshot cache metadata
 
-`MainActivity` reads the stored state on startup and shows whether each piece was restored.
-The store has unit coverage that verifies save, reload, and clear behavior.
+The launcher reads the stored state on startup and shows whether each piece was
+restored. Unit coverage verifies save, reload, and clear behavior.
 
 ### Bootstrap Parsing
 
-Bootstrap JSON is parsed in `app/src/main/java/com/xmdm/launcher/bootstrap/`.
-The parser accepts the Android provisioning payload shape described in the blueprint; manual and ADB intake should pass that JSON as `base64url:<payload>`.
+The parser accepts the Android provisioning payload shape described in the
+blueprint; manual and ADB intake should pass that JSON as
+`base64url:<payload>`.
 
-`MainActivity` accepts `base64url:<payload>` on the launch intent, parses it, and persists the normalized bootstrap state.
+The launcher accepts `base64url:<payload>` on the launch intent, parses it, and
+persists the normalized bootstrap state.
 Unit tests cover the canonical Android provisioning JSON and reject bare bootstrap keys.
 
 ### Enrollment And First Config
 
-When bootstrap data is present and the device is not yet enrolled, `MainActivity` now calls the enrollment API at `/api/v1/enrollment`.
-The response supplies the device secret and the initial signed config snapshot, which are persisted locally as device identity and policy cache state.
+When bootstrap data is present and the device is not yet enrolled, the launcher
+calls the enrollment API at `/api/v1/enrollment`.
+The response supplies the device secret, which is persisted locally as device identity state.
+After enrollment succeeds, the launcher fetches the signed config snapshot from `/api/v1/devices/{deviceId}/config` and persists the verified policy cache state.
 
 ### Retry Foundation
 
-Retry helpers live in `app/src/main/java/com/xmdm/launcher/retry/`.
-The current runner provides a small exponential-backoff utility that future config fetch and sync code can reuse.
+The launcher has an exponential-backoff utility used by config fetch and sync
+code.
 
 ### Config Sync
 
-Config sync lives in `app/src/main/java/com/xmdm/launcher/sync/`.
-It fetches a signed config snapshot through an injectable source, verifies the snapshot signature, retries transient fetch failures, and stores the last successful policy cache locally.
+Config sync fetches a signed config snapshot, verifies the snapshot signature,
+retries transient fetch failures, and stores the last successful policy cache
+locally.
 
 ### Device Owner Test
 

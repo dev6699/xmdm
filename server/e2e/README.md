@@ -1,6 +1,6 @@
 # Server E2E
 
-This directory holds the root-level end-to-end tests for the Go server. The tests run against the HTTP handler stack with a real Postgres database, but they do not start a socket listener.
+This directory holds the root-level end-to-end tests for the Go server. The tests run against the HTTP handler stack with a real PostgreSQL database, but they do not start a socket listener.
 When the real server is started for browser-driven tests, request-completion observability logs are disabled so the startup output stays readable.
 
 ## What Is Covered
@@ -82,10 +82,14 @@ Current coverage:
 - `TestDeviceLogsUpload`
 - `TestDeviceInfoReporting`
 - `TestKioskModeChrome`
+- `TestKioskExitChromeLocal`
 - `TestKioskExitChromeCommand`
+- `TestKioskAdminConfigSyncTwice`
+- `TestKioskStayAwakeWhilePluggedIn`
 - `TestPackageRules`
 - `TestPolicySync`
 - `TestCommandMQTT`
+- `TestCommandMQTTSyncConfig`
 - `TestCommandPolling`
 - `TestCommandBrokerOutageRecovery`
 
@@ -93,7 +97,7 @@ Current coverage:
 
 `TestDeviceInfoReporting` is the physical-device device-info test. It does all of the following in one run:
 
-1. Starts a real HTTP handler stack with a real Postgres test database.
+1. Starts a real HTTP handler stack with a real PostgreSQL test database.
 2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
 3. Creates the managed file and Chrome app fixtures used by the content install test.
 4. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
@@ -106,11 +110,16 @@ Current coverage:
 
 - `TestEnrollmentE2E` for server-simulated device enrollment and sync behavior.
 - `TestManagedAppsAndFiles` for real-device managed file and app delivery.
+- `TestManagedAppsSelfUpdate` for real-device launcher self-update through the managed-app policy path.
 - `TestDeviceLogsUpload` for real-device device log upload.
 - `TestDeviceInfoReporting` for real-device device info reporting and export.
 - `TestKioskModeChrome` for real-device kiosk enforcement using Chrome.
+- `TestKioskExitChromeLocal` for real-device local kiosk unlock.
+- `TestKioskAdminConfigSyncTwice` for repeated local kiosk config sync.
+- `TestKioskExitChromeCommand` for server-command kiosk unlock.
 - `TestPackageRules` for real-device package suspension enforcement.
 - `TestKioskStayAwakeWhilePluggedIn` for real-device kiosk stay-awake policy application.
+- `TestPolicySync` for real-device policy refresh after an admin update.
 - `TestCommandMQTT` for real-device MQTT command transport.
 - `TestCommandMQTTSyncConfig` for real-device MQTT command-triggered config sync.
 - `TestCommandPolling` for real-device HTTP polling command transport.
@@ -131,7 +140,7 @@ Current coverage:
 
 `TestManagedAppsAndFiles` is the physical-device content test. It does all of the following in one run:
 
-1. Starts a real HTTP handler stack with a real Postgres test database.
+1. Starts a real HTTP handler stack with a real PostgreSQL test database.
 2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
 3. Creates a managed file source blob with `POST /api/v1/files`.
 4. Creates a managed file record with `POST /api/v1/managed-files`.
@@ -146,7 +155,7 @@ Current coverage:
 
 `TestManagedAppsSelfUpdate` is the physical-device launcher self-update test. It does all of the following in one run:
 
-1. Starts a real HTTP handler stack with a real Postgres test database.
+1. Starts a real HTTP handler stack with a real PostgreSQL test database.
 2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
 3. Uploads a newer launcher APK artifact for `com.xmdm.launcher` and publishes it as the managed-app update.
 4. Uses adb to reinstall the older launcher build, clear launcher-private state, and reverse the server port onto the device.
@@ -159,7 +168,7 @@ Current coverage:
 
 `TestCertificatesApplied` is the physical-device certificate install test. It does all of the following in one run:
 
-1. Starts a real HTTP handler stack with a real Postgres test database.
+1. Starts a real HTTP handler stack with a real PostgreSQL test database.
 2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
 3. Uploads a certificate artifact and registers it as an active certificate.
 4. Uses adb to reinstall the launcher, clear launcher-private state, and reverse the server port onto the device.
@@ -196,7 +205,7 @@ Current coverage:
 
 `TestPackageRules` is the physical-device package policy test. It does all of the following in one run:
 
-1. Starts a real HTTP handler stack with a real Postgres test database.
+1. Starts a real HTTP handler stack with a real PostgreSQL test database.
 2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
 3. Uploads the Chrome APK artifact and publishes it as a managed app.
 4. Creates an active policy that blocks `com.android.chrome` through the policy restrictions JSON.
@@ -209,7 +218,7 @@ Current coverage:
 
 `TestPolicySync` is the physical-device policy refresh test. It does all of the following in one run:
 
-1. Starts a real HTTP handler stack with a real Postgres test database.
+1. Starts a real HTTP handler stack with a real PostgreSQL test database.
 2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
 3. Uploads the Chrome APK artifact and publishes it as a managed app.
 4. Creates a benign active policy, then later patches it to block `com.android.chrome`.
@@ -256,6 +265,8 @@ The command transport tests share the same device bootstrap and server setup, th
 5. Enqueues a `ping` command through `POST /admin/commands/create`.
 6. Verifies the device polls `GET /api/v1/devices/{deviceId}/commands`.
 7. Verifies the device acknowledges the command with `POST /api/v1/devices/{deviceId}/commands/{commandId}/ack`.
+
+`TestCommandPolling` uses the short poll interval from the signed config snapshot runtime bucket so it completes faster than the production 30-second default.
 
 Important details:
 
@@ -356,8 +367,6 @@ eval "$(../infra/test-db-env.sh)"
 cd server
 XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestCommandMQTTSyncConfig -count=1 ./e2e
 ```
-
-`TestCommandPolling` uses the short poll interval from the signed config snapshot runtime bucket so it completes faster than the production 30-second default.
 
 ### MQTT Outage Recovery Flow
 

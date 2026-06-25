@@ -1,12 +1,12 @@
 # Playwright Dashboard Workspace
 
-This workspace owns dashboard browser automation for XMDM.
+Dashboard browser automation for XMDM lives in this workspace.
 
 ## Layout
 
 - `playwright.config.ts` defines the browser projects and server startup.
 - `support/` holds shared helpers for routes, auth, and server wiring.
-- `tests/` will hold the Playwright specs.
+- `tests/` holds the Playwright specs.
 
 ## Setup
 
@@ -38,6 +38,6 @@ XMDM_DASHBOARD_URL=http://127.0.0.1:39092 npm test
 ## Environment
 
 - `XMDM_DASHBOARD_URL` overrides the dashboard base URL.
-- `XMDM_DASHBOARD_USERNAME` sets the login username for future specs.
-- `XMDM_DASHBOARD_PASSWORD` sets the login password for future specs.
+- `XMDM_DASHBOARD_USERNAME` sets the login username used by browser specs.
+- `XMDM_DASHBOARD_PASSWORD` sets the login password used by browser specs.
 - The default Playwright startup path resets the local compose stack with `docker compose down -v`, runs `infra/bootstrap-local.sh`, and then starts `server/cmd/server` with `XMDM_ADDR=:39092` and `XMDM_DISABLE_REQUEST_LOGS=1`.

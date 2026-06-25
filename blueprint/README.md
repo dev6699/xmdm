@@ -1,8 +1,13 @@
 # XMDM Technical Blueprint
 
-XMDM is the project name for a new self-hosted MDM platform rebuilt in Kotlin and Go.
+XMDM is a self-hosted Android MDM control plane implemented in Kotlin and Go.
+The blueprint records durable product and architecture decisions. Product docs,
+operator procedures, roadmaps, and status tracking live outside the blueprint.
 
-This folder is the source of truth for product scope, architecture, contracts, data model, operations, security, and future delivery planning for the XMDM codebase.
+Product and operator documentation starts at [../docs/README.md](../docs/README.md).
+If a blueprint decision conflicts with source code, tests, config, migrations, or
+current runbooks, verify the implementation and update or remove the stale
+blueprint text.
 
 The design rule is simple:
 
@@ -11,7 +16,8 @@ The design rule is simple:
 - state what was rejected
 - describe the resulting behavior
 
-If a choice is not written here, it is not decided yet.
+Present a choice as supported only when it is written here and implemented in
+the current repo.
 
 ## Reading Order
 
@@ -19,24 +25,21 @@ If a choice is not written here, it is not decided yet.
 2. [01-system-architecture.md](01-system-architecture.md)
 3. [02-api-contracts.md](02-api-contracts.md)
 4. [03-data-model.md](03-data-model.md)
-5. [04-device-agent.md](04-device-agent.md)
+5. [04-android-launcher.md](04-android-launcher.md)
 6. [05-server-services.md](05-server-services.md)
 7. [06-security-and-compliance.md](06-security-and-compliance.md)
 8. [07-operations.md](07-operations.md)
-9. [08-migration-plan.md](08-migration-plan.md)
-10. [09-roadmap-checklist.md](09-roadmap-checklist.md)
 
 ## Locked Decisions
 
 - Self-hosted, single-tenant first
-- Full enterprise parity as the target feature set
-- Kotlin Android agent
-- Go server, workers, and admin console
+- Kotlin Android launcher
+- Go server and admin dashboard
 - PostgreSQL as the system of record
 - Object storage for all binary artifacts
 - MQTT plus HTTP polling for push delivery
 - Plugin-capable backend from day one
-- Server-rendered admin console first, SPA later only if there is a hard need
+- Server-rendered admin dashboard first, SPA later only if there is a hard need
 
 ## What These Docs Define
 
@@ -48,17 +51,14 @@ If a choice is not written here, it is not decided yet.
 - the server-side control plane flow
 - the security model and trust boundaries
 - the deployment, backup, and operational model
-- the phased implementation roadmap and completion gates
-- the numbered implementation backlog with owners and dependencies
 
-## Delivery Standard
+## Documentation Standard
 
-Every major capability must eventually have:
+Every documented capability must have:
 
 - a written contract
 - a persisted state model
 - a failure mode
 - an operational path
 - a test plan
-- a checklist item in the roadmap
-- an owner and dependency chain in the backlog
+- implementation evidence or an explicit limitation

@@ -71,7 +71,7 @@ The release workflow gives you an APK file, but the server serves the launcher f
 2. Open the seeded managed app whose package name is `com.xmdm.launcher`.
 3. Upload the released `xmdm-launcher-<release-tag>.apk` file.
 4. Set the version code for the release.
-5. Open the app detail page and use `Publish new version` to add a new APK; do not rename or retire the seeded app row.
+5. Open the app detail page and use `Publish new version` to add a new APK; keep the seeded app name and status intact.
 6. Confirm the app detail page shows the latest published APK.
 7. Use that app's latest published version checksum in the enrollment QR or bootstrap payload.
 

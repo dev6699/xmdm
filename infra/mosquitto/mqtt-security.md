@@ -1,6 +1,6 @@
 # MQTT Security Contract
 
-This repository uses MQTT only for push delivery.
+XMDM uses MQTT for push delivery.
 
 Topic contract:
 

@@ -2,7 +2,8 @@
 
 Infrastructure and deployment assets live here.
 
-This directory is reserved for local development tooling, compose files, provisioning scripts, and operational automation.
+Local development tooling, compose files, provisioning scripts, and operational
+automation live here.
 
 Local development entry points:
 

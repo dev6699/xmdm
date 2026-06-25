@@ -1,11 +1,13 @@
 # Backup And Restore Drill
 
-This drill verifies that the Postgres-backed XMDM database can be backed up, restored into a fresh database, and validated against the source data.
+The backup and restore drill verifies that the PostgreSQL-backed XMDM database
+can be backed up, restored into a fresh database, and validated against the
+source data.
 
 ## Prerequisites
 
 - Docker Compose
-- The local Postgres service started by the repo
+- The local PostgreSQL service started by the repo
 - Existing schema migrations applied by `infra/test-db-env.sh`
 
 ## Run

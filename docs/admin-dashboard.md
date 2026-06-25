@@ -1,6 +1,7 @@
 # Admin Dashboard User Manual
 
-This manual covers the browser dashboard from login through the main operator workflows.
+The browser dashboard supports login, fleet review, policy and content
+management, command dispatch, and audit review.
 
 The screenshots in this guide are real captures from the implemented dashboard using sample data. Regenerate them with the tooling in [docs/tools/admin-dashboard-screenshots](tools/admin-dashboard-screenshots).
 
@@ -92,7 +93,9 @@ Open the user email to reach the detail page.
 4. Select `Update user`.
 5. Select `Retire user` from the same page when the account should no longer be active.
 
-When `Password` is left blank during update, the backend preserves the existing stored password hash. When a new password is supplied, the backend derives and stores the replacement hash; the dashboard never displays stored password hashes.
+When `Password` is left blank during update, the backend preserves the existing
+stored password hash. When a new password is supplied, the backend derives and
+stores the replacement hash; the dashboard keeps stored password hashes hidden.
 
 ### Roles
 
@@ -212,11 +215,15 @@ Open the app name to reach the detail page.
 3. Choose the APK file to upload.
 4. Select `Create managed app`.
 
-Use this flow only for the first app record. The dashboard seeds the standard agent app row during bootstrap, so the launcher package already exists on a fresh database and only needs new versions published later.
+Use this flow only for the first app record. The dashboard seeds the standard
+launcher app row during bootstrap, so the launcher package already exists on a
+fresh database and only needs new versions published later.
 The dashboard derives the artifact storage key, checksum, and file record from the uploaded APK on the server.
 The server derives the app version name from the version code for this flow, so operators only need to supply the code.
 The dashboard always publishes the new APK as another version for that app instead of creating a duplicate app row.
-Device enrollment QR generation uses the latest published version of the seeded agent app package, `com.xmdm.launcher`, and serves it from `/api/v1/enrollment/agent.apk`.
+Device enrollment QR generation uses the latest published version of the seeded
+launcher app package, `com.xmdm.launcher`, and serves it from
+`/api/v1/enrollment/agent.apk`.
 
 #### App Detail
 
@@ -345,7 +352,11 @@ The groups selector only shows active groups, uses a scrollable checkbox list, a
 5. Select `Update device`.
 6. Select `Retire device` from the same page when the device should no longer be active.
 
-The dashboard creates the device record first, with the selected policy linked to it. New devices are created in `pending` state. The device has a server-generated immutable device ID for enrollment and runtime auth, plus a separate display name for operators. Device secret rotation is disabled for now; the dashboard does not expose the stored secret hash.
+The dashboard creates the device record first, with the selected policy linked to
+it. New devices are created in `pending` state. The device has a
+server-generated immutable device ID for enrollment and runtime auth, plus a
+separate display name for operators. Device secrets are generated server-side
+and stored as hashes.
 The device detail page also keeps the assigned groups editable, and the command selectors only show active or enrolled devices and active groups.
 
 #### Generate Enrollment QR
@@ -414,6 +425,8 @@ The group detail page shows the devices that belong to the group.
 ![Command detail page](assets/admin-dashboard-command-detail.png)
 
 Use `/admin/commands` to send and inspect device commands.
+For command delivery behavior, statuses, and troubleshooting signals, see
+[Commands](commands.md).
 
 The commands list follows the scan-first pattern:
 
@@ -439,7 +452,7 @@ Open the command ID to reach the detail page.
 7. Select `Send command`.
 
 Invalid payload JSON or invalid expiry is rejected before enqueue.
-Broadcast is disabled in the dashboard UI for safety, although the API still accepts it for compatibility.
+The dashboard UI exposes device and group targeting for commands.
 
 #### Command Detail
 

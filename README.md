@@ -1,88 +1,84 @@
 # XMDM
 
-XMDM is a self-hosted device management system for Android fleets.
-
-It gives operators one place to:
-
-- enroll devices
-- publish the launcher app
-- push apps, files, and certificates
-- apply kiosk and policy rules
-- review device health, logs, and audits
-- send commands from the dashboard
-
-Core features:
-
-- Android device enrollment
-- launcher app deployment
-- policy-based kiosk control
-- managed apps, files, and certificates
-- device status, logs, and audit visibility
-- dashboard operations
-
-Premium features:
-
-These features are not included in the core version.
-
-- Remote control for supported devices, see [docs/admin-dashboard.md#premium-remote-control](docs/admin-dashboard.md#premium-remote-control)
-
-## Built For Operators
-
-XMDM keeps the day-to-day workflow simple:
-
-1. Bring up the server.
-2. Publish the launcher APK.
-3. Enroll a device.
-4. Manage the device from the dashboard.
-
-For the operator docs index, see [docs/README.md](docs/README.md).
-
-## Dashboard Preview
+XMDM is a self-hosted Android device management platform for operating managed
+launcher fleets with clear control, delivery, and recovery workflows.
 
 ![Dashboard overview](docs/assets/admin-dashboard-overview.png)
 
-The overview shows the current fleet state, alerts, and the most common actions at a glance.
+## What It Manages
 
-## Get Started
+- Android launcher enrollment through QR/provisioning payloads
+- Signed config sync for policy, runtime settings, apps, files, and certificates
+- Kiosk behavior and package rules applied by the launcher
+- Managed APK, file, and certificate delivery with checksum verification
+- Device commands over MQTT with HTTP polling recovery
+- Device telemetry, logs, device info, audit, health, backup, and release flows
 
-If you want to understand the project, start here:
+For the full capability matrix, see [docs/capabilities.md](docs/capabilities.md).
+For support limits, see [docs/support-boundaries.md](docs/support-boundaries.md).
 
-1. [Blueprint index](blueprint/00-product-principles.md)
-2. [Roadmap checklist](blueprint/09-roadmap-checklist.md)
-3. [Project status snapshot](PROJECT_STATUS.md)
-4. [Release artifacts and deployment](docs/release-artifacts-and-deployment.md)
+## Start Here
 
-## Local Setup
+| Goal | Start with |
+| --- | --- |
+| Evaluate the product shape | [Capability Matrix](docs/capabilities.md) |
+| Understand runtime architecture | [System Shape](#system-shape) |
+| Operate the dashboard | [Admin Dashboard](docs/admin-dashboard.md) |
+| Understand command delivery | [Commands](docs/commands.md) |
+| Work on the Android launcher | [Launcher Lifecycle](docs/launcher-lifecycle.md) |
+| Run locally | [Local Development](infra/local-dev.md) |
+| Ship a release | [Release Artifacts And Deployment](docs/release-artifacts-and-deployment.md) |
+
+## Local Run
+
+Start the local stack:
 
 ```sh
 cd infra
 docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --build
 ```
 
-To stop it:
+Stop it:
 
 ```sh
 cd infra
 docker compose -f docker-compose.yml -f docker-compose.server.yml down
 ```
 
-## Project Layout
+## System Shape
 
-- `app/`: Android launcher and agent
-- `server/`: backend services and admin console
-- `infra/`: deployment and local environment files
-- `docs/`: guides, runbooks, and release notes
+XMDM runtime architecture has four primary components: the admin dashboard,
+the control-plane API, the Android launcher, and the supporting data services.
+
+```mermaid
+flowchart TD
+    Admin[Admin browser] --> Dashboard[Go server-rendered dashboard]
+    Dashboard --> API[Go /api/v1 router]
+    API --> DB[(PostgreSQL)]
+    API --> Store[(S3-compatible object storage)]
+    API --> MQTT[(Mosquitto MQTT)]
+    Launcher[Android launcher app] --> API
+    Launcher --> MQTT
+    Launcher --> Store
+    Plugin[Optional plugin host] --> API
+```
+
+## Repository Map
+
+- `app/`: Android launcher
+- `server/`: Go server and admin dashboard
+- `infra/`: local runtime and deployment assets
+- `docs/`: product docs, operator guides, and runbooks
 - `blueprint/`: product and architecture decisions
-- `playwright/`: dashboard end-to-end coverage
+- `playwright/`: dashboard browser coverage
 
-## Release Flow
+## Premium Boundary
 
-Release artifacts are built through GitHub Actions and published as GitHub Release assets.
+Premium features live outside this core repository.
 
-- The Android launcher APK is published separately and then uploaded into the server’s managed app catalog
-- Production signing keys are stored as GitHub repository secrets
-- Server release details live in [docs/release-artifacts-and-deployment.md](docs/release-artifacts-and-deployment.md)
+- Remote control for supported devices:
+  [docs/admin-dashboard.md#premium-remote-control](docs/admin-dashboard.md#premium-remote-control)
 
-## Roadmap
+## Docs
 
-The current implementation snapshot lives in [PROJECT_STATUS.md](PROJECT_STATUS.md).
+The docs hub is [docs/README.md](docs/README.md).

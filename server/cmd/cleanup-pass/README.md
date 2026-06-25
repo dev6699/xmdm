@@ -1,6 +1,6 @@
 # Cleanup Pass
 
-This command runs the hardening cleanup pass for one tenant.
+The cleanup-pass command runs the hardening cleanup pass for one tenant.
 
 It reports and, with `--apply`, fixes:
 

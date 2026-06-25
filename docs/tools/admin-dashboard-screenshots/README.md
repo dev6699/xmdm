@@ -1,6 +1,6 @@
 # Admin Dashboard Screenshot Tooling
 
-This tooling regenerates the screenshots used by `docs/admin-dashboard.md`.
+Use this tooling to regenerate the screenshots used by `docs/admin-dashboard.md`.
 
 It uses:
 

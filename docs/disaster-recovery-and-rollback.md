@@ -1,6 +1,6 @@
 # Disaster Recovery And Rollback
 
-This runbook covers the recovery steps a maintainer should use when XMDM loses a core service, data store, or release rollout.
+Use this runbook when XMDM loses a core service, data store, or release rollout.
 
 It assumes the single-tenant self-hosted deployment described in [blueprint/07-operations.md](../blueprint/07-operations.md).
 
@@ -27,7 +27,7 @@ For an actual incident:
 
 ## Object Storage Recovery
 
-If the object store is lost or corrupted:
+If object storage is lost or corrupted:
 
 - restore the artifact bucket from the last object-storage backup
 - verify app, file, certificate, and managed-file downloads
@@ -39,12 +39,13 @@ If only a small set of artifacts is impacted, prefer targeted replacement over a
 
 If a release must be rolled back:
 
-1. Revert the server and agent release artifacts to the previous known-good version.
+1. Revert the server and launcher release artifacts to the previous known-good version.
 2. Restart the server with the previous image or binary.
-3. Reinstall or redeploy the matching Android agent build if the rollout touched agent code.
+3. Reinstall or redeploy the matching Android launcher build if the rollout touched launcher code.
 4. Verify admin login, device sync, and command push before re-enabling traffic.
 
-If the failed release included schema changes that are not backward compatible, do not attempt a binary-only rollback. Restore the pre-upgrade database backup first, then roll back the binaries.
+If the failed release included schema changes that require database rollback,
+restore the pre-upgrade database backup first, then roll back the binaries.
 
 ## Incident Checklist
 

@@ -1,6 +1,7 @@
 # Artifact Cleanup
 
-This command inspects the artifact table for rows that are no longer referenced by files, certificates, or app versions.
+The artifact cleanup command inspects artifact rows referenced by files,
+certificates, and app versions.
 
 Run a dry pass:
 
