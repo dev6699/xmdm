@@ -46,7 +46,7 @@ Implemented device controls are limited to the surfaces in
 - kiosk behavior
 - package rules
 - app, file, and certificate delivery
-- device logs, telemetry, device info, commands, and audit
+- device logs, telemetry API records, device info, commands, and audit
 
 Remote-control behavior belongs to optional premium extensions.
 

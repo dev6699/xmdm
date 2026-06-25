@@ -163,15 +163,15 @@ func (s *Store) ListDevicesByFilter(ctx context.Context, tenantID string, page p
 		LEFT JOIN device_groups dg ON dg.tenant_id = cd.tenant_id AND dg.device_id = cd.id
 		LEFT JOIN LATERAL (
 			SELECT
-				dt.observed_at,
+				di.observed_at,
 				CASE
-					WHEN jsonb_typeof(dt.payload_json->'battery'->'level') = 'number' THEN (dt.payload_json->'battery'->>'level')::numeric
-					WHEN jsonb_typeof(dt.payload_json->'battery'->'level') = 'string' AND (dt.payload_json->'battery'->>'level') ~ '^[0-9]+(\.[0-9]+)?$' THEN (dt.payload_json->'battery'->>'level')::numeric
+					WHEN jsonb_typeof(di.payload_json->'battery'->'level') = 'number' THEN (di.payload_json->'battery'->>'level')::numeric
+					WHEN jsonb_typeof(di.payload_json->'battery'->'level') = 'string' AND (di.payload_json->'battery'->>'level') ~ '^[0-9]+(\.[0-9]+)?$' THEN (di.payload_json->'battery'->>'level')::numeric
 					ELSE NULL
 				END AS battery_level
-			FROM device_telemetry dt
-			WHERE dt.tenant_id = $1 AND dt.device_id = cd.id
-			ORDER BY dt.observed_at DESC, dt.created_at DESC, dt.id DESC
+			FROM device_info di
+			WHERE di.tenant_id = $1 AND di.device_id = cd.id
+			ORDER BY di.observed_at DESC, di.created_at DESC, di.id DESC
 			LIMIT 1
 		) lt ON true
 		WHERE ($2::bool = false OR (lt.battery_level IS NOT NULL AND lt.battery_level <= $4))

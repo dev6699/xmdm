@@ -67,24 +67,24 @@ type overviewContentStats struct {
 }
 
 type overviewDashboardData struct {
-	Freshness            string
-	SummaryTitle         string
-	SummaryDetail        string
-	SummaryTone          string
-	CanWrite             bool
-	ServiceHealth        []serviceHealthCheck
-	Signals              []overviewSignal
-	Metrics              []overviewMetric
-	Attention            []overviewAttention
-	Chart                overviewChart
-	DeviceStatusChart    overviewChart
-	DeviceActivityChart  overviewChart
-	DeviceTelemetryChart overviewChart
-	CommandTrendChart    overviewChart
-	DeviceModelChart     overviewChart
-	CommandStats         overviewCommandStats
-	ContentStats         overviewContentStats
-	RecentActivity       []audit.Event
+	Freshness                string
+	SummaryTitle             string
+	SummaryDetail            string
+	SummaryTone              string
+	CanWrite                 bool
+	ServiceHealth            []serviceHealthCheck
+	Signals                  []overviewSignal
+	Metrics                  []overviewMetric
+	Attention                []overviewAttention
+	Chart                    overviewChart
+	DeviceStatusChart        overviewChart
+	DeviceActivityChart      overviewChart
+	DeviceInfoFreshnessChart overviewChart
+	CommandTrendChart        overviewChart
+	DeviceModelChart         overviewChart
+	CommandStats             overviewCommandStats
+	ContentStats             overviewContentStats
+	RecentActivity           []audit.Event
 }
 
 func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
@@ -237,7 +237,7 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ov.DeviceActivityChart = buildUniqueDeviceActivityChart(items, now, 7)
-		ov.DeviceTelemetryChart = buildDeviceTelemetryFreshnessChart(activeDeviceRecords, items, now)
+		ov.DeviceInfoFreshnessChart = buildDeviceInfoFreshnessChart(activeDeviceRecords, items, now)
 		staleActiveDevices = countStaleActiveDevices(activeDeviceRecords, items, now, 72*time.Hour)
 		ov.DeviceModelChart = buildDeviceModelChart(activeDeviceRecords, items, 6)
 	}
@@ -302,7 +302,7 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 		ackRate = ov.CommandStats.Acked * 100 / ov.CommandStats.Total
 	}
 	ov.Metrics = append(ov.Metrics,
-		telemetryFreshnessMetric(ov.DeviceTelemetryChart, totalDevices),
+		deviceInfoFreshnessMetric(ov.DeviceInfoFreshnessChart, totalDevices),
 		overviewMetric{Label: "Pending enrollment", Value: strconv.Itoa(pendingDevices), Detail: "Devices waiting to become active"},
 		overviewMetric{Label: "Command ack rate", Value: strconv.Itoa(ackRate) + "%", Detail: fmt.Sprintf("%d of %d recent commands acknowledged", ov.CommandStats.Acked, ov.CommandStats.Total)},
 		overviewMetric{Label: "Content items", Value: strconv.Itoa(totalContent), Detail: "Active apps, managed files, and certificates"},
@@ -320,13 +320,13 @@ func (d *dashboard) overview(w http.ResponseWriter, r *http.Request) {
 	if len(ov.DeviceActivityChart.Values) == 0 {
 		ov.DeviceActivityChart = buildOverviewChart(nil, now, 7)
 		ov.DeviceActivityChart.Title = "Device activity timeline"
-		ov.DeviceActivityChart.EmptyNote = "No device telemetry in the last 7 days."
+		ov.DeviceActivityChart.EmptyNote = "No device-info reports in the last 7 days."
 	}
-	if len(ov.DeviceTelemetryChart.Values) == 0 {
-		ov.DeviceTelemetryChart = overviewChart{Title: "Device telemetry freshness", EmptyNote: "No device telemetry freshness data available."}
+	if len(ov.DeviceInfoFreshnessChart.Values) == 0 {
+		ov.DeviceInfoFreshnessChart = overviewChart{Title: "Device-info freshness", EmptyNote: "No device-info freshness data available."}
 	}
 	if len(ov.DeviceModelChart.Values) == 0 {
-		ov.DeviceModelChart = overviewChart{Title: "Device model breakdown", EmptyNote: "No device model telemetry available."}
+		ov.DeviceModelChart = overviewChart{Title: "Device model breakdown", EmptyNote: "No device-info model data available."}
 	}
 	if len(ov.CommandTrendChart.Values) == 0 {
 		ov.CommandTrendChart = buildCommandDeliveryTrendChart(nil, now, 7)
@@ -418,7 +418,7 @@ func renderOverviewDashboard(data overviewDashboardData) template.HTML {
 	b.WriteString(`<div class="overview-device-grid">`)
 	b.WriteString(string(renderOverviewChartPanel(data.DeviceStatusChart, "devices", "/admin/devices", "View devices")))
 	b.WriteString(string(renderOverviewChartPanel(data.DeviceActivityChart, "Last 7 days", "/admin/devices", "View devices")))
-	b.WriteString(string(renderOverviewChartPanel(data.DeviceTelemetryChart, "freshness", "/admin/devices", "View devices")))
+	b.WriteString(string(renderOverviewChartPanel(data.DeviceInfoFreshnessChart, "freshness", "/admin/devices", "View devices")))
 	b.WriteString(string(renderOverviewChartPanel(data.CommandTrendChart, "Last 7 days", "/admin/commands", "View commands")))
 	b.WriteString(string(renderOverviewChartPanel(data.DeviceModelChart, "top models", "/admin/devices", "View devices")))
 	b.WriteString(string(renderOverviewCommandPanel(data.CommandStats)))
@@ -719,30 +719,30 @@ func buildDeviceStatusChart(counts device.StatusCounts) overviewChart {
 	return chartFromCounts(chart.Title, values, 8, chart.EmptyNote)
 }
 
-func buildDeviceTelemetryFreshnessChart(devices []device.Device, records any, now time.Time) overviewChart {
-	chart := overviewChart{Title: "Device telemetry freshness", EmptyNote: "No device telemetry freshness data available."}
+func buildDeviceInfoFreshnessChart(devices []device.Device, records any, now time.Time) overviewChart {
+	chart := overviewChart{Title: "Device-info freshness", EmptyNote: "No device-info freshness data available."}
 	if len(devices) == 0 {
 		return chart
 	}
 
-	latestByDevice := latestTelemetryByDevice(records)
+	latestByDevice := latestDeviceInfoByDevice(records)
 	counts := map[string]int{
-		"Last 24h":     0,
-		"2–7 days":     0,
-		"Stale 8+d":    0,
-		"No telemetry": 0,
+		"Last 24h":  0,
+		"2–7 days":  0,
+		"Stale 8+d": 0,
+		"No report": 0,
 	}
 
 	for _, item := range devices {
 		deviceKey := strings.TrimSpace(firstNonEmpty(item.RecordID(), item.ID, item.Name))
 		if deviceKey == "" {
-			counts["No telemetry"]++
+			counts["No report"]++
 			continue
 		}
 
 		latest, ok := latestByDevice[deviceKey]
 		if !ok {
-			counts["No telemetry"]++
+			counts["No report"]++
 			continue
 		}
 
@@ -757,7 +757,7 @@ func buildDeviceTelemetryFreshnessChart(devices []device.Device, records any, no
 		}
 	}
 
-	for _, label := range []string{"Last 24h", "2–7 days", "Stale 8+d", "No telemetry"} {
+	for _, label := range []string{"Last 24h", "2–7 days", "Stale 8+d", "No report"} {
 		value := counts[label]
 		if value <= 0 {
 			continue
@@ -769,7 +769,7 @@ func buildDeviceTelemetryFreshnessChart(devices []device.Device, records any, no
 	return chart
 }
 
-func latestTelemetryByDevice(records any) map[string]time.Time {
+func latestDeviceInfoByDevice(records any) map[string]time.Time {
 	latest := map[string]time.Time{}
 	values := reflect.ValueOf(records)
 	if values.Kind() != reflect.Slice && values.Kind() != reflect.Array {
@@ -835,7 +835,7 @@ func countStaleActiveDevices(devices []device.Device, records any, now time.Time
 	if len(devices) == 0 {
 		return 0
 	}
-	latestByDevice := latestTelemetryByDevice(records)
+	latestByDevice := latestDeviceInfoByDevice(records)
 	count := 0
 	for _, item := range devices {
 		if item.Status != device.StatusActive {
@@ -851,7 +851,7 @@ func countStaleActiveDevices(devices []device.Device, records any, now time.Time
 }
 
 func buildUniqueDeviceActivityChart(records any, now time.Time, days int) overviewChart {
-	chart := overviewChart{Title: "Device activity timeline", EmptyNote: "No device telemetry in the last 7 days."}
+	chart := overviewChart{Title: "Device activity timeline", EmptyNote: "No device-info reports in the last 7 days."}
 	if days <= 0 {
 		days = 7
 	}
@@ -934,11 +934,11 @@ func buildCommandDeliveryTrendChart(items any, now time.Time, days int) overview
 }
 
 func buildDeviceModelChart(devices []device.Device, records any, limit int) overviewChart {
-	chart := overviewChart{Title: "Device model breakdown", EmptyNote: "No device model telemetry available."}
+	chart := overviewChart{Title: "Device model breakdown", EmptyNote: "No device-info model data available."}
 	if len(devices) == 0 {
 		return chart
 	}
-	modelByDevice := latestTelemetryModelByDevice(records)
+	modelByDevice := latestDeviceInfoModelByDevice(records)
 	counts := map[string]int{}
 	for _, item := range devices {
 		deviceKey := strings.TrimSpace(firstNonEmpty(item.RecordID(), item.ID, item.Name))
@@ -954,7 +954,7 @@ func buildDeviceModelChart(devices []device.Device, records any, limit int) over
 	return chartFromCounts(chart.Title, counts, limit, chart.EmptyNote)
 }
 
-func latestTelemetryModelByDevice(records any) map[string]string {
+func latestDeviceInfoModelByDevice(records any) map[string]string {
 	type observedModel struct {
 		observed time.Time
 		model    string
@@ -990,7 +990,7 @@ func latestTelemetryModelByDevice(records any) map[string]string {
 	return result
 }
 
-func telemetryFreshnessMetric(chart overviewChart, totalDevices int) overviewMetric {
+func deviceInfoFreshnessMetric(chart overviewChart, totalDevices int) overviewMetric {
 	seenRecent := 0
 	for i, label := range chart.Labels {
 		normalized := strings.ToLower(strings.TrimSpace(label))
@@ -1005,9 +1005,9 @@ func telemetryFreshnessMetric(chart overviewChart, totalDevices int) overviewMet
 	}
 	detail := fmt.Sprintf("%d of %d devices seen in the last 24 hours", seenRecent, totalDevices)
 	if seenRecent > 0 {
-		detail += " · latest telemetry is current"
+		detail += " · latest device-info report is current"
 	}
-	return overviewMetric{Label: "Telemetry freshness", Value: value, Detail: detail}
+	return overviewMetric{Label: "Device-info freshness", Value: value, Detail: detail}
 }
 
 func chartFromCounts(title string, counts map[string]int, limit int, emptyNote string) overviewChart {

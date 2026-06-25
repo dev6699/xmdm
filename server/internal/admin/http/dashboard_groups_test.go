@@ -72,7 +72,7 @@ func TestGroupsPageRender(t *testing.T) {
 			t.Fatalf("unexpected group detail status: %d body=%s", rr.Code, rr.Body.String())
 		}
 		body := rr.Body.String()
-		for _, want := range []string{"Group Detail", "Review the cohort, then update or retire it from this page.", "Update group", "Retire group", "Field Devices", "Battery", "Last online", "No telemetry", "warehouse-tablet-001"} {
+		for _, want := range []string{"Group Detail", "Review the cohort, then update or retire it from this page.", "Update group", "Retire group", "Field Devices", "Battery", "Last report", "No device info", "warehouse-tablet-001"} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("group detail page missing %q: %s", want, body)
 			}

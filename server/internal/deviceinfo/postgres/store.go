@@ -129,6 +129,53 @@ func (s *Store) Search(ctx context.Context, tenantID string, filter deviceinfo.S
 	return items, nil
 }
 
+func (s *Store) ListLatestByDeviceIDs(ctx context.Context, tenantID string, deviceIDs []string) (map[string]deviceinfo.Record, error) {
+	if tenantID == "" {
+		return nil, httpx.ErrInvalidInput
+	}
+	ids := make([]string, 0, len(deviceIDs))
+	seen := map[string]struct{}{}
+	for _, id := range deviceIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return map[string]deviceinfo.Record{}, nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT ON (d.id) i.id::text, i.tenant_id::text, d.id::text, i.observed_at, i.payload_json
+		 FROM device_info i
+		 JOIN devices d ON d.id = i.device_id
+		 WHERE i.tenant_id = $1 AND d.id = ANY($2::uuid[])
+		 ORDER BY d.id, i.observed_at DESC, i.created_at DESC, i.id DESC`,
+		tenantID, ids,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make(map[string]deviceinfo.Record, len(ids))
+	for rows.Next() {
+		rec, err := scanSearchDeviceInfo(rows)
+		if err != nil {
+			return nil, err
+		}
+		items[rec.DeviceID] = rec
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 type deviceRow struct {
 	ID         string
 	SecretHash string

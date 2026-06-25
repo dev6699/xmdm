@@ -4,8 +4,8 @@
 
 XMDM is a self-hosted Android device-management control plane. It lets an
 administrator enroll Android devices, publish the launcher app, distribute apps,
-files, and certificates, apply kiosk and package policy, collect telemetry,
-device info, and logs, and send approved commands from the dashboard.
+files, and certificates, apply kiosk and package policy, collect device info and
+logs, store telemetry records, and send approved commands from the dashboard.
 
 The product scope in this repository is Android device management.
 

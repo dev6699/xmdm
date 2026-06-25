@@ -29,7 +29,7 @@
 | Command | Admin-issued device command and terminal result. |
 | Audit Event | Immutable admin/system event record. |
 | Enrollment Token | One-time bootstrap credential. |
-| Device Telemetry | Device heartbeat and operational metrics. |
+| Device Telemetry | Device-authenticated heartbeat and operational metrics. |
 | Device Log | Structured launcher log entry. |
 | Device Info | Device inventory and runtime snapshot. |
 
@@ -43,7 +43,7 @@
 - An app may have multiple immutable versions.
 - A managed file references one uploaded file and one target device path.
 - A command belongs to one device.
-- Device telemetry, logs, and device info belong to one device.
+- Device telemetry records, logs, and device info records belong to one device.
 
 ## Lifecycle Rules
 

@@ -24,7 +24,6 @@ import (
 	"xmdm/server/internal/logs"
 	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/policy"
-	"xmdm/server/internal/telemetry"
 
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -72,21 +71,10 @@ func (d *dashboard) devices(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	var telemetryByDevice map[string]telemetry.Record
-	if d.deps.Telemetry != nil && len(items) > 0 {
-		deviceIDs := make([]string, 0, len(items))
-		for _, item := range items {
-			if strings.TrimSpace(item.ID) != "" {
-				deviceIDs = append(deviceIDs, item.ID)
-			}
-		}
-		if len(deviceIDs) > 0 {
-			telemetryByDevice, err = d.deps.Telemetry.ListLatestByDeviceIDs(r.Context(), d.deps.TenantID, deviceIDs)
-			if err != nil {
-				d.renderPageError(w, r, session, "Devices", err)
-				return
-			}
-		}
+	deviceInfoByDevice, err := d.latestDeviceInfoByDeviceIDs(r.Context(), items)
+	if err != nil {
+		d.renderPageError(w, r, session, "Devices", err)
+		return
 	}
 	d.renderForSession(w, r, session, pageData{
 		Title:    "Devices",
@@ -102,7 +90,7 @@ func (d *dashboard) devices(w http.ResponseWriter, r *http.Request) {
 			Help:   "",
 			Submit: "Create device",
 		}},
-		Items: withPager(template.HTML(deviceFilterBarHTML(r, healthFilter, searchQuery)+string(devicesTable(items, policies, telemetryByDevice, true))), pagerHTML(r, page, limit, hasNext)),
+		Items: withPager(template.HTML(deviceFilterBarHTML(r, healthFilter, searchQuery)+string(devicesTable(items, policies, deviceInfoByDevice, true))), pagerHTML(r, page, limit, hasNext)),
 	})
 }
 
@@ -765,7 +753,23 @@ const (
 	staleOnlineThreshold       = 24 * time.Hour
 )
 
-func devicesTable(items []device.Device, policies []policy.Policy, telemetryByDevice map[string]telemetry.Record, includeTelemetryColumns bool) template.HTML {
+func (d *dashboard) latestDeviceInfoByDeviceIDs(ctx context.Context, items []device.Device) (map[string]deviceinfo.Record, error) {
+	if d.deps.DeviceInfo == nil || len(items) == 0 {
+		return nil, nil
+	}
+	deviceIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.ID) != "" {
+			deviceIDs = append(deviceIDs, item.ID)
+		}
+	}
+	if len(deviceIDs) == 0 {
+		return nil, nil
+	}
+	return d.deps.DeviceInfo.ListLatestByDeviceIDs(ctx, d.deps.TenantID, deviceIDs)
+}
+
+func devicesTable(items []device.Device, policies []policy.Policy, deviceInfoByDevice map[string]deviceinfo.Record, includeTelemetryColumns bool) template.HTML {
 	var rows strings.Builder
 	policyMap := policyNameByID(policies)
 	for _, item := range items {
@@ -785,9 +789,9 @@ func devicesTable(items []device.Device, policies []policy.Policy, telemetryByDe
 			label = item.ID
 		}
 		if includeTelemetryColumns {
-			lastOnline := template.HTML(esc("No telemetry"))
+			lastOnline := template.HTML(esc("No device info"))
 			battery := template.HTML(esc("Unknown"))
-			if rec, ok := telemetryByDevice[item.ID]; ok {
+			if rec, ok := deviceInfoByDevice[item.ID]; ok {
 				batteryLevel, batteryClass := batteryLevelInfo(rec.Payload)
 				battery = valueOrPillHTML(batteryLevel, batteryClass)
 				lastOnlineValue, lastOnlineClass := lastOnlineInfo(rec.ObservedAt)
@@ -812,7 +816,7 @@ func devicesTable(items []device.Device, policies []policy.Policy, telemetryByDe
 		))
 	}
 	if includeTelemetryColumns {
-		return tableHTML("", []string{"Created", "Name", "Status", "Battery", "Last online", "Policy"}, rows.String())
+		return tableHTML("", []string{"Created", "Name", "Status", "Battery", "Last report", "Policy"}, rows.String())
 	}
 	return tableHTML("", []string{"Created", "ID", "Name", "Policy", "Status"}, rows.String())
 }
@@ -842,7 +846,7 @@ func deviceFilterBarHTML(r *http.Request, active device.HealthFilter, searchQuer
 	b.WriteString(`<span class="device-filter-label">Filter</span>`)
 	b.WriteString(renderDeviceFilterLink(r, "All", device.HealthFilterAll, active))
 	b.WriteString(renderDeviceFilterLink(r, "Low battery", device.HealthFilterLowBattery, active))
-	b.WriteString(renderDeviceFilterLink(r, "Stale online", device.HealthFilterStale, active))
+	b.WriteString(renderDeviceFilterLink(r, "Stale report", device.HealthFilterStale, active))
 	b.WriteString(`</div>`)
 	return b.String()
 }
@@ -895,7 +899,7 @@ func batteryLevelInfo(payload map[string]any) (string, string) {
 
 func lastOnlineInfo(observedAt time.Time) (string, string) {
 	if observedAt.IsZero() {
-		return "No telemetry", ""
+		return "No device info", ""
 	}
 	if time.Since(observedAt) > staleOnlineThreshold {
 		return formatDashboardTime(observedAt), "status-pill status-stale"

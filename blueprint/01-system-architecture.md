@@ -17,7 +17,7 @@ state back to the server.
 - Device policy and content state flow from the server to the launcher through
   signed config snapshots.
 - PostgreSQL stores transactional state, relationships, audit, command state,
-  telemetry, logs, and device info.
+  telemetry API records, device logs, and device info.
 - Object storage stores binary artifacts referenced by server metadata.
 - PostgreSQL command state is authoritative; MQTT is a push channel, and HTTP
   polling is the recovery path.

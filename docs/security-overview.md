@@ -16,7 +16,8 @@ Dashboard mutations keep CSRF and permission checks enabled.
 
 Enrollment starts with an enrollment token. After enrollment, the server issues
 device identity material and device routes authenticate the device before
-accepting telemetry, logs, device info, command polling, or artifact access.
+accepting telemetry ingestion, logs, device info, command polling, or artifact
+access.
 
 Device credentials are scoped to a device and are stored server-side as hashes.
 

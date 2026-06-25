@@ -175,6 +175,24 @@ Managed files are applied before managed apps so content and config can settle b
   - `GET /api/v1/device-info`
 - Device info is emitted after enrollment, then again when config, managed apps, or managed files change.
 
+### Device Info And Telemetry Boundary
+
+- Device info is the launcher inventory and applied-state snapshot.
+- Device-info reports include:
+  - device identifier and server URL
+  - launcher package and version details
+  - Android build, hardware, ABI, OS version, SDK, and security patch details
+  - device serial when Android permits access
+  - battery level, charging state, and power source
+  - device-owner status
+  - config revision, policy version, and kiosk-policy flag when a policy cache exists
+  - certificate, managed-app, and managed-file bucket versions when present
+  - installed CA certificate count when the launcher can read it as device owner
+- Telemetry is a separate device-authenticated health/activity record for
+  heartbeat, battery, network, location, and app-state signals.
+- Dashboard freshness views read device-info report times. Telemetry records
+  remain a separate API surface.
+
 ### 10. Device Log Categories
 
 The device currently emits structured logs for these launcher sources:

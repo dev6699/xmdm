@@ -12,7 +12,7 @@ launcher fleets with clear control, delivery, and recovery workflows.
 - Kiosk behavior and package rules applied by the launcher
 - Managed APK, file, and certificate delivery with checksum verification
 - Device commands over MQTT with HTTP polling recovery
-- Device telemetry, logs, device info, audit, health, backup, and release flows
+- Telemetry API records, device logs, device info, audit, health, backup, and release flows
 
 For the full capability matrix, see [docs/capabilities.md](docs/capabilities.md).
 For support limits, see [docs/support-boundaries.md](docs/support-boundaries.md).

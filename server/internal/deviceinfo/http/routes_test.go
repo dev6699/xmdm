@@ -92,6 +92,10 @@ func (s *fakeDeviceInfoStore) Search(context.Context, string, deviceinfo.SearchF
 	return s.searchRecords, nil
 }
 
+func (s *fakeDeviceInfoStore) ListLatestByDeviceIDs(context.Context, string, []string) (map[string]deviceinfo.Record, error) {
+	return map[string]deviceinfo.Record{}, nil
+}
+
 type fakeDeviceStore struct{}
 
 func (s *fakeDeviceStore) ListDevices(context.Context, string, pagination.Params) ([]device.Device, error) {

@@ -3,7 +3,8 @@
 ## Server Design
 
 The Go backend owns admin auth, dashboard rendering, enrollment, policy/content
-state, artifact metadata and storage access, device telemetry/logs/info,
+state, artifact metadata and storage access, telemetry records, device logs and
+device info,
 command state, MQTT publishing, audit, and plugin registration.
 
 The server must start and operate core enrollment, sync, dashboard, and command

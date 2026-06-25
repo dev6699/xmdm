@@ -10,8 +10,8 @@ import (
 
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/device"
+	"xmdm/server/internal/deviceinfo"
 	"xmdm/server/internal/pagination"
-	"xmdm/server/internal/telemetry"
 )
 
 func TestDeviceMutationsRecordAudit(t *testing.T) {
@@ -73,8 +73,8 @@ func TestDevicesPageShowsBatteryAndLastOnline(t *testing.T) {
 			Name:       "tablet-001",
 		},
 	}
-	telemetryStore := &recordingTelemetryStore{
-		records: map[string]telemetry.Record{
+	deviceInfoStore := &recordingDeviceInfoStore{
+		records: map[string]deviceinfo.Record{
 			"device-1": {
 				DeviceID:   "device-1",
 				TenantID:   "tenant-1",
@@ -85,9 +85,9 @@ func TestDevicesPageShowsBatteryAndLastOnline(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	RegisterDashboard(mux, svc, DashboardDependencies{
-		Devices:   store,
-		Telemetry: telemetryStore,
-		TenantID:  "tenant-1",
+		Devices:    store,
+		DeviceInfo: deviceInfoStore,
+		TenantID:   "tenant-1",
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/devices", nil)
@@ -99,7 +99,7 @@ func TestDevicesPageShowsBatteryAndLastOnline(t *testing.T) {
 		t.Fatalf("unexpected devices page status: %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Created", "Name", "Status", "Battery", "Last online", "Policy", "17%", formatDashboardTime(observedAt), "tablet-001", "status-low", "status-stale"} {
+	for _, want := range []string{"Created", "Name", "Status", "Battery", "Last report", "Policy", "17%", formatDashboardTime(observedAt), "tablet-001", "status-low", "status-stale"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected devices page body to contain %q, got %s", want, body)
 		}
@@ -116,8 +116,8 @@ func TestDevicesPageShowsDecimalBatteryLevel(t *testing.T) {
 			Name:       "decimal-tablet",
 		},
 	}
-	telemetryStore := &recordingTelemetryStore{
-		records: map[string]telemetry.Record{
+	deviceInfoStore := &recordingDeviceInfoStore{
+		records: map[string]deviceinfo.Record{
 			"device-decimal": {
 				DeviceID:   "device-decimal",
 				TenantID:   "tenant-1",
@@ -128,9 +128,9 @@ func TestDevicesPageShowsDecimalBatteryLevel(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	RegisterDashboard(mux, svc, DashboardDependencies{
-		Devices:   store,
-		Telemetry: telemetryStore,
-		TenantID:  "tenant-1",
+		Devices:    store,
+		DeviceInfo: deviceInfoStore,
+		TenantID:   "tenant-1",
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/devices", nil)
@@ -174,8 +174,8 @@ func TestDevicesPageFiltersByHealth(t *testing.T) {
 			string(device.HealthFilterStale):      []device.Device{staleDevice},
 		},
 	}
-	telemetryStore := &recordingTelemetryStore{
-		records: map[string]telemetry.Record{
+	deviceInfoStore := &recordingDeviceInfoStore{
+		records: map[string]deviceinfo.Record{
 			"device-low": {
 				DeviceID:   "device-low",
 				TenantID:   "tenant-1",
@@ -198,9 +198,9 @@ func TestDevicesPageFiltersByHealth(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	RegisterDashboard(mux, svc, DashboardDependencies{
-		Devices:   store,
-		Telemetry: telemetryStore,
-		TenantID:  "tenant-1",
+		Devices:    store,
+		DeviceInfo: deviceInfoStore,
+		TenantID:   "tenant-1",
 	})
 
 	assertPage := func(path string, want []string, dontWant []string) {
@@ -225,7 +225,7 @@ func TestDevicesPageFiltersByHealth(t *testing.T) {
 	}
 
 	assertPage("/admin/devices?health=low", []string{"low-tablet", "17%", "Low battery"}, []string{"stale-tablet", "healthy-tablet"})
-	assertPage("/admin/devices?health=stale", []string{"stale-tablet", "82%", "Stale online"}, []string{"low-tablet", "healthy-tablet"})
+	assertPage("/admin/devices?health=stale", []string{"stale-tablet", "82%", "Stale report"}, []string{"low-tablet", "healthy-tablet"})
 }
 
 func TestDevicesPageSearchesByName(t *testing.T) {
@@ -347,10 +347,18 @@ func (s *recordingDeviceStore) listItems() []device.Device {
 	return nil
 }
 
-type recordingTelemetryStore struct {
-	records map[string]telemetry.Record
+type recordingDeviceInfoStore struct {
+	records map[string]deviceinfo.Record
 }
 
-func (s *recordingTelemetryStore) ListLatestByDeviceIDs(context.Context, string, []string) (map[string]telemetry.Record, error) {
+func (s *recordingDeviceInfoStore) Upload(context.Context, string, string, string, deviceinfo.UploadRequest) ([]deviceinfo.Record, error) {
+	return nil, nil
+}
+
+func (s *recordingDeviceInfoStore) Search(context.Context, string, deviceinfo.SearchFilter) ([]deviceinfo.Record, error) {
+	return nil, nil
+}
+
+func (s *recordingDeviceInfoStore) ListLatestByDeviceIDs(context.Context, string, []string) (map[string]deviceinfo.Record, error) {
 	return s.records, nil
 }

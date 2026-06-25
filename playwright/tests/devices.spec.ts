@@ -154,7 +154,7 @@ test('admin can edit and retire a device from the detail page', async ({ page })
     await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Battery' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'Last online' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Last report' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Policy' })).toBeVisible();
     await expect(page.getByRole('group', { name: 'Groups' })).toBeVisible();
     await page.getByLabel('Display name').fill(deviceName);

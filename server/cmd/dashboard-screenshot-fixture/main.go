@@ -29,7 +29,6 @@ import (
 	"xmdm/server/internal/pagination"
 	"xmdm/server/internal/policy"
 	"xmdm/server/internal/roles"
-	"xmdm/server/internal/telemetry"
 	"xmdm/server/internal/users"
 )
 
@@ -57,7 +56,6 @@ func main() {
 		Commands:        &commandStore{now: now},
 		Logs:            &logStore{now: now},
 		DeviceInfo:      &deviceInfoStore{now: now},
-		Telemetry:       &telemetryStore{now: now},
 		Audit:           &auditStore{now: now},
 		Enrollment:      &enrollmentStore{now: now},
 		Runtime:         enrollment.RuntimeSnapshot{},
@@ -375,8 +373,6 @@ type deviceStore struct {
 	policyID string
 }
 
-type telemetryStore struct{ now time.Time }
-
 func fixtureDevices(now time.Time) []device.Device {
 	policyBaseline := "policy-baseline"
 	policyKiosk := "policy-kiosk"
@@ -416,8 +412,8 @@ func (s *deviceStore) ListDevicesByFilter(_ context.Context, _ string, _ paginat
 	if health != "" && health != "all" && !lowOnly && !staleOnly {
 		return items, nil
 	}
-	latest := map[string]telemetry.Record{}
-	for _, item := range fixtureTelemetry(s.now) {
+	latest := map[string]deviceinfo.Record{}
+	for _, item := range fixtureDeviceInfo(s.now) {
 		latest[item.DeviceID] = item
 	}
 	filtered := make([]device.Device, 0, len(items))
@@ -431,7 +427,7 @@ func (s *deviceStore) ListDevicesByFilter(_ context.Context, _ string, _ paginat
 		if !ok {
 			healthMatch = staleOnly
 		} else {
-			battery := telemetryBatteryLevel(record)
+			battery := deviceInfoBatteryLevel(record)
 			lowBattery := battery != nil && *battery <= 20
 			stale := record.ObservedAt.IsZero() || !record.ObservedAt.After(cutoff)
 			switch {
@@ -521,7 +517,7 @@ func (s *deviceStore) Authenticate(context.Context, string, string, string) (dev
 	return device.Device{}, nil
 }
 
-func telemetryBatteryLevel(record telemetry.Record) *float64 {
+func deviceInfoBatteryLevel(record deviceinfo.Record) *float64 {
 	battery, ok := record.Payload["battery"].(map[string]any)
 	if !ok {
 		return nil
@@ -545,61 +541,6 @@ func telemetryBatteryLevel(record telemetry.Record) *float64 {
 	default:
 		return nil
 	}
-}
-
-func fixtureTelemetry(now time.Time) []telemetry.Record {
-	type sample struct {
-		deviceID string
-		hoursAgo int
-		level    any
-	}
-	samples := []sample{
-		{deviceID: "device-001", hoursAgo: 1, level: 91},
-		{deviceID: "device-002", hoursAgo: 2, level: 78},
-		{deviceID: "device-003", hoursAgo: 3, level: 64},
-		{deviceID: "device-004", hoursAgo: 5, level: 88},
-		{deviceID: "device-005", hoursAgo: 8, level: 52},
-		{deviceID: "device-006", hoursAgo: 2, level: 19},
-		{deviceID: "device-007", hoursAgo: 29, level: 72},
-		{deviceID: "device-008", hoursAgo: 4, level: 73},
-		{deviceID: "device-009", hoursAgo: 6, level: 80},
-		{deviceID: "device-010", hoursAgo: 1, level: 68},
-		{deviceID: "device-012", hoursAgo: 33, level: 88},
-		{deviceID: "device-013", hoursAgo: 7, level: 84},
-		{deviceID: "device-014", hoursAgo: 3, level: 15},
-		{deviceID: "device-015", hoursAgo: 2, level: 96},
-	}
-	rows := make([]telemetry.Record, 0, len(samples))
-	for i, sample := range samples {
-		rows = append(rows, telemetry.Record{
-			ID:         fmt.Sprintf("telemetry-%03d", i+1),
-			TenantID:   tenantID,
-			DeviceID:   sample.deviceID,
-			ObservedAt: now.Add(-time.Duration(sample.hoursAgo) * time.Hour),
-			Payload: map[string]any{
-				"heartbeat": map[string]any{"online": true},
-				"battery":   map[string]any{"level": sample.level},
-			},
-		})
-	}
-	return rows
-}
-
-func (s *telemetryStore) ListLatestByDeviceIDs(_ context.Context, _ string, deviceIDs []string) (map[string]telemetry.Record, error) {
-	deviceSet := map[string]struct{}{}
-	for _, deviceID := range deviceIDs {
-		if deviceID == "" {
-			continue
-		}
-		deviceSet[deviceID] = struct{}{}
-	}
-	rows := map[string]telemetry.Record{}
-	for _, item := range fixtureTelemetry(s.now) {
-		if _, ok := deviceSet[item.DeviceID]; ok {
-			rows[item.DeviceID] = item
-		}
-	}
-	return rows, nil
 }
 
 type appStore struct {
@@ -1046,7 +987,7 @@ func fixtureDeviceInfo(now time.Time) []deviceinfo.Record {
 					observedAt = now.Add(-time.Duration(30+(i*9+sample*7)%90) * time.Hour)
 				}
 			} else {
-				// Stale/pending/retired devices have older telemetry spread across the week.
+				// Stale, pending, and retired devices have older reports spread across the week.
 				observedAt = now.Add(-time.Duration(36+i*3+sample*6) * time.Hour)
 			}
 			battery := profile.baseBatt - sample*7 - i%5
@@ -1059,11 +1000,13 @@ func fixtureDeviceInfo(now time.Time) []deviceinfo.Record {
 				DeviceID:   profile.deviceID,
 				ObservedAt: observedAt,
 				Payload: map[string]any{
-					"batteryLevel": battery,
+					"battery": map[string]any{
+						"level":    battery,
+						"charging": (seq+i)%4 == 0,
+					},
 					"model":        profile.model,
 					"android":      profile.android,
 					"network":      profile.network,
-					"charging":     (seq+i)%4 == 0,
 					"serialNumber": fmt.Sprintf("SN-%03d-%04x", i+1, 9000+seq),
 				},
 			})
@@ -1082,6 +1025,26 @@ func (s *deviceInfoStore) Search(_ context.Context, _ string, filter deviceinfo.
 		rows = append(rows, item)
 		if filter.Limit > 0 && len(rows) >= filter.Limit {
 			break
+		}
+	}
+	return rows, nil
+}
+
+func (s *deviceInfoStore) ListLatestByDeviceIDs(_ context.Context, _ string, deviceIDs []string) (map[string]deviceinfo.Record, error) {
+	deviceSet := map[string]struct{}{}
+	for _, deviceID := range deviceIDs {
+		if deviceID == "" {
+			continue
+		}
+		deviceSet[deviceID] = struct{}{}
+	}
+	rows := map[string]deviceinfo.Record{}
+	for _, item := range fixtureDeviceInfo(s.now) {
+		if _, ok := deviceSet[item.DeviceID]; !ok {
+			continue
+		}
+		if current, exists := rows[item.DeviceID]; !exists || item.ObservedAt.After(current.ObservedAt) {
+			rows[item.DeviceID] = item
 		}
 	}
 	return rows, nil

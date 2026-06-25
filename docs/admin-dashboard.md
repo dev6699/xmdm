@@ -42,9 +42,9 @@ The overview is the fleet command center. It combines:
 - a fleet health banner with active, pending, retired/wiped device counts, active policy count, command acknowledgement summary, and recent audit activity
 - quick actions for managing devices, reviewing policies, and viewing the audit log
 - live health cards for device readiness, policy library, content readiness, command health, and audit activity
-- metric cards for telemetry freshness, pending enrollment, command acknowledgement rate, and content items, each with a compact visual indicator
+- metric cards for device-info freshness, pending enrollment, command acknowledgement rate, and content items, each with a compact visual indicator
 - a needs-attention panel that surfaces active operational issues such as pending enrollment, stale active devices, failed commands, and commands awaiting acknowledgement
-- device-focused charts for status distribution, activity timeline, telemetry freshness, and model breakdown
+- device-focused charts for status distribution, device-info activity, device-info freshness, and model breakdown
 - command-focused panels for delivery volume over time and delivery status breakdown
 - content library and recent activity panels at the bottom of the page
 
@@ -323,12 +323,12 @@ The device list follows the scan-first pattern:
 - `Name`
 - `Status`
 - `Battery`
-- `Last online`
+- `Last report`
 - `Policy`
 
 Open the device name to reach the detail page.
 
-Use the search field above the table to narrow the list by device name, then use the filter chips to switch between `All`, `Low battery`, and `Stale online` devices.
+Use the search field above the table to narrow the list by device name, then use the filter chips to switch between `All`, `Low battery`, and `Stale report` devices.
 
 #### Create A Device
 

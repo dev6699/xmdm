@@ -33,8 +33,8 @@
 - Enrollment consumes a one-time token and returns device credentials.
 - Config sync returns a signed snapshot that the launcher verifies before
   applying state.
-- Device telemetry, logs, device info, command polling, command acknowledgement,
-  and artifact downloads require device authentication.
+- Telemetry ingestion, device logs, device info, command polling, command
+  acknowledgement, and artifact downloads require device authentication.
 - Command identifiers are idempotency keys across MQTT and polling.
 - Artifact metadata includes checksums, and the launcher verifies downloaded
   content before applying it.

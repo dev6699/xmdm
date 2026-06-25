@@ -8,7 +8,7 @@
 | Admin auth and RBAC | Admin login/session handling with permissions `admin.read`, `admin.write`, `devices.read`, and `devices.write`. |
 | Enrollment | Enrollment token, QR/provisioning payload, device secret issuance, and config snapshot flow. |
 | Device config sync | Signed config snapshot fetch and launcher-side verification before applying state. |
-| Device telemetry | Device telemetry upload and dashboard usage. |
+| Telemetry API | Device-authenticated telemetry ingestion for heartbeat, battery, network, location, and app-state records. |
 | Managed apps | App/version records, artifact storage, policy assignment, launcher download/install coordination, checksum verification, and launcher self-update support. |
 | Managed files | File upload, managed-file policy assignment, device artifact download, optional variable replacement, and checksum headers. |
 | Managed certificates | Certificate records, artifact delivery, policy assignment, and launcher certificate install coordination. |
@@ -37,5 +37,5 @@
 | --- | --- |
 | Endpoint platform | XMDM manages Android launcher devices in this repository. |
 | Deployment model | XMDM is single-tenant self-hosted at runtime. |
-| Device controls | Current controls center on launcher kiosk behavior, package rules, managed content, telemetry, logs, device info, commands, and audit. |
+| Device controls | Current controls center on launcher kiosk behavior, package rules, managed content, telemetry API records, logs, device info, commands, and audit. |
 | Android coverage | Device-owner provisioning and launcher behavior depend on Android/OEM behavior. See [Support Boundaries](support-boundaries.md). |

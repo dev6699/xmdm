@@ -4,8 +4,8 @@
 
 The Android launcher is the device-side runtime. It enrolls the device, persists
 local state, fetches signed config snapshots, applies policy/content assignments,
-handles kiosk behavior, executes supported commands, and uploads telemetry,
-device info, and logs.
+handles kiosk behavior, executes supported commands, and uploads device info and
+logs.
 
 The server owns policy truth. The launcher owns local application of the latest
 accepted snapshot.

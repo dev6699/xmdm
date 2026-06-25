@@ -34,7 +34,6 @@ import (
 	"xmdm/server/internal/policy"
 	"xmdm/server/internal/push"
 	"xmdm/server/internal/roles"
-	"xmdm/server/internal/telemetry"
 	"xmdm/server/internal/users"
 )
 
@@ -48,7 +47,6 @@ type DashboardDependencies struct {
 	Logs            logsRepository
 	Commands        commands.Repository
 	DeviceInfo      deviceInfoRepository
-	Telemetry       telemetryRepository
 	Certificates    certificates.Repository
 	Artifacts       artifacts.Store
 	Groups          group.Repository
@@ -69,10 +67,7 @@ type logsRepository interface {
 
 type deviceInfoRepository interface {
 	Search(ctx context.Context, tenantID string, filter deviceinfo.SearchFilter) ([]deviceinfo.Record, error)
-}
-
-type telemetryRepository interface {
-	ListLatestByDeviceIDs(ctx context.Context, tenantID string, deviceIDs []string) (map[string]telemetry.Record, error)
+	ListLatestByDeviceIDs(ctx context.Context, tenantID string, deviceIDs []string) (map[string]deviceinfo.Record, error)
 }
 
 type dashboard struct {
