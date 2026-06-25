@@ -15,12 +15,12 @@ jobs:
     name: Docs Link And Lint Checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Check docs links and style
         run: node scripts/check-doc-links.mjs
@@ -29,33 +29,30 @@ jobs:
     name: Full Server Tests Excluding E2E
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
-      - name: Prepare server test database
+      - name: Run full server tests
         run: |
           cd infra
           eval "$(./test-db-env.sh)"
-          echo "XMDM_TEST_POSTGRES_DSN=$XMDM_TEST_POSTGRES_DSN" >> "$GITHUB_ENV"
-
-      - name: Run full server tests
-        run: |
-          cd server
-          GOCACHE=/tmp/go-build go test -p 1 $(go list ./... | grep -v '/e2e')
+          test -n "${XMDM_TEST_POSTGRES_DSN:-}"
+          cd ../server
+          GOCACHE=/tmp/go-build go test -p 1 -count=1 $(go list ./... | grep -v '/e2e$')
 
   server-build:
     name: Server Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
@@ -69,10 +66,13 @@ jobs:
     env:
       GRADLE_USER_HOME: /tmp/xmdm-gradle
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Prepare Gradle cache directories
+        run: mkdir -p "$GRADLE_USER_HOME/caches" "$GRADLE_USER_HOME/wrapper"
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -88,10 +88,13 @@ jobs:
     env:
       GRADLE_USER_HOME: /tmp/xmdm-gradle
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Prepare Gradle cache directories
+        run: mkdir -p "$GRADLE_USER_HOME/caches" "$GRADLE_USER_HOME/wrapper"
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -107,17 +110,17 @@ jobs:
     env:
       GOCACHE: /tmp/go-build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: playwright/package-lock.json
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
