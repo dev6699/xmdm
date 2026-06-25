@@ -7,6 +7,7 @@ import (
 )
 
 type EntryUpsert struct {
+	ID         string         `json:"id,omitempty"`
 	ObservedAt time.Time      `json:"observedAt,omitempty"`
 	Source     string         `json:"source,omitempty"`
 	Level      string         `json:"level,omitempty"`
@@ -15,8 +16,9 @@ type EntryUpsert struct {
 }
 
 type UploadRequest struct {
-	ObservedAt time.Time     `json:"observedAt,omitempty"`
-	Entries    []EntryUpsert `json:"entries"`
+	SchemaVersion int           `json:"schemaVersion"`
+	ObservedAt    time.Time     `json:"observedAt,omitempty"`
+	Entries       []EntryUpsert `json:"entries"`
 }
 
 type Record struct {
@@ -31,13 +33,13 @@ type Record struct {
 }
 
 type SearchFilter struct {
-	DeviceID string
-	Source   string
-	Level    string
-	Query    string
-	Since    *time.Time
-	Until    *time.Time
-	Limit    int
-	Offset   int
+	DeviceID   string
+	Source     string
+	Level      string
+	Query      string
+	Since      *time.Time
+	Until      *time.Time
+	Limit      int
+	Offset     int
 	Pagination pagination.Params
 }

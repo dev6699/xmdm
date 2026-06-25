@@ -159,7 +159,16 @@ flowchart TD
 ## Observability
 
 - Generate a local diagnostic trace for startup failures.
-- Upload logs on a schedule and on demand.
+- Upload logs on a schedule and on demand, batching launcher lifecycle entries with client-generated ids so retries stay idempotent.
 - Preserve the last successful sync metadata locally.
-- Expose enrollment and config failure details through device logs and admin inspection surfaces.
+- Expose enrollment and config success or failure details through device logs and admin inspection surfaces.
 - Expose command lifecycle hints through device logs, including transport connect, subscribe, disconnect, fallback polling, command receipt, command execution, and ack send events.
+- Emit the launcher lifecycle logs as a structured sequence around enrollment and sync:
+  - launcher startup
+  - bootstrap intent received
+  - bootstrap persisted
+  - enrollment started
+  - enrollment succeeded
+  - initial config sync
+  - `config changed` after the first successful config sync and on later revision changes
+  - later config sync refreshes

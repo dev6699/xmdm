@@ -2,6 +2,7 @@ package com.xmdm.launcher.apps
 
 import com.xmdm.launcher.artifacts.ArtifactChecksumVerifier
 import com.xmdm.launcher.sync.ConfigSnapshotVerifier
+import com.xmdm.launcher.BuildConfig
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -152,6 +153,118 @@ class ManagedAppInstallCoordinatorTest {
         assertEquals(listOf("com.example.old"), uninstalls)
         assertEquals(listOf("com.example.app"), result.installed)
         assertEquals(listOf("com.example.old"), result.uninstalled)
+    }
+
+    @Test
+    fun installsLauncherLastWhenItIsPartOfTheSameBatch() = runTest {
+        val verifier = ConfigSnapshotVerifier()
+        val checksumVerifier = ArtifactChecksumVerifier()
+        val launcherBytes = "launcher-payload".toByteArray()
+        val otherBytes = "other-payload".toByteArray()
+        val launcherChecksum = checksumVerifier.sha256Base64Url(launcherBytes)
+        val otherChecksum = checksumVerifier.sha256Base64Url(otherBytes)
+        val unsigned = """
+            {
+              "version":"8",
+              "device":{"deviceId":"device-123"},
+              "policy":{},
+              "apps":[
+                {
+                  "appId":"launcher-app",
+                  "packageName":"${BuildConfig.APPLICATION_ID}",
+                  "versionId":"launcher-ver",
+                  "versionName":"0.2.0",
+                  "versionCode":2,
+                  "checksum":"$launcherChecksum",
+                  "downloadPath":"/api/v1/devices/device-123/apps/launcher-app/versions/launcher-ver/artifact"
+                },
+                {
+                  "appId":"other-app",
+                  "packageName":"com.example.other",
+                  "versionId":"other-ver",
+                  "versionName":"1.0.0",
+                  "versionCode":10,
+                  "checksum":"$otherChecksum",
+                  "downloadPath":"/api/v1/devices/device-123/apps/other-app/versions/other-ver/artifact"
+                }
+              ],
+              "files":[],
+              "certificates":[]
+            }
+        """.trimIndent()
+        val signed = """
+            {
+              "version":"8",
+              "device":{"deviceId":"device-123"},
+              "policy":{},
+              "apps":[
+                {
+                  "appId":"launcher-app",
+                  "packageName":"${BuildConfig.APPLICATION_ID}",
+                  "versionId":"launcher-ver",
+                  "versionName":"0.2.0",
+                  "versionCode":2,
+                  "checksum":"$launcherChecksum",
+                  "downloadPath":"/api/v1/devices/device-123/apps/launcher-app/versions/launcher-ver/artifact"
+                },
+                {
+                  "appId":"other-app",
+                  "packageName":"com.example.other",
+                  "versionId":"other-ver",
+                  "versionName":"1.0.0",
+                  "versionCode":10,
+                  "checksum":"$otherChecksum",
+                  "downloadPath":"/api/v1/devices/device-123/apps/other-app/versions/other-ver/artifact"
+                }
+              ],
+              "files":[],
+              "certificates":[],
+              "signature":"${verifier.sign(unsigned, "secret-abc")}"
+            }
+        """.trimIndent()
+
+        val installOrder = mutableListOf<String>()
+        val coordinator = ManagedAppInstallCoordinator(
+            downloader = object : ManagedAppDownloader {
+                override suspend fun download(
+                    url: String,
+                    deviceSecret: String,
+                    destination: File,
+                    onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+                ): Long {
+                    assertEquals("secret-abc", deviceSecret)
+                    when {
+                        url.contains("launcher-app") -> destination.writeBytes(launcherBytes)
+                        url.contains("other-app") -> destination.writeBytes(otherBytes)
+                        else -> error("unexpected url: $url")
+                    }
+                    onProgress(destination.length(), destination.length())
+                    return destination.length()
+                }
+            },
+            installer = object : ManagedAppInstaller {
+                override fun listInstalledApps(): List<InstalledManagedApp> = emptyList()
+
+                override suspend fun install(app: ManagedAppSpec, apkFile: File) {
+                    installOrder += app.packageName
+                    when (app.packageName) {
+                        BuildConfig.APPLICATION_ID -> assertTrue(apkFile.readBytes().contentEquals(launcherBytes))
+                        "com.example.other" -> assertTrue(apkFile.readBytes().contentEquals(otherBytes))
+                        else -> error("unexpected package: ${app.packageName}")
+                    }
+                }
+
+                override suspend fun uninstall(packageName: String) = Unit
+            },
+        )
+
+        coordinator.apply(
+            snapshotJson = signed,
+            deviceSecret = "secret-abc",
+            serverUrl = "https://mdm.example",
+        )
+
+        assertEquals(listOf("com.example.other", BuildConfig.APPLICATION_ID), installOrder)
     }
 
     @Test(expected = IllegalArgumentException::class)

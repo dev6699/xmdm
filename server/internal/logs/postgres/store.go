@@ -56,7 +56,7 @@ func (s *Store) Upload(ctx context.Context, tenantID, deviceID, secret string, r
 	now := s.now()
 	records := make([]logs.Record, 0, len(req.Entries))
 	for _, entry := range req.Entries {
-		record, err := insertLog(ctx, tx, tenantID, deviceID, deviceRow.ID, now, req.ObservedAt, entry)
+		record, err := insertLog(ctx, tx, tenantID, deviceRow.ID, now, req.ObservedAt, entry)
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +178,13 @@ func loadDeviceForSecret(ctx context.Context, tx interface {
 
 func insertLog(ctx context.Context, tx interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, tenantID, deviceID, deviceRowID string, now, fallbackObservedAt time.Time, entry logs.EntryUpsert) (logs.Record, error) {
+}, tenantID, deviceRowID string, now, fallbackObservedAt time.Time, entry logs.EntryUpsert) (logs.Record, error) {
+	if strings.TrimSpace(entry.ID) == "" {
+		return logs.Record{}, logs.ErrLogsInvalid
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(entry.ID)); err != nil {
+		return logs.Record{}, logs.ErrLogsInvalid
+	}
 	if strings.TrimSpace(entry.Message) == "" && len(entry.Payload) == 0 {
 		return logs.Record{}, logs.ErrLogsInvalid
 	}
@@ -198,16 +204,24 @@ func insertLog(ctx context.Context, tx interface {
 		return logs.Record{}, err
 	}
 	row := tx.QueryRow(ctx,
-		`INSERT INTO device_logs (id, tenant_id, device_id, observed_at, source, level, message, payload_json, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
-		 RETURNING id::text, tenant_id::text, observed_at, source, level, message, payload_json`,
-		uuid.NewString(), tenantID, deviceRowID, observedAt, strings.TrimSpace(entry.Source), strings.TrimSpace(entry.Level), strings.TrimSpace(entry.Message), payloadJSON, now,
+		`WITH inserted AS (
+			INSERT INTO device_logs (id, tenant_id, device_id, observed_at, source, level, message, payload_json, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+			ON CONFLICT (id) DO NOTHING
+			RETURNING id::text, tenant_id::text, device_id::text, observed_at, source, level, message, payload_json
+		)
+		SELECT id, tenant_id, device_id, observed_at, source, level, message, payload_json
+		FROM inserted
+		UNION ALL
+		SELECT id::text, tenant_id::text, device_id::text, observed_at, source, level, message, payload_json
+		FROM device_logs
+		WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted)`,
+		strings.TrimSpace(entry.ID), tenantID, deviceRowID, observedAt, strings.TrimSpace(entry.Source), strings.TrimSpace(entry.Level), strings.TrimSpace(entry.Message), payloadJSON, now,
 	)
 	rec, err := scanUploadLog(row)
 	if err != nil {
 		return logs.Record{}, err
 	}
-	rec.DeviceID = deviceID
 	return rec, nil
 }
 
@@ -215,7 +229,7 @@ func scanUploadLog(scanner rowScanner) (logs.Record, error) {
 	var rec logs.Record
 	var payload []byte
 	var observedAt pgtype.Timestamptz
-	if err := scanner.Scan(&rec.ID, &rec.TenantID, &observedAt, &rec.Source, &rec.Level, &rec.Message, &payload); err != nil {
+	if err := scanner.Scan(&rec.ID, &rec.TenantID, &rec.DeviceID, &observedAt, &rec.Source, &rec.Level, &rec.Message, &payload); err != nil {
 		return logs.Record{}, err
 	}
 	if observedAt.Valid {

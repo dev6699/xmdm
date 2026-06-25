@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">XMDM Agent</string>
     <string name="launcher_title">XMDM Agent</string>
+    <string name="launcher_version">Version %1$s (#%2$d)</string>
     <string name="launcher_status">Device enrollment status</string>
     <string name="launcher_enrollment_success">enrollment: success</string>
     <string name="launcher_enrollment_in_progress">enrollment: in progress</string>

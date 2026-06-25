@@ -139,6 +139,9 @@ Relevant code:
   - verifies the checksum
   - installs or restores the package
 - The launcher tracks installed apps by package name and version code to avoid redundant installs.
+- If the signed snapshot includes the launcher package itself, the launcher applies it after the other managed apps in that batch so its own update does not interrupt earlier installs.
+- This is the launcher self-update path: the managed-app snapshot can publish a newer `com.xmdm.launcher` artifact, the launcher installs it like any other managed app, and Android relaunches the process after replacement.
+- When the launcher package is replaced, Android delivers `MY_PACKAGE_REPLACED` and the launcher relaunches its main screen.
 - If the config snapshot has no managed files, the launcher proceeds directly to app processing.
 - If a later config revision removes an app, the launcher uninstalls the removed package on the next sync pass.
 
@@ -168,10 +171,14 @@ Relevant code:
 
 - Once the launcher has bootstrap data and device identity, it starts a periodic log upload loop.
 - The launcher records structured lifecycle events during:
-  - startup
-  - bootstrap intake
-  - enrollment
-  - config sync
+  - launcher startup
+  - bootstrap intent received
+  - bootstrap persisted
+  - enrollment started
+  - enrollment succeeded
+  - initial config sync
+  - `config changed` after the first successful config sync and on later revision changes
+  - later config sync refreshes
   - managed file application
   - managed app application
   - command transport
@@ -207,27 +214,48 @@ Relevant code:
 
 ### 10. Device Log Categories
 
-The device currently emits structured logs for these launcher events:
+The device currently emits structured logs for these launcher sources:
 
 - `launcher`
-  - app process start and high-level lifecycle markers
+  - app process start and launcher upgrade markers
 - `bootstrap`
   - bootstrap intent received
-  - bootstrap parsing success or failure
+  - bootstrap persisted
+  - bootstrap failed
 - `enrollment`
-  - enrollment attempt started
-  - enrollment succeeded or failed
-- `sync`
-  - initial config sync succeeded or failed
-  - periodic config sync refreshed or failed
-- `files`
-  - managed files applied or failed
-- `apps`
-  - managed apps applied or failed
+  - enrollment started
+  - enrollment succeeded
+  - enrollment failed
+- `config`
+  - config sync requested
+  - config sync failed
+  - `config changed` after the first successful config sync and on later revision changes
+- `transport`
+  - command polling fallback failure
 - `commands`
-  - MQTT command transport connect, failure, and polling fallback
-  - command polling activity
-  - command-triggered config sync
+  - command received, executed, and ack sent
+  - command-triggered config sync refreshes
+  - kiosk exit requests routed through commands
+- `kiosk`
+  - kiosk entry and exit requests
+  - kiosk admin menu opens
+  - kiosk passcode acceptance or rejection
+  - kiosk app launch skipped
+- `managed_files`
+  - managed files applied
+  - managed files cleared
+  - managed files apply failed
+- `certificates`
+  - certificates applied
+  - certificates cleared
+  - certificates apply failed
+- `managed_apps`
+  - managed apps applied
+  - managed app install failed
+- `device_info`
+  - device info upload failed
+- `logs`
+  - device logs dropped when the local queue trims entries
 
 Each log entry carries a human-readable `message` plus a structured `payload` with context such as:
 

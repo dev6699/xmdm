@@ -77,10 +77,12 @@
 ### Log Upload
 
 - Accepts batch uploads of app and device logs.
+- Each uploaded device-log entry carries a client-generated `id` that the server uses as the idempotency key, so replayed batches do not create duplicate rows.
 - Log uploads are separate from telemetry so large log payloads do not block config sync.
 - The live upload surface uses `POST /api/v1/devices/{deviceId}/logs` with the device secret in `X-XMDM-Device-Secret`.
 - The admin search surface uses `GET /api/v1/logs` with optional `deviceId`, `source`, `level`, `q`, `since`, `until`, and `limit` filters.
 - The search response returns a `logs` array of device log records.
+- The launcher uses this surface for structured lifecycle logs such as startup, bootstrap, enrollment, config changes, transport fallback, command handling, kiosk handling, managed content, device info, and log-drop summaries.
 
 ### Message Polling
 

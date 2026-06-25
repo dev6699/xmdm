@@ -1,6 +1,9 @@
 package com.xmdm.launcher.logs
 
+import java.util.UUID
+
 data class DeviceLogEntry(
+    val id: String = UUID.randomUUID().toString(),
     val observedAt: String,
     val source: String,
     val level: String,
@@ -9,6 +12,7 @@ data class DeviceLogEntry(
 )
 
 data class DeviceLogUploadRequest(
+    val schemaVersion: Int = 1,
     val observedAt: String,
     val entries: List<DeviceLogEntry>,
 )
@@ -21,4 +25,3 @@ interface DeviceLogGateway {
         request: DeviceLogUploadRequest,
     )
 }
-

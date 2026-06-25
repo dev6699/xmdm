@@ -67,6 +67,24 @@ func waitForChromeUninstalled(t *testing.T, serial string) {
 	)
 }
 
+// waitForPackageVersion polls until the package manager reports the requested
+// version code and name for a package.
+func waitForPackageVersion(t *testing.T, serial, packageName string, versionCode int64, versionName string) {
+	t.Helper()
+	wantCode := fmt.Sprintf("versionCode=%d", versionCode)
+	wantName := "versionName=" + versionName
+	waitForCondition(t, time.Minute, packageName+" to reach version "+versionName,
+		func() string { return adbPackageVersionSnapshot(t, serial, packageName) },
+		func() (bool, error) {
+			out, err := adbShellOutput(serial, "dumpsys", "package", packageName)
+			if err != nil {
+				return false, nil
+			}
+			return strings.Contains(out, wantCode) && strings.Contains(out, wantName), nil
+		},
+	)
+}
+
 // waitForForegroundPackage polls until the requested package appears as the
 // foreground or resumed activity in dumpsys output.
 func waitForForegroundPackage(t *testing.T, serial, packageName string) {
@@ -453,12 +471,15 @@ func resetADBLauncherState(t *testing.T, serial, launcherAPKPath string) {
 		clearDeviceOwner(t, serial)
 	}
 
+	if _, err := adb(serial, "shell", "am", "force-stop", "com.xmdm.launcher"); err != nil {
+		t.Fatalf("force-stop launcher: %v", err)
+	}
 	if _, err := adb(serial, "shell", "run-as", "com.xmdm.launcher", "rm", "-rf",
-		"files", "cache", "shared_prefs", "databases",
+		"files", "cache", "shared_prefs", "databases", "datastore",
 	); err != nil {
 		t.Fatalf("wipe launcher app data: %v", err)
 	}
-	if _, err := adb(serial, "install", "-t", "-r", launcherAPKPath); err != nil {
+	if _, err := adb(serial, "install", "-t", "-r", "-d", launcherAPKPath); err != nil {
 		t.Fatalf("install launcher apk: %v", err)
 	}
 	setDeviceOwner(t, serial)
@@ -583,6 +604,30 @@ func adbPackageSnapshot(t *testing.T, serial, packageName string) string {
 	}
 	if len(filtered) == 0 {
 		return "package=unknown"
+	}
+	return strings.Join(filtered, " | ")
+}
+
+func adbPackageVersionSnapshot(t *testing.T, serial, packageName string) string {
+	t.Helper()
+	out, err := adbShellOutput(serial, "dumpsys", "package", packageName)
+	if err != nil {
+		return "package_err=" + strings.TrimSpace(err.Error())
+	}
+	lines := strings.Split(out, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "versioncode") || strings.Contains(lower, "versionname") {
+			filtered = append(filtered, line)
+		}
+	}
+	if len(filtered) == 0 {
+		return "package_version=unknown"
 	}
 	return strings.Join(filtered, " | ")
 }

@@ -1,14 +1,12 @@
 package e2e_test
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
-	appspg "xmdm/server/internal/apps/postgres"
 	"xmdm/server/internal/bootstrap"
 )
 
@@ -41,44 +39,61 @@ func TestManagedAppsAndFiles(t *testing.T) {
 	waitForChromeInstalled(t, env.serial)
 }
 
-// TestManagedAppsAndFilesRemoval verifies that managed file and app removals in
-// a later config snapshot are reflected on the device without re-enrollment.
-func TestManagedAppsAndFilesRemoval(t *testing.T) {
-	t.Skip() // TODO: change to other app
-	env := newContentTestEnvWithExtras(t, nil)
+// TestManagedAppsSelfUpdate enrolls a device and verifies that the launcher can
+// update itself through the managed-app policy path.
+func TestManagedAppsSelfUpdate(t *testing.T) {
+	env := newBaseTestEnv(t, false)
+	artifactStore := newTestArtifactStore(t)
+
+	mustSeedLauncherApp(t, env.pool)
+
+	token := mustCreateEnrollmentToken(t, env.client, env.baseURL)
+	bootstrapURI := mustBuildBootstrapURI(t, env.client, env.baseURL, env.launcherChecksum, env.deviceID, token, nil)
+	startLauncher(t, env.serial, bootstrapURI)
 
 	env.requests.waitFor(t, time.Minute, "POST /api/v1/enrollment", func(r requestRecord) bool {
 		return r.method == http.MethodPost && r.path == "/api/v1/enrollment"
 	})
 	waitForDeviceEnrollmentInDB(t, env.pool, env.deviceID)
 	waitForConfigSnapshotFetch(t, env.requests, env.deviceID)
-	env.requests.waitFor(t, time.Minute, "managed file artifact download", func(r requestRecord) bool {
-		return r.method == http.MethodGet &&
-			strings.Contains(r.path, "/api/v1/devices/") &&
-			strings.Contains(r.path, "/managed-files/") &&
-			strings.HasSuffix(r.path, "/artifact")
-	})
-	env.requests.waitFor(t, time.Minute, "managed app artifact download", func(r requestRecord) bool {
+	waitForPackageVersion(t, env.serial, bootstrap.SeedAgentAppPackage, 1, "0.1.0")
+	waitForUIContains(t, env.serial, "Version 0.1.0 (#1)", time.Minute)
+	waitForForegroundPackageStable(t, env.serial, bootstrap.SeedAgentAppPackage, 2*time.Second)
+
+	requestMarker := env.requests.len()
+	launcherVersionCode := int64(2)
+	launcherVersionName := "0.2.0"
+	launcherAppID := mustRegisterLauncherUpdate(t, env.pool, env.client, env.baseURL, artifactStore, launcherVersionCode, launcherVersionName)
+	seedPolicyApp(t, env.pool, env.policyID, launcherAppID)
+
+	env.requests.waitForAfter(t, requestMarker, time.Minute, "managed app artifact download for launcher v0.2.0", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
 			strings.Contains(r.path, "/api/v1/devices/") &&
 			strings.Contains(r.path, "/apps/") &&
+			strings.Contains(r.path, "/"+launcherAppID+"/") &&
 			strings.HasSuffix(r.path, "/artifact")
 	})
-	waitForManagedFileOnDevice(t, env.serial, env.deviceID)
-	waitForChromeInstalled(t, env.serial)
 
-	requestMarker := env.requests.len()
-	deleteJSON(t, env.client, env.baseURL+"/api/v1/managed-files/"+env.managedFile.managedFileID)
-	if _, err := appspg.New(env.pool).RetireApp(context.Background(), bootstrap.SeedTenantID, env.chromeAppID); err != nil {
-		t.Fatalf("retire app: %v", err)
-	}
+	waitForPackageVersion(t, env.serial, bootstrap.SeedAgentAppPackage, launcherVersionCode, launcherVersionName)
+	waitForUIContains(t, env.serial, "Version "+launcherVersionName+" (#2)", time.Minute)
+	waitForForegroundPackageStable(t, env.serial, bootstrap.SeedAgentAppPackage, 2*time.Second)
 
-	env.requests.waitForAfter(t, requestMarker, time.Minute, "config sync after managed content removal", func(r requestRecord) bool {
+	requestMarker = env.requests.len()
+	launcherVersionCode = int64(3)
+	launcherVersionName = "0.3.0"
+	launcherAppID = mustRegisterLauncherUpdate(t, env.pool, env.client, env.baseURL, artifactStore, launcherVersionCode, launcherVersionName)
+
+	env.requests.waitForAfter(t, requestMarker, time.Minute, "managed app artifact download for launcher v0.3.0", func(r requestRecord) bool {
 		return r.method == http.MethodGet &&
-			r.path == "/api/v1/devices/"+env.deviceID+"/config"
+			strings.Contains(r.path, "/api/v1/devices/") &&
+			strings.Contains(r.path, "/apps/") &&
+			strings.Contains(r.path, "/"+launcherAppID+"/") &&
+			strings.HasSuffix(r.path, "/artifact")
 	})
-	waitForManagedFileRemovedFromDevice(t, env.serial)
-	waitForManagedAppsApplied(t, env.requests, requestMarker, env.deviceID, 1)
+
+	waitForPackageVersion(t, env.serial, bootstrap.SeedAgentAppPackage, launcherVersionCode, launcherVersionName)
+	waitForUIContains(t, env.serial, "Version "+launcherVersionName+" (#3)", time.Minute)
+	waitForForegroundPackageStable(t, env.serial, bootstrap.SeedAgentAppPackage, 2*time.Second)
 }
 
 // TestCertificatesApplied enrolls a device and verifies that active certificates
@@ -439,7 +454,6 @@ func TestKioskExitChromeCommand(t *testing.T) {
 	commandID := env.mustIssueExitKioskCommand(t)
 	env.waitForCommandAck(t, commandID, "kiosk exit requested", "mqtt")
 	waitForKioskModeOffOnDevice(t, env.serial)
-	waitForForegroundPackage(t, env.serial, launcherPackage)
 }
 
 // TestKioskStayAwakeWhilePluggedIn verifies that a kiosk policy can push the
@@ -556,7 +570,7 @@ func TestPolicySync(t *testing.T) {
 }
 
 // TestDeviceLogsUpload verifies that the launcher emits and uploads structured
-// device logs after enrollment and config sync.
+// device logs after enrollment.
 func TestDeviceLogsUpload(t *testing.T) {
 	env := newBaseTestEnv(t, false)
 

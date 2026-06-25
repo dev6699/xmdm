@@ -6,13 +6,20 @@ plugins {
 android {
     namespace = "com.xmdm.launcher"
     compileSdk = 34
+    val testOnlyBuild = providers.gradleProperty("xmdm.testOnly")
+        .orNull
+        ?.toBooleanStrictOrNull()
+        ?: true
 
     defaultConfig {
         applicationId = "com.xmdm.launcher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.gradleProperty("xmdm.versionCode")
+            .orNull
+            ?.toIntOrNull()
+            ?: 1
+        versionName = providers.gradleProperty("xmdm.versionName").orNull ?: "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -48,7 +55,7 @@ android {
 
     buildTypes {
         getByName("debug") {
-            manifestPlaceholders["testOnly"] = "true"
+            manifestPlaceholders["testOnly"] = if (testOnlyBuild) "true" else "false"
         }
         getByName("release") {
             signingConfig = signingConfigs.getByName("release")

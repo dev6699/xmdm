@@ -161,6 +161,36 @@ func newContentTestEnvWithExtras(t *testing.T, extraBootstrapExtras map[string]s
 	}
 }
 
+// mustReadLauncherAPKFixture builds a launcher APK variant with the requested
+// version metadata and returns its bytes. The default launcher APK output is
+// restored at test cleanup time.
+func mustReadLauncherAPKFixture(t *testing.T, versionCode int64, versionName string) []byte {
+	t.Helper()
+	defaultPath := defaultLauncherAPKPath()
+	original := mustReadFile(t, "launcher apk", defaultPath)
+	t.Cleanup(func() {
+		if err := os.WriteFile(defaultPath, original, 0o644); err != nil {
+			t.Logf("restore launcher apk: %v", err)
+		}
+	})
+
+	cmd := exec.Command(
+		"./gradlew",
+		"--no-daemon",
+		"assembleDebug",
+		fmt.Sprintf("-Pxmdm.versionCode=%d", versionCode),
+		"-Pxmdm.versionName="+versionName,
+		"-Pxmdm.testOnly=false",
+	)
+	cmd.Dir = filepath.Join("..", "..", "app")
+	cmd.Env = append(os.Environ(), "GRADLE_USER_HOME="+filepath.Join(os.TempDir(), "xmdm-gradle"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build launcher apk version %d (%s): %v\n%s", versionCode, versionName, err, strings.TrimSpace(string(output)))
+	}
+	return mustReadFile(t, "launcher apk", defaultPath)
+}
+
 // newPackageRulesTestEnv builds a baseTestEnv, uploads Chrome, creates a
 // blocking policy, then starts the launcher so device assertions can begin
 // immediately after this call returns.
@@ -691,19 +721,33 @@ func assertDeviceLogsUploadPayload(t *testing.T, requests *requestRecorder, devi
 	required := map[string]bool{
 		"launcher|info|launcher started":           false,
 		"bootstrap|info|bootstrap intent received": false,
+		"bootstrap|info|bootstrap persisted":       false,
+		"enrollment|info|enrollment started":       false,
 		"enrollment|info|enrollment succeeded":     false,
-		"sync|info|initial config sync succeeded":  false,
 	}
+	var launcherStartedPayload map[string]any
 	for _, entry := range upload.Entries {
 		key := entry.Source + "|" + entry.Level + "|" + entry.Message
 		if _, ok := required[key]; ok {
 			required[key] = true
+		}
+		if entry.Source == "launcher" && entry.Level == "info" && entry.Message == "launcher started" {
+			launcherStartedPayload = entry.Payload
 		}
 	}
 	for key, seen := range required {
 		if !seen {
 			t.Fatalf("device log upload body did not include expected entry %q; body=%s", key, payloadBody)
 		}
+	}
+	if launcherStartedPayload == nil {
+		t.Fatalf("did not find launcher started payload in device log upload body; body=%s", payloadBody)
+	}
+	if _, ok := launcherStartedPayload["appVersionName"].(string); !ok || launcherStartedPayload["appVersionName"].(string) == "" {
+		t.Fatalf("launcher started payload missing appVersionName; payload=%v", launcherStartedPayload)
+	}
+	if versionCode, ok := launcherStartedPayload["appVersionCode"].(float64); !ok || versionCode <= 0 {
+		t.Fatalf("launcher started payload missing appVersionCode; payload=%v", launcherStartedPayload)
 	}
 }
 
@@ -714,42 +758,6 @@ func assertDeviceLogsRecordedViaAPI(t *testing.T, client *http.Client, baseURL, 
 	if !deviceLogsMatch(logs, deviceID) {
 		t.Fatalf("device logs API did not include the expected launcher records: %s", deviceLogsSnapshot(logs))
 	}
-}
-
-func waitForManagedAppsApplied(t *testing.T, requests *requestRecorder, start int, deviceID string, wantUninstalled int) {
-	t.Helper()
-	requests.waitForAfter(t, start, time.Minute, "managed apps applied log upload", func(r requestRecord) bool {
-		if r.method != http.MethodPost || r.path != "/api/v1/devices/"+deviceID+"/logs" || strings.TrimSpace(r.body) == "" {
-			return false
-		}
-		var upload struct {
-			ObservedAt string `json:"observedAt"`
-			Entries    []struct {
-				Source  string         `json:"source"`
-				Level   string         `json:"level"`
-				Message string         `json:"message"`
-				Payload map[string]any `json:"payload"`
-			} `json:"entries"`
-		}
-		if err := json.Unmarshal([]byte(r.body), &upload); err != nil {
-			return false
-		}
-		for _, entry := range upload.Entries {
-			if entry.Source != "apps" || entry.Level != "info" || entry.Message != "managed apps applied" {
-				continue
-			}
-			payload := entry.Payload
-			if payload == nil {
-				continue
-			}
-			uninstalled, ok := payload["uninstalled"].(float64)
-			if !ok || int(uninstalled) != wantUninstalled {
-				continue
-			}
-			return true
-		}
-		return false
-	})
 }
 
 func assertDeviceInfoUploadPayload(t *testing.T, requests *requestRecorder, deviceID string) {
@@ -945,8 +953,10 @@ func mustFetchDeviceInfo(t *testing.T, client *http.Client, baseURL, deviceID st
 func deviceLogsMatch(logs []any, deviceID string) bool {
 	required := map[string]bool{
 		"bootstrap|info|bootstrap intent received": false,
+		"bootstrap|info|bootstrap persisted":       false,
+		"enrollment|info|enrollment started":       false,
 		"enrollment|info|enrollment succeeded":     false,
-		"sync|info|initial config sync succeeded":  false,
+		"config|info|config changed":               false,
 	}
 	for _, item := range logs {
 		rec, _ := item.(map[string]any)
@@ -962,16 +972,30 @@ func deviceLogsMatch(logs []any, deviceID string) bool {
 					required[key] = true
 				}
 			}
+		case "bootstrap|info|bootstrap persisted":
+			if payload != nil {
+				if _, ok := payload["bootstrapHash"]; ok {
+					required[key] = true
+				}
+			}
+		case "enrollment|info|enrollment started":
+			if payload != nil {
+				if _, ok := payload["bootstrapHash"]; ok {
+					required[key] = true
+				}
+			}
 		case "enrollment|info|enrollment succeeded":
 			if payload != nil && payload["deviceId"] == deviceID {
 				required[key] = true
 			}
-		case "sync|info|initial config sync succeeded":
+		case "config|info|config changed":
 			if payload != nil {
-				if _, ok := payload["configRevision"]; ok {
-					if _, ok := payload["syncedAtEpochMillis"]; ok {
-						required[key] = true
-					}
+				if payload["configRevision"] != nil &&
+					payload["snapshotHash"] != nil &&
+					payload["appCount"] != nil &&
+					payload["fileCount"] != nil &&
+					payload["certificateCount"] != nil {
+					required[key] = true
 				}
 			}
 		}
@@ -1311,6 +1335,64 @@ func mustRegisterChromeApp(t *testing.T, pool *pgxpool.Pool, client *http.Client
 		t.Fatalf("chrome version create returned unexpected status: %v", versionResp["status"])
 	}
 	return appID
+}
+
+// mustRegisterLauncherUpdate publishes a new managed-app version for the seeded
+// launcher app package and returns the app ID.
+func mustRegisterLauncherUpdate(t *testing.T, pool *pgxpool.Pool, client *http.Client, baseURL string, artifactStore interface {
+	Delete(context.Context, string) error
+}, versionCode int64, versionName string) string {
+	t.Helper()
+
+	apk := mustReadLauncherAPKFixture(t, versionCode, versionName)
+	checksumValue := checksum.SHA256Base64URL(apk)
+	storageKey := "artifacts/content-e2e/" + uuid.NewString() + "/launcher.apk"
+	fileName := fmt.Sprintf("launcher-%s.apk", strings.ReplaceAll(versionName, "/", "-"))
+	uploadClient := newHTTPClient(t)
+	login(uploadClient, t, baseURL, adminUsername, adminPassword)
+
+	fileResp := postMultipartFile(t, uploadClient, baseURL+"/api/v1/files", map[string]string{
+		"name":       fileName,
+		"storageKey": storageKey,
+		"checksum":   checksumValue,
+		"sizeBytes":  fmt.Sprintf("%d", len(apk)),
+		"mimeType":   "application/vnd.android.package-archive",
+	}, "file", fileName, apk)
+
+	artifact, _ := fileResp["artifact"].(map[string]any)
+	artifactID, _ := artifact["id"].(string)
+	if artifactID == "" {
+		t.Fatalf("launcher file create returned empty artifact id: %#v", fileResp)
+	}
+	t.Cleanup(func() { _ = artifactStore.Delete(context.Background(), storageKey) })
+
+	appRec, err := appspg.New(pool).GetAppByPackageName(context.Background(), bootstrap.SeedTenantID, bootstrap.SeedAgentAppPackage)
+	if err != nil {
+		t.Fatalf("get seeded launcher app: %v", err)
+	}
+	versionResp := postJSON(t, uploadClient, baseURL+"/api/v1/apps/"+appRec.ID+"/versions", fmt.Sprintf(`{
+		"versionName":"%s",
+		"versionCode":%d,
+		"artifactId":"%s",
+		"checksum":"%s",
+		"publish":true
+	}`, versionName, versionCode, artifactID, checksumValue))
+	if versionResp["status"] != "published" {
+		t.Fatalf("launcher version create returned unexpected status: %v", versionResp["status"])
+	}
+	return appRec.ID
+}
+
+// mustSeedLauncherApp ensures the seeded tenant has the system-owned launcher
+// app row required for publishing a launcher update in e2e tests.
+func mustSeedLauncherApp(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := appspg.New(pool).UpsertSystemOwnedApp(context.Background(), bootstrap.SeedTenantID, apps.AppUpsert{
+		PackageName: bootstrap.SeedAgentAppPackage,
+		Name:        bootstrap.SeedAgentAppName,
+	}); err != nil {
+		t.Fatalf("seed launcher app: %v", err)
+	}
 }
 
 func testCertificatePEM() []byte {

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"xmdm/server/internal/auth"
 	"xmdm/server/internal/device"
 	"xmdm/server/internal/httpx"
@@ -26,9 +28,9 @@ func TestRegisterDeviceLogUpload(t *testing.T) {
 	}
 	Register(httpx.WithPrefix(mux, "/api/v1"), svc, &fakeDeviceStore{}, store, "tenant-1")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/device-123/logs", bytes.NewBufferString(`{
-		"entries":[{"source":"launcher","level":"info","message":"hello"}]
-	}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/device-123/logs", bytes.NewBufferString(fmt.Sprintf(`{
+		"entries":[{"id":"%s","source":"launcher","level":"info","message":"hello"}]
+	}`, uuid.NewString())))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(deviceSecretHeader, "device-secret")
 	res := httptest.NewRecorder()

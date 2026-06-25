@@ -14,6 +14,7 @@ class DeviceCommandCoordinator(
         transportSource: String,
         command: DeviceCommandRecord,
         onCommandExecuted: suspend (DeviceCommandRecord, DeviceCommandExecutionResult) -> Unit = { _, _ -> },
+        onCommandAckFailed: suspend (DeviceCommandRecord, DeviceCommandExecutionResult, Throwable) -> Unit = { _, _, _ -> },
     ): DeviceCommandRecord {
         val result = history.lookup(command.id) ?: try {
             val executed = executor.execute(command)
@@ -37,17 +38,25 @@ class DeviceCommandCoordinator(
         }
         onCommandExecuted(command, result)
         val ackDetails = buildAckDetails(command, result, transportSource)
-        return gateway.ack(
-            serverUrl = serverUrl,
-            deviceId = deviceId,
-            deviceSecret = deviceSecret,
-            commandId = command.id,
-            request = DeviceCommandAckRequest(
-                status = result.status,
-                message = result.message,
-                details = ackDetails,
-            ),
-        )
+        return try {
+            gateway.ack(
+                serverUrl = serverUrl,
+                deviceId = deviceId,
+                deviceSecret = deviceSecret,
+                commandId = command.id,
+                request = DeviceCommandAckRequest(
+                    status = result.status,
+                    message = result.message,
+                    details = ackDetails,
+                ),
+            )
+        } catch (failure: Throwable) {
+            if (failure is CancellationException) {
+                throw failure
+            }
+            onCommandAckFailed(command, result, failure)
+            throw failure
+        }
     }
 
     private fun buildAckDetails(
@@ -81,6 +90,7 @@ class DeviceCommandCoordinator(
         onCommandReceived: suspend (DeviceCommandRecord) -> Unit = {},
         onCommandExecuted: suspend (DeviceCommandRecord, DeviceCommandExecutionResult) -> Unit = { _, _ -> },
         onCommandAcked: suspend (DeviceCommandRecord, DeviceCommandRecord) -> Unit = { _, _ -> },
+        onCommandAckFailed: suspend (DeviceCommandRecord, DeviceCommandExecutionResult, Throwable) -> Unit = { _, _, _ -> },
     ): List<DeviceCommandRecord> {
         val commands = gateway.poll(serverUrl, deviceId, deviceSecret)
         val handled = mutableListOf<DeviceCommandRecord>()
@@ -93,6 +103,7 @@ class DeviceCommandCoordinator(
                 transportSource = transportSource,
                 command = command,
                 onCommandExecuted = onCommandExecuted,
+                onCommandAckFailed = onCommandAckFailed,
             )
             onCommandAcked(command, acked)
             handled += command

@@ -3,6 +3,7 @@ package com.xmdm.launcher.apps
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.xmdm.launcher.BuildConfig
 import com.xmdm.launcher.artifacts.ArtifactChecksumVerifier
 import com.xmdm.launcher.sync.ConfigSnapshotVerifier
 import java.io.File
@@ -103,10 +104,11 @@ class ManagedAppInstallCoordinator(
             ?.let { snapshotVerifier.verify(it, deviceSecret) }
             ?.let(::parseApps)
             .orEmpty()
+        val orderedDesiredApps = desiredApps.launcherLast()
 
         val installedByPackage = installer.listInstalledApps().associateBy { it.packageName }
         val installed = mutableListOf<String>()
-        for ((index, app) in desiredApps.withIndex()) {
+        for ((index, app) in orderedDesiredApps.withIndex()) {
             val current = installedByPackage[app.packageName]
             if (current != null && current.versionCode == app.versionCode) {
                 continue
@@ -115,7 +117,7 @@ class ManagedAppInstallCoordinator(
                 ManagedAppInstallProgress.Downloading(
                     app = app,
                     index = index + 1,
-                    total = desiredApps.size,
+                    total = orderedDesiredApps.size,
                     downloadedBytes = 0L,
                     totalBytes = null,
                 ),
@@ -132,14 +134,14 @@ class ManagedAppInstallCoordinator(
                         ManagedAppInstallProgress.Downloading(
                             app = app,
                             index = index + 1,
-                            total = desiredApps.size,
+                            total = orderedDesiredApps.size,
                             downloadedBytes = downloadedBytes,
                             totalBytes = totalBytes,
                         ),
                     )
                 }
                 checksumVerifier.verify(apkFile, app.checksum)
-                onProgress(ManagedAppInstallProgress.Installing(app, index + 1, desiredApps.size))
+                onProgress(ManagedAppInstallProgress.Installing(app, index + 1, orderedDesiredApps.size))
                 installer.install(app, apkFile)
                 installed += app.packageName
             } finally {
@@ -197,6 +199,22 @@ class ManagedAppInstallCoordinator(
 
     private fun resolveUrl(serverUrl: String, downloadPath: String): String {
         return URI(serverUrl).resolve(downloadPath).toString()
+    }
+
+    private fun List<ManagedAppSpec>.launcherLast(): List<ManagedAppSpec> {
+        if (isEmpty()) {
+            return this
+        }
+        val launcherApps = mutableListOf<ManagedAppSpec>()
+        val otherApps = mutableListOf<ManagedAppSpec>()
+        for (app in this) {
+            if (app.packageName == BuildConfig.APPLICATION_ID) {
+                launcherApps += app
+            } else {
+                otherApps += app
+            }
+        }
+        return otherApps + launcherApps
     }
 
     private fun JsonObject.string(name: String): String? {

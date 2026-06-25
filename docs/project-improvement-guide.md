@@ -106,7 +106,7 @@ Tasks:
 - Decide whether replay is time-based, command-ID-based, or status-based.
 - Make polling the recovery path for commands that were not acknowledged, not an independent command brain.
 - Record command transport source in result metadata when useful for debugging.
-- Add device log events for MQTT connect, subscribe, disconnect, fallback polling, command received, command executed, and ack sent.
+- Keep device log events for MQTT connect, subscribe, disconnect, fallback polling, command received, command executed, and ack sent.
 - Add dashboard language for stale active devices and command timeout reasons.
 
 Verification:

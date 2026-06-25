@@ -38,7 +38,10 @@ class HttpDeviceLogGateway(
                 val statusCode = connection.responseCode
                 val body = connection.responseBody()
                 if (statusCode !in 200..299) {
-                    error("device log upload failed with HTTP $statusCode: $body")
+                    val safeBody = body
+                        .replace(deviceSecret, "[redacted]")
+                        .take(MAX_ERROR_BODY_CHARS)
+                    error("device log upload failed with HTTP $statusCode: $safeBody")
                 }
             } finally {
                 connection.disconnect()
@@ -60,6 +63,7 @@ class HttpDeviceLogGateway(
 
     private companion object {
         const val DEVICE_SECRET_HEADER = "X-XMDM-Device-Secret"
+        const val MAX_ERROR_BODY_CHARS = 512
     }
 }
 

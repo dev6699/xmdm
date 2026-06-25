@@ -15,7 +15,7 @@ class ManagedAppInstallResultReceiver : BroadcastReceiver() {
         )
         val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
         ManagedAppInstallResultRegistry.complete(action, resultCode, message)
-        Log.i(TAG, "managed app operation completed: $action code=$resultCode")
+        Log.i(TAG, "managed app operation completed: $action code=$resultCode message=${message.orEmpty()}")
     }
 
     companion object {

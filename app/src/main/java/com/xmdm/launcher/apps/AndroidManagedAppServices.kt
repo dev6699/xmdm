@@ -112,6 +112,13 @@ class AndroidManagedAppInstaller(
         val packageInstaller = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         params.setAppPackageName(app.packageName)
+        if (app.packageName == context.packageName && isTestOnlyApp()) {
+            runCatching {
+                PackageInstaller.SessionParams::class.java
+                    .getMethod("setInstallAsTestOnly", Boolean::class.javaPrimitiveType)
+                    .invoke(params, true)
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
@@ -226,6 +233,10 @@ class AndroidManagedAppInstaller(
     private fun isSystemPackage(appInfo: ApplicationInfo): Boolean {
         return appInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0 ||
             appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0
+    }
+
+    private fun isTestOnlyApp(): Boolean {
+        return context.applicationInfo.flags and ApplicationInfo.FLAG_TEST_ONLY != 0
     }
 
     companion object {

@@ -7,7 +7,7 @@ When the real server is started for browser-driven tests, request-completion obs
 
 - `TestEnrollmentE2E` covers server-simulated enrollment and first-sync behavior.
 - `TestManagedAppsAndFiles` covers adb-backed managed app and managed file delivery on a physical device.
-- `TestManagedAppsAndFilesRemoval` covers adb-backed managed app and managed file removal on a physical device.
+- `TestManagedAppsSelfUpdate` covers adb-backed launcher self-update on a physical device through the managed-app policy path.
 - `TestCertificatesApplied` covers adb-backed certificate download and install on a physical device.
 - `TestDeviceLogsUpload` covers adb-backed device log upload and recorded-log API verification on a physical device.
 - `TestDeviceInfoReporting` covers adb-backed device-info reporting and admin export on a physical device.
@@ -67,6 +67,7 @@ Use this bucket for:
 - package suspension enforcement
 - managed file rendering
 - managed app install
+- launcher self-update through the managed-app policy path
 - certificate download and install
 - device log upload and API readback
 - MQTT command transport
@@ -76,7 +77,7 @@ Use this bucket for:
 Current coverage:
 
 - `TestManagedAppsAndFiles`
-- `TestManagedAppsAndFilesRemoval`
+- `TestManagedAppsSelfUpdate`
 - `TestCertificatesApplied`
 - `TestDeviceLogsUpload`
 - `TestDeviceInfoReporting`
@@ -87,16 +88,6 @@ Current coverage:
 - `TestCommandMQTT`
 - `TestCommandPolling`
 - `TestCommandBrokerOutageRecovery`
-
-The device-log upload test covers the structured launcher events emitted by the app:
-
-- `launcher` startup
-- `bootstrap` intake and parsing
-- `enrollment` attempt and result
-- `sync` refresh success or failure
-- `files` apply and removal
-- `apps` apply and removal
-- `commands` transport, polling, and command-triggered sync
 
 ### Device Info Flow
 
@@ -115,7 +106,6 @@ The device-log upload test covers the structured launcher events emitted by the 
 
 - `TestEnrollmentE2E` for server-simulated device enrollment and sync behavior.
 - `TestManagedAppsAndFiles` for real-device managed file and app delivery.
-- `TestManagedAppsAndFilesRemoval` for real-device managed file and app removal.
 - `TestDeviceLogsUpload` for real-device device log upload.
 - `TestDeviceInfoReporting` for real-device device info reporting and export.
 - `TestKioskModeChrome` for real-device kiosk enforcement using Chrome.
@@ -154,16 +144,16 @@ The device-log upload test covers the structured launcher events emitted by the 
 11. Waits for the launcher to enroll, fetch the signed device config snapshot, receive the rendered managed file, and restore Chrome for the current user.
 12. Verifies on-device state with adb reads from the launcher sandbox and package manager.
 
-`TestManagedAppsAndFilesRemoval` is the physical-device content removal test. It does all of the following in one run:
+`TestManagedAppsSelfUpdate` is the physical-device launcher self-update test. It does all of the following in one run:
 
-1. Starts the same real HTTP handler stack with a real Postgres test database.
+1. Starts a real HTTP handler stack with a real Postgres test database.
 2. Uploads the launcher APK artifact to the test server so the device can reprovision itself from the same server under test.
-3. Creates the managed file and Chrome app fixtures used by the content install test.
-4. Starts the launcher; the test server injects a short config-sync interval through the signed config snapshot runtime bucket.
-5. Waits for the launcher to enroll, fetch the signed device config snapshot, receive the rendered managed file, and restore Chrome for the current user.
-6. Retires the managed file record and the managed Chrome app on the server.
-7. Waits for the launcher to fetch the updated device config snapshot after the retire operations.
-8. Verifies the managed file has been removed from the launcher sandbox and Chrome has been uninstalled from the device.
+3. Uploads a newer launcher APK artifact for `com.xmdm.launcher` and publishes it as the managed-app update.
+4. Uses adb to reinstall the older launcher build, clear launcher-private state, and reverse the server port onto the device.
+5. Starts the launcher with the bootstrap payload on the physical device.
+6. Waits for the launcher to enroll, fetch the signed device config snapshot, download the launcher managed-app artifact, and replace its own package.
+7. Verifies the installed launcher version code and the version label shown on the launcher screen.
+8. Verifies the launcher stays in the foreground after updating itself.
 
 ## Certificate Flow
 
@@ -296,16 +286,6 @@ XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestManagedAppsAndFiles -
 ```
 
 The test uses `XMDM_TEST_POSTGRES_DSN` from `../infra/test-db-env.sh` and requires a connected device serial in `XMDM_ADB_SERIAL`.
-
-For the adb-backed content removal test on a physical device:
-
-```sh
-eval "$(../infra/test-db-env.sh)"
-cd server
-XMDM_ADB_SERIAL=<connected-device-serial> go test -run TestManagedAppsAndFilesRemoval -count=1 ./e2e
-```
-
-`TestManagedAppsAndFilesRemoval` uses the short config-sync interval from the signed config snapshot runtime bucket so the launcher picks up the retire operations quickly.
 
 For the adb-backed device log upload test:
 

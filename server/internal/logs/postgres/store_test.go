@@ -26,16 +26,20 @@ func TestStoreUploadAndSearchLogs(t *testing.T) {
 	now := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
 	store := New(pool)
 	store.SetNow(func() time.Time { return now })
+	firstID := uuid.NewString()
+	secondID := uuid.NewString()
 
 	records, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "device-secret", logs.UploadRequest{
 		ObservedAt: now,
 		Entries: []logs.EntryUpsert{
 			{
+				ID:      firstID,
 				Source:  "launcher",
 				Level:   "info",
 				Message: "first log",
 			},
 			{
+				ID:         secondID,
 				ObservedAt: now.Add(time.Minute),
 				Source:     "launcher",
 				Level:      "warn",
@@ -50,8 +54,40 @@ func TestStoreUploadAndSearchLogs(t *testing.T) {
 	if len(records) != 2 {
 		t.Fatalf("expected two records, got %#v", records)
 	}
+	if records[0].ID != firstID || records[1].ID != secondID {
+		t.Fatalf("unexpected record ids: %#v", records)
+	}
 	if records[0].DeviceID != seededDeviceID || records[0].TenantID != bootstrap.SeedTenantID {
 		t.Fatalf("unexpected record: %#v", records[0])
+	}
+	if records[0].Message != "first log" || records[1].Message != "second log" {
+		t.Fatalf("unexpected record messages: %#v", records)
+	}
+
+	recordsAgain, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "device-secret", logs.UploadRequest{
+		ObservedAt: now,
+		Entries: []logs.EntryUpsert{
+			{
+				ID:      firstID,
+				Source:  "launcher",
+				Level:   "info",
+				Message: "first log",
+			},
+			{
+				ID:         secondID,
+				ObservedAt: now.Add(time.Minute),
+				Source:     "launcher",
+				Level:      "warn",
+				Message:    "second log",
+				Payload:    map[string]any{"code": 42},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("reupload logs: %v", err)
+	}
+	if len(recordsAgain) != 2 || recordsAgain[0].ID != firstID || recordsAgain[1].ID != secondID {
+		t.Fatalf("unexpected reupload records: %#v", recordsAgain)
 	}
 
 	var status string
@@ -76,6 +112,13 @@ func TestStoreUploadAndSearchLogs(t *testing.T) {
 	if found[0].Message != "second log" || found[1].Message != "first log" {
 		t.Fatalf("unexpected search order: %#v", found)
 	}
+	var count int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM device_logs WHERE tenant_id = $1 AND device_id = $2`, bootstrap.SeedTenantID, seededDeviceID).Scan(&count); err != nil {
+		t.Fatalf("count logs: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected two stored log rows after retry, got %d", count)
+	}
 }
 
 func TestStoreUploadLogsValidationAndAuth(t *testing.T) {
@@ -87,10 +130,10 @@ func TestStoreUploadLogsValidationAndAuth(t *testing.T) {
 	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "device-secret", logs.UploadRequest{}); !errors.Is(err, logs.ErrLogsInvalid) {
 		t.Fatalf("expected invalid logs payload, got %v", err)
 	}
-	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, uuid.NewString(), "device-secret", logs.UploadRequest{Entries: []logs.EntryUpsert{{Message: "hello"}}}); !errors.Is(err, logs.ErrDeviceNotFound) {
+	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, uuid.NewString(), "device-secret", logs.UploadRequest{Entries: []logs.EntryUpsert{{ID: uuid.NewString(), Message: "hello"}}}); !errors.Is(err, logs.ErrDeviceNotFound) {
 		t.Fatalf("expected device not found, got %v", err)
 	}
-	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "wrong-secret", logs.UploadRequest{Entries: []logs.EntryUpsert{{Message: "hello"}}}); !errors.Is(err, logs.ErrDeviceUnauthorized) {
+	if _, err := store.Upload(context.Background(), bootstrap.SeedTenantID, seededDeviceID, "wrong-secret", logs.UploadRequest{Entries: []logs.EntryUpsert{{ID: uuid.NewString(), Message: "hello"}}}); !errors.Is(err, logs.ErrDeviceUnauthorized) {
 		t.Fatalf("expected unauthorized, got %v", err)
 	}
 }

@@ -248,7 +248,15 @@ func login(client *http.Client, t *testing.T, baseURL, username, password string
 		t.Fatalf("expected login redirect, got %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if client.Jar != nil {
-		client.Jar.SetCookies(req.URL, res.Cookies())
+		for _, cookie := range res.Cookies() {
+			client.Jar.SetCookies(req.URL, []*http.Cookie{
+				{
+					Name:  cookie.Name,
+					Value: cookie.Value,
+					Path:  "/",
+				},
+			})
+		}
 	}
 }
 

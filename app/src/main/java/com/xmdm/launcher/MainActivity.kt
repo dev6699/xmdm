@@ -4,6 +4,7 @@ import android.app.admin.DevicePolicyManager
 import android.app.KeyguardManager
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import android.view.MotionEvent
@@ -22,6 +23,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonParser
+import com.xmdm.launcher.BuildConfig
 import com.xmdm.launcher.bootstrap.BootstrapProvisioner
 import com.xmdm.launcher.apps.AndroidManagedAppInstaller
 import com.xmdm.launcher.apps.HttpManagedAppDownloader
@@ -71,7 +73,6 @@ import com.xmdm.launcher.state.ManagedFilesState
 import com.xmdm.launcher.sync.ConfigSyncEngine
 import com.xmdm.launcher.sync.HttpConfigSnapshotFetcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.collectLatest
@@ -83,7 +84,10 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -128,6 +132,12 @@ class MainActivity : AppCompatActivity() {
         DeviceLogCoordinator(
             queue = DeviceLogStore.from(applicationContext),
             gateway = HttpDeviceLogGateway(),
+            sessionProvider = {
+                val state = stateStore.state.first()
+                val bootstrap = state.bootstrap
+                val identity = state.identity
+                if (bootstrap == null || identity == null) null else bootstrap to identity
+            },
         )
     }
     private val deviceInfoReporter by lazy {
@@ -175,14 +185,9 @@ class MainActivity : AppCompatActivity() {
     private var commandTransportTargetKey: String? = null
     private var configSyncJob: Job? = null
     private var configSyncTargetKey: String? = null
-    private var deviceLogUploadJob: Job? = null
-    private var deviceLogUploadTargetKey: String? = null
-    private val deviceLogUploadRequestLock = Any()
-    private var deviceLogUploadRequestJob: Job? = null
-    private var deviceLogUploadRequestTargetKey: String? = null
-    private var deviceLogUploadRequestPending = false
     private var startedFromBoot = false
     private var launcherRuntimeStarted = false
+    private var pendingBootstrapDataString: String? = null
     private val prettyJson = GsonBuilder().setPrettyPrinting().create()
     private var cachedPrettySnapshotJson: String? = null
     private var cachedPrettySnapshotText: String = ""
@@ -192,6 +197,9 @@ class MainActivity : AppCompatActivity() {
     private var kioskPolicySyncDialog: AlertDialog? = null
     private var kioskPolicySyncInFlight = false
     private var latestState: AgentState = AgentState.empty()
+    private var pendingDeviceLogFlushSessionKey: String? = null
+    private var kioskExitPasscodeRejectedCount = 0
+    private val configChangedLogMutex = Mutex()
     private var pendingOpenKioskAdminMenu = false
     private var kioskAdminMenuShouldReapply = false
     private var kioskExitDialogShouldReapply = false
@@ -209,9 +217,15 @@ class MainActivity : AppCompatActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.launcherVersion.text = getString(
+            R.string.launcher_version,
+            BuildConfig.VERSION_NAME,
+            BuildConfig.VERSION_CODE,
+        )
         startedFromBoot = intent.getBooleanExtra(EXTRA_STARTED_FROM_BOOT, false)
         pendingOpenKioskAdminMenu = intent.getBooleanExtra(EXTRA_OPEN_KIOSK_ADMIN_MENU, false)
         kioskAdminMenuShouldReapply = pendingOpenKioskAdminMenu
+        captureBootstrapIntentData(intent)
 
         binding.launcherTitle.text = getString(R.string.launcher_title)
         binding.kioskAdminButton.setOnClickListener {
@@ -240,6 +254,7 @@ class MainActivity : AppCompatActivity() {
         Log.w(TAG, "onNewIntent instance=$instanceId")
         pendingOpenKioskAdminMenu = intent.getBooleanExtra(EXTRA_OPEN_KIOSK_ADMIN_MENU, false)
         kioskAdminMenuShouldReapply = pendingOpenKioskAdminMenu || kioskAdminMenuShouldReapply
+        captureBootstrapIntentData(intent)
         if (launcherRuntimeStarted || isUserUnlocked()) {
             consumeBootstrapIntent()
             if (pendingOpenKioskAdminMenu) {
@@ -278,30 +293,47 @@ class MainActivity : AppCompatActivity() {
             return
         }
         launcherRuntimeStarted = true
-        recordDeviceLog(
+        recordDeviceLogSafely(
             source = "launcher",
             level = "info",
             message = "launcher started",
-            payload = mapOf("instanceId" to instanceId),
+            payload = mapOf(
+                "instanceId" to instanceId,
+                "appVersionName" to BuildConfig.VERSION_NAME,
+                "appVersionCode" to BuildConfig.VERSION_CODE,
+                "startedFromBoot" to startedFromBoot,
+            ),
         )
+        recordLauncherUpgradeIfNeeded()
         if (startedFromBoot) {
             clearBootKioskExitSuppression()
         }
+        Log.w(TAG, "launcher runtime preparing bootstrap instance=$instanceId")
         consumeBootstrapIntent()
         lifecycleScope.launch {
+            Log.w(TAG, "state collector starting instance=$instanceId")
             stateStore.state.collectLatest { state ->
                 latestState = state
+                maybeFlushPendingDeviceLogs(state)
+                maybeRecordObservedConfigChanged(state)
+                Log.w(
+                    TAG,
+                    "state emission instance=$instanceId enrolled=${state.isEnrolled} " +
+                        "policy=${state.policyCache?.version ?: -1} " +
+                        "managedApps=${state.managedApps?.version ?: -1} " +
+                        "managedFiles=${state.managedFiles?.version ?: -1} " +
+                        "certs=${state.certificates?.version ?: -1}",
+                )
                 renderUi()
                 maybeStartEnrollment(state)
+                maybeStartConfigSync(state)
                 maybeApplyManagedFiles(state)
                 maybeApplyCertificates(state)
                 maybeApplyManagedApps(state)
-                maybeStartConfigSync(state)
                 packageRulesController.apply(state)
                 if (!kioskAdminMenuShouldReapply) {
                     kioskModeController.apply(state)
                 }
-                maybeStartDeviceLogUpload(state)
                 maybeStartCommandTransport(state)
             }
         }
@@ -415,6 +447,16 @@ class MainActivity : AppCompatActivity() {
         }
         if (kioskExitPasscodeMatches(snapshotJson, candidate)) {
             Log.w(TAG, "kiosk exit passcode accepted instance=$instanceId")
+            val rejectedBeforeSuccess = kioskExitPasscodeRejectedCount
+            kioskExitPasscodeRejectedCount = 0
+            lifecycleScope.launch(Dispatchers.IO) {
+                recordDeviceLogSafely(
+                    source = "kiosk",
+                    level = "warn",
+                    message = "kiosk exit passcode accepted",
+                    payload = mapOf("rejectedBeforeSuccess" to rejectedBeforeSuccess),
+                )
+            }
             passcodeInput.error = null
             kioskExitDialogShouldReapply = false
             dialog.dismiss()
@@ -423,6 +465,18 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             Log.w(TAG, "kiosk exit passcode rejected instance=$instanceId")
+            kioskExitPasscodeRejectedCount += 1
+            if (kioskExitPasscodeRejectedCount == 1 || kioskExitPasscodeRejectedCount % 5 == 0) {
+                val rejectedCount = kioskExitPasscodeRejectedCount
+                lifecycleScope.launch(Dispatchers.IO) {
+                    recordDeviceLogSafely(
+                        source = "kiosk",
+                        level = "warn",
+                        message = "kiosk exit passcode rejected",
+                        payload = mapOf("failureCount" to rejectedCount),
+                    )
+                }
+            }
             passcodeInput.setText("")
             passcodeInput.error = getString(R.string.kiosk_exit_dialog_invalid_code)
         }
@@ -486,6 +540,12 @@ class MainActivity : AppCompatActivity() {
         kioskPolicySyncInFlight = true
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                recordDeviceLogSafely(
+                    source = "config",
+                    level = "info",
+                    message = "config sync requested",
+                    payload = mapOf("trigger" to "kiosk"),
+                )
                 withContext(Dispatchers.Main) {
                     showKioskPolicySyncDialog()
                 }
@@ -495,7 +555,6 @@ class MainActivity : AppCompatActivity() {
                     performPolicySync(
                         state = state,
                         source = "kiosk",
-                        message = "config sync requested locally",
                     )
                 }
                 val refreshedState = stateStore.state.first()
@@ -570,23 +629,14 @@ class MainActivity : AppCompatActivity() {
     private suspend fun performPolicySync(
         state: AgentState,
         source: String,
-        message: String,
     ): com.xmdm.launcher.state.PolicyCacheState? {
         return try {
             val bootstrap = state.bootstrap ?: return null
             val identity = state.identity ?: return null
+            val previousPolicyVersion = state.policyCache?.version
             val cached = configSyncEngine.sync(bootstrap, identity)
+            recordConfigChangedIfNeeded(previousPolicyVersion, cached)
             maybeApplyCertificates(cached.snapshotJson, state)
-            recordDeviceLogSafely(
-                source = source,
-                level = "info",
-                message = message,
-                payload = mapOf(
-                    "configRevision" to cached.version,
-                    "syncedAtEpochMillis" to cached.lastSyncAtEpochMillis,
-                ),
-            )
-            requestDeviceLogUpload(bootstrap, identity)
             requestDeviceInfoUpload()
             cached
         } catch (t: Throwable) {
@@ -594,11 +644,11 @@ class MainActivity : AppCompatActivity() {
                 throw t
             }
             Log.w(TAG, "$source config sync failed", t)
-            recordDeviceLogSafely(
-                source = source,
-                level = "warn",
-                message = message.replace("requested", "failed"),
-                payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+            recordFailureLog(
+                source = "config",
+                message = "config sync failed",
+                throwable = t,
+                payload = mapOf("trigger" to source),
             )
             null
         }
@@ -608,6 +658,7 @@ class MainActivity : AppCompatActivity() {
         state: AgentState,
         source: String,
         message: String,
+        recordLog: Boolean = true,
     ): Long? {
         val policyCache = state.policyCache ?: return null
         val updatedState = state.copy(
@@ -618,15 +669,57 @@ class MainActivity : AppCompatActivity() {
             latestState = updatedState
             kioskModeController.apply(updatedState)
         }
+        if (recordLog) {
+            recordDeviceLogSafely(
+                source = source,
+                level = if (source == "commands") "info" else if (message.contains("exit")) "warn" else "info",
+                message = message,
+                payload = mapOf(
+                    "policyVersion" to policyCache.version,
+                ),
+            )
+        }
+        return policyCache.version
+    }
+
+    private suspend fun flushCommandLifecycleLogsSafely() {
+        try {
+            deviceLogCoordinator.flushPendingLogsIfSessionAvailable()
+        } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException) {
+                throw t
+            }
+            Log.w(TAG, "command lifecycle log flush failed", t)
+        }
+    }
+
+    private suspend fun applyCommandSideEffectAfterAckIfNeeded(
+        command: com.xmdm.launcher.commands.DeviceCommandRecord,
+        transportSource: String,
+    ) {
+        if (command.type.lowercase() != "exit_kiosk") {
+            return
+        }
+        val state = stateStore.state.first()
+        val policyCache = state.policyCache ?: return
         recordDeviceLogSafely(
-            source = source,
+            source = "commands",
             level = "info",
-            message = message,
+            message = "kiosk exit requested by command",
             payload = mapOf(
+                "transportSource" to transportSource,
+                "commandId" to command.id,
+                "commandType" to command.type,
                 "policyVersion" to policyCache.version,
             ),
         )
-        return policyCache.version
+        flushCommandLifecycleLogsSafely()
+        suppressKioskUntilCurrentPolicyVersion(
+            state = state,
+            source = "commands",
+            message = "kiosk exit requested by command",
+            recordLog = false,
+        )
     }
 
     private suspend fun awaitUserUnlockIfNeeded() {
@@ -701,6 +794,12 @@ class MainActivity : AppCompatActivity() {
             val state = stateStore.state.first()
             latestState = state
             kioskAdminMenuShouldReapply = true
+            recordDeviceLogSafely(
+                source = "kiosk",
+                level = "info",
+                message = "kiosk admin menu opened",
+                payload = mapOf("policyVersion" to state.policyCache?.version),
+            )
             showKioskAdminMenu(state)
         }
     }
@@ -943,6 +1042,14 @@ class MainActivity : AppCompatActivity() {
         return min(100, ratio.toInt())
     }
 
+    private suspend fun maybeRecordObservedConfigChanged(state: AgentState) {
+        val policyCache = state.policyCache ?: return
+        recordConfigChangedIfNeeded(
+            previousPolicyVersion = lastConfigChangedLogVersion(),
+            cached = policyCache,
+        )
+    }
+
     private fun maybeStartEnrollment(state: AgentState) {
         val bootstrap = enrollmentStateMachine.nextEnrollmentBootstrap(state) ?: return
         val bootstrapJson = bootstrap.rawJson?.trim() ?: return
@@ -953,14 +1060,15 @@ class MainActivity : AppCompatActivity() {
         }
         lastEnrollmentAttemptBootstrapJson = bootstrapJson
         Log.w(TAG, "mark enrollment attempted instance=$instanceId bootstrap=${bootstrapJson.hashCode()}")
-        recordDeviceLog(
-            source = "enrollment",
-            level = "info",
-            message = "enrollment attempt started",
-            payload = mapOf("bootstrapHash" to bootstrapJson.hashCode()),
-        )
         lifecycleScope.launch {
             try {
+                Log.w(TAG, "enrollment begin instance=$instanceId bootstrap=${bootstrapJson.hashCode()}")
+                recordDeviceLogSafely(
+                    source = "enrollment",
+                    level = "info",
+                    message = "enrollment started",
+                    payload = mapOf("bootstrapHash" to bootstrapJson.hashCode()),
+                )
                 val result = enrollmentCoordinator.enroll(bootstrap)
                 enrollmentStateMachine.onEnrollmentSucceeded()
                 recordDeviceLogSafely(
@@ -972,19 +1080,13 @@ class MainActivity : AppCompatActivity() {
                 maybeStartConfigSync(bootstrap, result.identity, null)
                 requestDeviceInfoUpload()
                 try {
+                    Log.w(TAG, "initial config sync begin instance=$instanceId device=${result.identity.deviceId}")
+                    val previousPolicyVersion = stateStore.state.first().policyCache?.version
                     val cached = configSyncEngine.sync(bootstrap, result.identity)
+                    Log.w(TAG, "initial config sync finished instance=$instanceId version=${cached.version}")
+                    recordConfigChangedIfNeeded(previousPolicyVersion, cached)
                     maybeStartConfigSync(bootstrap, result.identity, cached)
                     maybeApplyCertificates(cached.snapshotJson, stateStore.state.first())
-                    recordDeviceLogSafely(
-                        source = "sync",
-                        level = "info",
-                        message = "initial config sync succeeded",
-                        payload = mapOf(
-                            "configRevision" to cached.version,
-                            "syncedAtEpochMillis" to cached.lastSyncAtEpochMillis,
-                        ),
-                    )
-                    requestDeviceLogUpload(bootstrap, result.identity)
                     requestDeviceInfoUpload()
                     maybeStartCommandTransport(bootstrap, result.identity, cached)
                 } catch (t: Throwable) {
@@ -992,20 +1094,20 @@ class MainActivity : AppCompatActivity() {
                         throw t
                     }
                     Log.w(TAG, "initial config sync failed", t)
-                    recordDeviceLogSafely(
-                        source = "sync",
-                        level = "warn",
-                        message = "initial config sync failed",
-                        payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                    recordFailureLog(
+                        source = "config",
+                        message = "config sync failed",
+                        throwable = t,
+                        payload = mapOf("trigger" to "initial"),
                     )
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "enrollment failed", t)
-                recordDeviceLogSafely(
+                recordFailureLog(
                     source = "enrollment",
-                    level = "warn",
                     message = "enrollment failed",
-                    payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                    throwable = t,
+                    level = "error",
                 )
                 enrollmentStateMachine.onEnrollmentFailed(t.message ?: t.javaClass.simpleName)
             }
@@ -1044,12 +1146,6 @@ class MainActivity : AppCompatActivity() {
                     val mqtt = mqttAddress.takeIf { it.isNotBlank() }
                     if (mqtt != null) {
                         Log.w(TAG, "command transport connecting via mqtt=$mqtt instance=$instanceId")
-                        recordDeviceLogSafely(
-                            source = "commands",
-                            level = "info",
-                            message = "command transport connecting via mqtt",
-                            payload = mapOf("mqttAddress" to mqtt),
-                        )
                         MqttDeviceCommandTransport(
                             MqttDeviceCommandConfig(
                                 address = mqtt,
@@ -1058,16 +1154,7 @@ class MainActivity : AppCompatActivity() {
                                 username = identity.deviceId,
                                 password = identity.deviceSecret,
                             ),
-                        ).stream(
-                            onSubscribed = {
-                                recordDeviceLogSafely(
-                                    source = "commands",
-                                    level = "info",
-                                    message = "command transport subscribed",
-                                    payload = mapOf("mqttAddress" to mqtt),
-                                )
-                            },
-                        ) { command ->
+                        ).stream { command ->
                             handleDeviceCommand(bootstrap, identity, command, "mqtt")
                         }
                     } else {
@@ -1079,28 +1166,17 @@ class MainActivity : AppCompatActivity() {
                     }
                     if (t is EOFException) {
                         Log.w(TAG, "command transport disconnected", t)
-                        recordDeviceLogSafely(
-                            source = "commands",
-                            level = "info",
-                            message = "command transport disconnected",
-                            payload = mapOf("reason" to (t.message ?: t.javaClass.simpleName)),
-                        )
                     } else {
                         Log.w(TAG, "command transport failed", t)
-                        recordDeviceLogSafely(
-                            source = "commands",
-                            level = "warn",
-                            message = "command transport failed",
-                            payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
-                        )
                     }
                     if (mqttAddress.isNotBlank()) {
                         try {
                             Log.w(TAG, "command transport falling back to polling instance=$instanceId")
                             recordDeviceLogSafely(
-                                source = "commands",
-                                level = "info",
-                                message = "command transport falling back to polling",
+                                source = "transport",
+                                level = "warn",
+                                message = "command transport fallback to polling",
+                                payload = mapOf("errorType" to t.javaClass.simpleName),
                             )
                             pollCommands(bootstrap, identity)
                         } catch (pollFailure: Throwable) {
@@ -1108,11 +1184,10 @@ class MainActivity : AppCompatActivity() {
                                 throw pollFailure
                             }
                             Log.w(TAG, "command polling fallback failed", pollFailure)
-                            recordDeviceLogSafely(
-                                source = "commands",
-                                level = "warn",
+                            recordFailureLog(
+                                source = "transport",
                                 message = "command polling fallback failed",
-                                payload = mapOf("error" to (pollFailure.message ?: pollFailure.javaClass.simpleName)),
+                                throwable = pollFailure,
                             )
                         }
                     }
@@ -1155,30 +1230,22 @@ class MainActivity : AppCompatActivity() {
             delay(syncIntervalMs)
             while (isActive) {
                 try {
+                    val previousPolicyVersion = stateStore.state.first().policyCache?.version
                     val cached = configSyncEngine.sync(bootstrap, identity)
                     Log.w(TAG, "config sync refreshed instance=$instanceId")
+                    recordConfigChangedIfNeeded(previousPolicyVersion, cached)
                     maybeApplyCertificates(cached.snapshotJson, stateStore.state.first())
-                    recordDeviceLogSafely(
-                        source = "sync",
-                        level = "info",
-                        message = "config sync refreshed",
-                        payload = mapOf(
-                            "configRevision" to cached.version,
-                            "syncedAtEpochMillis" to cached.lastSyncAtEpochMillis,
-                        ),
-                    )
-                    requestDeviceLogUpload(bootstrap, identity)
                     requestDeviceInfoUpload()
                 } catch (t: Throwable) {
                     if (t is kotlinx.coroutines.CancellationException) {
                         throw t
                     }
                     Log.w(TAG, "config sync failed", t)
-                    recordDeviceLogSafely(
-                        source = "sync",
-                        level = "warn",
+                    recordFailureLog(
+                        source = "config",
                         message = "config sync failed",
-                        payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                        throwable = t,
+                        payload = mapOf("trigger" to "periodic"),
                     )
                 }
                 delay(syncIntervalMs)
@@ -1227,16 +1294,27 @@ class MainActivity : AppCompatActivity() {
                         "status" to acked.status,
                     ),
                 )
+                flushCommandLifecycleLogsSafely()
+                applyCommandSideEffectAfterAckIfNeeded(command, "polling")
+            },
+            onCommandAckFailed = { command, result, failure ->
+                recordDeviceLogSafely(
+                    source = "commands",
+                    level = "warn",
+                    message = "command ack failed",
+                    payload = mapOf(
+                        "transportSource" to "polling",
+                        "commandId" to command.id,
+                        "status" to result.status,
+                        "errorType" to failure.javaClass.simpleName,
+                        "errorMessage" to failure.message?.take(MAX_DEVICE_LOG_ERROR_MESSAGE_CHARS),
+                    ),
+                )
+                flushCommandLifecycleLogsSafely()
             },
         )
         if (handled.isNotEmpty()) {
             Log.w(TAG, "command poll handled ${handled.size} commands instance=$instanceId")
-            recordDeviceLogSafely(
-                source = "commands",
-                level = "info",
-                message = "command poll handled commands",
-                payload = mapOf("count" to handled.size),
-            )
         }
     }
 
@@ -1274,6 +1352,21 @@ class MainActivity : AppCompatActivity() {
                     ),
                 )
             },
+            onCommandAckFailed = { failedCommand, result, failure ->
+                recordDeviceLogSafely(
+                    source = "commands",
+                    level = "warn",
+                    message = "command ack failed",
+                    payload = mapOf(
+                        "transportSource" to transportSource,
+                        "commandId" to failedCommand.id,
+                        "status" to result.status,
+                        "errorType" to failure.javaClass.simpleName,
+                        "errorMessage" to failure.message?.take(MAX_DEVICE_LOG_ERROR_MESSAGE_CHARS),
+                    ),
+                )
+                flushCommandLifecycleLogsSafely()
+            },
         )
         recordDeviceLogSafely(
             source = "commands",
@@ -1281,18 +1374,25 @@ class MainActivity : AppCompatActivity() {
             message = "command ack sent",
             payload = mapOf(
                 "transportSource" to transportSource,
-                "commandId" to acked.id,
+                "commandId" to command.id,
                 "status" to acked.status,
             ),
         )
+        flushCommandLifecycleLogsSafely()
+        applyCommandSideEffectAfterAckIfNeeded(command, transportSource)
     }
 
     private suspend fun requestConfigSyncFromCommand(): DeviceCommandExecutionResult {
+        recordDeviceLogSafely(
+            source = "config",
+            level = "info",
+            message = "config sync requested",
+            payload = mapOf("trigger" to "commands"),
+        )
         val state = stateStore.state.first()
         val cached = performPolicySync(
             state = state,
             source = "commands",
-            message = "config sync requested by command",
         ) ?: error("bootstrap state unavailable")
         return DeviceCommandExecutionResult(
             status = "acked",
@@ -1306,16 +1406,12 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun requestExitKioskFromCommand(): DeviceCommandExecutionResult {
         val state = stateStore.state.first()
-        val policyVersion = suppressKioskUntilCurrentPolicyVersion(
-            state = state,
-            source = "commands",
-            message = "kiosk exit requested by command",
-        ) ?: error("policy cache unavailable")
+        val policyCache = state.policyCache ?: error("policy cache unavailable")
         return DeviceCommandExecutionResult(
             status = "acked",
             message = "kiosk exit requested",
             details = mapOf(
-                "policyVersion" to policyVersion,
+                "policyVersion" to policyCache.version,
             ),
         )
     }
@@ -1356,21 +1452,40 @@ class MainActivity : AppCompatActivity() {
                     ),
                 )
                 lastManagedFilesSnapshotVersion = policyCache.version
-                recordDeviceLogSafely(
-                    source = "files",
-                    level = "info",
-                    message = "managed files applied",
-                    payload = mapOf("version" to policyCache.version),
-                )
-                requestDeviceLogUpload(bootstrap, identity)
+                val desiredFileCount = countSnapshotArray(policyCache.snapshotJson, "files")
+                val previousFileCount = state.managedFiles?.snapshotJson
+                    ?.let { countSnapshotArray(it, "files") }
+                    ?: 0
+                when {
+                    desiredFileCount > 0 -> recordDeviceLogSafely(
+                        source = "managed_files",
+                        level = "info",
+                        message = "managed files applied",
+                        payload = mapOf(
+                            "policyVersion" to policyCache.version,
+                            "fileCount" to desiredFileCount,
+                            "previousFileCount" to previousFileCount,
+                        ),
+                    )
+                    previousFileCount > 0 -> recordDeviceLogSafely(
+                        source = "managed_files",
+                        level = "info",
+                        message = "managed files cleared",
+                        payload = mapOf(
+                            "policyVersion" to policyCache.version,
+                            "previousFileCount" to previousFileCount,
+                        ),
+                    )
+                }
                 requestDeviceInfoUpload()
             } catch (t: Throwable) {
                 Log.w(TAG, "managed file install failed", t)
-                recordDeviceLogSafely(
-                    source = "files",
-                    level = "warn",
-                    message = "managed file install failed",
-                    payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                recordFailureLog(
+                    source = "managed_files",
+                    message = "managed files apply failed",
+                    throwable = t,
+                    level = "error",
+                    payload = mapOf("policyVersion" to policyCache.version),
                 )
             } finally {
                 withContext(Dispatchers.Main) {
@@ -1402,7 +1517,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (desiredVersion == 0L) {
-            if (state.certificates == null && lastCertificatesSnapshotVersion == 0L) {
+            val previousCertificates = state.certificates
+            if (previousCertificates == null) {
+                lastCertificatesSnapshotVersion = 0L
                 return
             }
             certInstallInFlight = true
@@ -1415,19 +1532,19 @@ class MainActivity : AppCompatActivity() {
                         level = "info",
                         message = "certificates cleared",
                         payload = mapOf(
-                            "version" to 0L,
-                            "installed" to 0,
+                            "policyVersion" to snapshotVersion,
+                            "previousCertificateVersion" to previousCertificates.version,
                         ),
                     )
-                    requestDeviceLogUpload(bootstrap, identity)
                     requestDeviceInfoUpload()
                 } catch (t: Throwable) {
                     Log.w(TAG, "certificate state update failed", t)
-                    recordDeviceLogSafely(
+                    recordFailureLog(
                         source = "certificates",
-                        level = "warn",
-                        message = "certificate state update failed",
-                        payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                        message = "certificates apply failed",
+                        throwable = t,
+                        level = "error",
+                        payload = mapOf("version" to desiredVersion),
                     )
                 } finally {
                     withContext(Dispatchers.Main) {
@@ -1470,15 +1587,15 @@ class MainActivity : AppCompatActivity() {
                         "installed" to result.installed.size,
                     ),
                 )
-                requestDeviceLogUpload(bootstrap, identity)
                 requestDeviceInfoUpload()
             } catch (t: Throwable) {
                 Log.w(TAG, "certificate install failed", t)
-                recordDeviceLogSafely(
+                recordFailureLog(
                     source = "certificates",
-                    level = "warn",
-                    message = "certificate install failed",
-                    payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                    message = "certificates apply failed",
+                    throwable = t,
+                    level = "error",
+                    payload = mapOf("version" to desiredVersion),
                 )
             } finally {
                 withContext(Dispatchers.Main) {
@@ -1493,41 +1610,97 @@ class MainActivity : AppCompatActivity() {
         val policyCache = state.policyCache ?: return
         val identity = state.identity ?: return
         val bootstrap = state.bootstrap ?: return
+        val desiredAppCount = countSnapshotArray(policyCache.snapshotJson, "apps")
+        val previousAppCount = state.managedApps?.snapshotJson
+            ?.let { countSnapshotArray(it, "apps") }
+            ?: 0
+        val hasManagedAppWork = desiredAppCount > 0 || previousAppCount > 0
         val requiresManagedFiles = snapshotHasManagedFiles(policyCache.snapshotJson)
         val requiresCertificates = snapshotHasCertificates(policyCache.snapshotJson)
         if (appInstallInFlight) {
+            Log.w(TAG, "managed apps skipped in-flight instance=$instanceId policy=${policyCache.version}")
             return
         }
         if (requiresManagedFiles && state.managedFiles?.version != policyCache.version) {
+            Log.w(
+                TAG,
+                "managed apps waiting for managed files instance=$instanceId policy=${policyCache.version} " +
+                    "have=${state.managedFiles?.version ?: -1}",
+            )
             return
         }
         if (requiresManagedFiles && lastManagedFilesSnapshotVersion != null && lastManagedFilesSnapshotVersion != policyCache.version) {
+            Log.w(
+                TAG,
+                "managed apps waiting for managed files snapshot refresh instance=$instanceId policy=${policyCache.version} " +
+                    "last=${lastManagedFilesSnapshotVersion ?: -1}",
+            )
             return
         }
         val desiredCertificateVersion = certificateBucketVersion(policyCache.snapshotJson)
         if (requiresCertificates && state.certificates?.version != desiredCertificateVersion) {
+            Log.w(
+                TAG,
+                "managed apps waiting for certificates instance=$instanceId policy=${policyCache.version} " +
+                    "desiredCert=$desiredCertificateVersion have=${state.certificates?.version ?: -1}",
+            )
             return
         }
         if (requiresCertificates && lastCertificatesSnapshotVersion != null && lastCertificatesSnapshotVersion != desiredCertificateVersion) {
+            Log.w(
+                TAG,
+                "managed apps waiting for certificates refresh instance=$instanceId policy=${policyCache.version} " +
+                    "lastCert=${lastCertificatesSnapshotVersion ?: -1} desiredCert=$desiredCertificateVersion",
+            )
             return
         }
         if (state.hasManagedApps && state.managedApps?.version == policyCache.version) {
             lastManagedAppsSnapshotVersion = policyCache.version
+            Log.w(TAG, "managed apps already applied instance=$instanceId policy=${policyCache.version}")
             return
         }
         if (lastManagedAppsSnapshotVersion == policyCache.version && state.hasManagedApps) {
+            Log.w(TAG, "managed apps already attempted instance=$instanceId policy=${policyCache.version}")
             return
         }
+        Log.w(
+            TAG,
+            "managed apps starting instance=$instanceId policy=${policyCache.version} " +
+                "requiresManagedFiles=$requiresManagedFiles requiresCertificates=$requiresCertificates " +
+                "hasManagedFiles=${state.managedFiles?.version ?: -1} hasCertificates=${state.certificates?.version ?: -1}",
+        )
         appInstallInFlight = true
         managedAppProgress.value = ManagedAppInstallProgress.VerifyingSnapshot
+        val applyAttempt = beginManagedAppsApplyAttempt(policyCache.version)
         lifecycleScope.launch(Dispatchers.IO) {
+            if (hasManagedAppWork || applyAttempt.resumed) {
+                recordDeviceLogSafely(
+                    source = "managed_apps",
+                    level = "info",
+                    message = if (applyAttempt.resumed) "managed apps apply resumed" else "managed apps apply started",
+                    payload = mapOf(
+                        "policyVersion" to policyCache.version,
+                        "attemptId" to applyAttempt.attemptId,
+                        "resumed" to applyAttempt.resumed,
+                        "appCount" to desiredAppCount,
+                        "previousAppCount" to previousAppCount,
+                    ),
+                )
+            }
             try {
+                val startedAt = SystemClock.elapsedRealtime()
                 val result = managedAppCoordinator.apply(
                     snapshotJson = policyCache.snapshotJson,
                     deviceSecret = identity.deviceSecret,
                     serverUrl = bootstrap.serverUrl,
                     previousSnapshotJson = state.managedApps?.snapshotJson,
                     onProgress = { progress -> managedAppProgress.value = progress },
+                )
+                Log.w(
+                    TAG,
+                    "managed apps apply finished instance=$instanceId policy=${policyCache.version} " +
+                        "elapsedMs=${SystemClock.elapsedRealtime() - startedAt} installed=${result.installed.size} " +
+                        "uninstalled=${result.uninstalled.size}",
                 )
                 val appliedManagedAppsState = ManagedAppsState(
                     snapshotJson = policyCache.snapshotJson,
@@ -1538,42 +1711,91 @@ class MainActivity : AppCompatActivity() {
                     appliedManagedAppsState,
                 )
                 lastManagedAppsSnapshotVersion = policyCache.version
-                recordDeviceLogSafely(
-                    source = "apps",
-                    level = "info",
-                    message = "managed apps applied",
-                    payload = mapOf(
-                        "installed" to result.installed.size,
-                        "uninstalled" to result.uninstalled.size,
-                        "version" to policyCache.version,
-                    ),
-                )
-                requestDeviceLogUpload(bootstrap, identity)
+                if (result.installed.isNotEmpty() || result.uninstalled.isNotEmpty() || applyAttempt.resumed) {
+                    recordDeviceLogSafely(
+                        source = "managed_apps",
+                        level = "info",
+                        message = "managed apps applied",
+                        payload = mapOf(
+                            "policyVersion" to policyCache.version,
+                            "attemptId" to applyAttempt.attemptId,
+                            "resumed" to applyAttempt.resumed,
+                            "installed" to result.installed.size,
+                            "uninstalled" to result.uninstalled.size,
+                            "elapsedMs" to (SystemClock.elapsedRealtime() - startedAt),
+                        ),
+                    )
+                }
                 requestDeviceInfoUpload()
+                finishManagedAppsApplyAttempt(policyCache.version, applyAttempt.attemptId)
                 val kioskState = latestState.copy(managedApps = appliedManagedAppsState)
-                withContext(Dispatchers.Main) {
-                    Log.w(TAG, "attempting kiosk handoff instance=$instanceId")
-                    if (!kioskModeController.launchConfiguredKioskApp(kioskState)) {
-                        Log.w(TAG, "kiosk handoff fell back to launcher instance=$instanceId")
-                        kioskModeController.apply(
-                            kioskState,
-                            forceLaunch = true,
+                val precheckReason = kioskLaunchPrecheckReason(kioskState)
+                if (precheckReason != null) {
+                    withContext(Dispatchers.Main) {
+                        Log.w(
+                            TAG,
+                            "kiosk handoff skipped instance=$instanceId policy=${policyCache.version} reason=$precheckReason",
+                        )
+                        kioskModeController.apply(kioskState)
+                        managedAppProgress.value = ManagedAppInstallProgress.Completed(
+                            installed = result.installed,
+                            uninstalled = result.uninstalled,
                         )
                     }
-                    Log.w(TAG, "kiosk handoff finished instance=$instanceId")
-                    managedAppProgress.value = ManagedAppInstallProgress.Completed(
-                        installed = result.installed,
-                        uninstalled = result.uninstalled,
+                    if (precheckReason != "kiosk_policy_disabled") {
+                        recordDeviceLogSafely(
+                            source = "kiosk",
+                            level = "warn",
+                            message = "kiosk app launch skipped",
+                            payload = kioskLaunchLogPayload(
+                                state = kioskState,
+                                policyVersion = policyCache.version,
+                                reason = precheckReason,
+                            ),
+                        )
+                    }
+                } else {
+                    val kioskLaunchSucceeded = withContext(Dispatchers.Main) {
+                        Log.w(TAG, "attempting kiosk handoff instance=$instanceId")
+                        val launched = kioskModeController.launchConfiguredKioskApp(kioskState)
+                        if (!launched) {
+                            Log.w(TAG, "kiosk handoff fell back to launcher instance=$instanceId")
+                            kioskModeController.apply(
+                                kioskState,
+                                forceLaunch = true,
+                            )
+                        }
+                        Log.w(TAG, "kiosk handoff finished instance=$instanceId")
+                        managedAppProgress.value = ManagedAppInstallProgress.Completed(
+                            installed = result.installed,
+                            uninstalled = result.uninstalled,
+                        )
+                        launched
+                    }
+                    recordDeviceLogSafely(
+                        source = "kiosk",
+                        level = if (kioskLaunchSucceeded) "info" else "error",
+                        message = if (kioskLaunchSucceeded) "kiosk app launched" else "kiosk app launch failed",
+                        payload = kioskLaunchLogPayload(
+                            state = kioskState,
+                            policyVersion = policyCache.version,
+                            reason = if (kioskLaunchSucceeded) "launched" else "launch_returned_false",
+                        ),
                     )
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "managed app install failed", t)
-                recordDeviceLogSafely(
-                    source = "apps",
-                    level = "warn",
+                recordFailureLog(
+                    source = "managed_apps",
                     message = "managed app install failed",
-                    payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
+                    throwable = t,
+                    level = "error",
+                    payload = mapOf(
+                        "policyVersion" to policyCache.version,
+                        "attemptId" to applyAttempt.attemptId,
+                    ),
                 )
+                finishManagedAppsApplyAttempt(policyCache.version, applyAttempt.attemptId)
                 managedAppProgress.value = ManagedAppInstallProgress.Failed(t.message ?: t.javaClass.simpleName)
             } finally {
                 withContext(Dispatchers.Main) {
@@ -1587,6 +1809,7 @@ class MainActivity : AppCompatActivity() {
     private fun consumeBootstrapIntent() {
         val rawBootstrapJson = resolveBootstrapJson()
             ?: return
+        pendingBootstrapDataString = null
         Log.w(TAG, "consumeBootstrapIntent instance=$instanceId bootstrap=${rawBootstrapJson.hashCode()}")
 
         val normalizedBootstrap = rawBootstrapJson.trim()
@@ -1594,38 +1817,84 @@ class MainActivity : AppCompatActivity() {
             return
         }
         try {
-            runBlocking(Dispatchers.IO + NonCancellable) {
-                stateStore.clearAllState()
-                BootstrapProvisioner(stateStore).persist(rawBootstrapJson)
+            val bootstrapEntryStartedAt = SystemClock.elapsedRealtime()
+            Log.w(TAG, "bootstrap intake begin instance=$instanceId bootstrap=${rawBootstrapJson.hashCode()}")
+            lifecycleScope.launch(Dispatchers.IO) {
+                recordDeviceLogSafely(
+                    source = "bootstrap",
+                    level = "info",
+                    message = "bootstrap intent received",
+                    payload = mapOf("bootstrapHash" to rawBootstrapJson.hashCode()),
+                )
             }
-            recordDeviceLog(
-                source = "bootstrap",
-                level = "info",
-                message = "bootstrap intent received",
-                payload = mapOf("bootstrapHash" to rawBootstrapJson.hashCode()),
+            Log.w(
+                TAG,
+                "bootstrap intake after log launch instance=$instanceId bootstrap=${rawBootstrapJson.hashCode()} " +
+                    "elapsedMs=${SystemClock.elapsedRealtime() - bootstrapEntryStartedAt}",
             )
+            val bootstrapStartedAt = SystemClock.elapsedRealtime()
+            Log.w(TAG, "bootstrap persistence begin instance=$instanceId bootstrap=${rawBootstrapJson.hashCode()}")
+            runBlocking(Dispatchers.IO + NonCancellable) {
+                Log.w(
+                    TAG,
+                    "bootstrap clearAllState begin instance=$instanceId bootstrap=${rawBootstrapJson.hashCode()} " +
+                        "elapsedMs=${SystemClock.elapsedRealtime() - bootstrapStartedAt}",
+                )
+                stateStore.clearAllState()
+                Log.w(
+                    TAG,
+                    "bootstrap state cleared instance=$instanceId bootstrap=${rawBootstrapJson.hashCode()} " +
+                        "elapsedMs=${SystemClock.elapsedRealtime() - bootstrapStartedAt}",
+                )
+                BootstrapProvisioner(stateStore).persist(rawBootstrapJson)
+                Log.w(
+                    TAG,
+                    "bootstrap state persisted instance=$instanceId bootstrap=${rawBootstrapJson.hashCode()} " +
+                        "elapsedMs=${SystemClock.elapsedRealtime() - bootstrapStartedAt}",
+                )
+            }
+            Log.w(
+                TAG,
+                "bootstrap intent applied instance=$instanceId bootstrap=${rawBootstrapJson.hashCode()} " +
+                    "elapsedMs=${SystemClock.elapsedRealtime() - bootstrapStartedAt}",
+            )
+            lifecycleScope.launch(Dispatchers.IO) {
+                recordDeviceLogSafely(
+                    source = "bootstrap",
+                    level = "info",
+                    message = "bootstrap persisted",
+                    payload = mapOf("bootstrapHash" to rawBootstrapJson.hashCode()),
+                )
+            }
             fileInstallInFlight = false
             appInstallInFlight = false
             lastManagedFilesSnapshotVersion = null
             lastCertificatesSnapshotVersion = null
             lastManagedAppsSnapshotVersion = null
             certInstallInFlight = false
-            cancelDeviceLogUploadRequests()
             lastEnrollmentAttemptBootstrapJson = null
             cachedPrettySnapshotJson = null
             cachedPrettySnapshotText = ""
+            getSharedPreferences(LAUNCHER_RUNTIME_PREFS, MODE_PRIVATE)
+                .edit()
+                .remove(KEY_LAST_CONFIG_CHANGED_LOG_VERSION)
+                .remove(KEY_MANAGED_APPS_APPLY_POLICY_VERSION)
+                .remove(KEY_MANAGED_APPS_APPLY_ATTEMPT_ID)
+                .apply()
             managedAppProgress.value = ManagedAppInstallProgress.Idle
             renderManagedAppProgress()
             enrollmentStateMachine.reset()
             enrollmentStateMachine.onBootstrapReceived(normalizedBootstrap)
         } catch (t: Throwable) {
             Log.w(TAG, "bootstrap parsing failed", t)
-            recordDeviceLog(
-                source = "bootstrap",
-                level = "warn",
-                message = "bootstrap parsing failed",
-                payload = mapOf("error" to (t.message ?: t.javaClass.simpleName)),
-            )
+            lifecycleScope.launch(Dispatchers.IO) {
+                recordFailureLog(
+                    source = "bootstrap",
+                    message = "bootstrap failed",
+                    throwable = t,
+                    level = "error",
+                )
+            }
         }
     }
 
@@ -1661,6 +1930,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resolveBootstrapJson(): String? {
+        pendingBootstrapDataString?.let { data ->
+            if (data.startsWith(BOOTSTRAP_DATA_PREFIX)) {
+                val encoded = data.removePrefix(BOOTSTRAP_DATA_PREFIX)
+                return String(
+                    Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP),
+                    Charsets.UTF_8,
+                )
+            }
+        }
         intent.dataString?.let { data ->
             if (data.startsWith(BOOTSTRAP_DATA_PREFIX)) {
                 val encoded = data.removePrefix(BOOTSTRAP_DATA_PREFIX)
@@ -1671,6 +1949,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return null
+    }
+
+    private fun captureBootstrapIntentData(intent: Intent) {
+        val data = intent.dataString ?: return
+        if (data.startsWith(BOOTSTRAP_DATA_PREFIX)) {
+            pendingBootstrapDataString = data
+        }
     }
 
     private fun runtimeConfig(snapshotJson: String?): RuntimeSnapshotConfig {
@@ -1696,62 +1981,175 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun maybeStartDeviceLogUpload(state: AgentState) {
-        maybeStartDeviceLogUpload(state.bootstrap, state.identity)
-    }
-
-    private fun maybeStartDeviceLogUpload(
-        bootstrap: com.xmdm.launcher.state.BootstrapState?,
-        identity: com.xmdm.launcher.state.DeviceIdentityState?,
-    ) {
-        if (bootstrap == null || identity == null) {
-            deviceLogUploadJob?.cancel()
-            deviceLogUploadJob = null
-            deviceLogUploadTargetKey = null
-            cancelDeviceLogUploadRequests()
+    private suspend fun maybeFlushPendingDeviceLogs(state: AgentState) {
+        val bootstrap = state.bootstrap ?: return
+        val identity = state.identity ?: return
+        val sessionKey = "${bootstrap.serverUrl}|${bootstrap.secondaryServerUrl}|${identity.deviceId}"
+        if (pendingDeviceLogFlushSessionKey == sessionKey) {
             return
         }
-        val targetKey = "${bootstrap.serverUrl}|${bootstrap.secondaryServerUrl}|${identity.deviceId}|${identity.deviceSecret}"
-        if (deviceLogUploadJob?.isActive == true && deviceLogUploadTargetKey == targetKey) {
-            return
-        }
-        deviceLogUploadJob?.cancel()
-        deviceLogUploadTargetKey = targetKey
-        deviceLogUploadJob = lifecycleScope.launch(Dispatchers.IO) {
-            delay(DEVICE_LOG_UPLOAD_INITIAL_DELAY_MS)
-            while (isActive) {
-                try {
-                    val uploaded = deviceLogCoordinator.upload(bootstrap, identity)
-                    if (uploaded > 0) {
-                        Log.w(TAG, "device logs uploaded count=$uploaded instance=$instanceId")
-                    }
-                } catch (t: Throwable) {
-                    if (t is kotlinx.coroutines.CancellationException) {
-                        throw t
-                    }
-                    Log.w(TAG, "device logs upload failed", t)
-                }
-                delay(DEVICE_LOG_UPLOAD_INTERVAL_MS)
-            }
-        }
+        pendingDeviceLogFlushSessionKey = sessionKey
+        deviceLogCoordinator.flushPendingLogsIfSessionAvailable()
     }
 
-    private fun recordDeviceLog(
+    private suspend fun recordLauncherUpgradeIfNeeded() {
+        val prefs = getSharedPreferences(LAUNCHER_RUNTIME_PREFS, MODE_PRIVATE)
+        val previousVersionCode = prefs.getInt(KEY_LAST_VERSION_CODE, -1)
+        val previousVersionName = prefs.getString(KEY_LAST_VERSION_NAME, null)
+        if (previousVersionCode >= 0 && previousVersionCode != BuildConfig.VERSION_CODE) {
+            val upgradePayload = mapOf(
+                "previousVersionCode" to previousVersionCode,
+                "currentVersionCode" to BuildConfig.VERSION_CODE,
+                "previousVersionName" to previousVersionName,
+                "currentVersionName" to BuildConfig.VERSION_NAME,
+            )
+            recordDeviceLogSafely(
+                source = "launcher",
+                level = "info",
+                message = "launcher upgraded",
+                payload = upgradePayload,
+            )
+        }
+        prefs.edit()
+            .putInt(KEY_LAST_VERSION_CODE, BuildConfig.VERSION_CODE)
+            .putString(KEY_LAST_VERSION_NAME, BuildConfig.VERSION_NAME)
+            .apply()
+    }
+
+    private suspend fun recordFailureLog(
         source: String,
-        level: String,
         message: String,
+        throwable: Throwable,
+        level: String = "warn",
         payload: Map<String, Any?> = emptyMap(),
     ) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                recordDeviceLogNow(source, level, message, payload)
-            } catch (t: Throwable) {
-                if (t is kotlinx.coroutines.CancellationException) {
-                    throw t
-                }
-                Log.w(TAG, "device log record failed", t)
-            }
+        recordDeviceLogSafely(
+            source = source,
+            level = level,
+            message = message,
+            payload = payload + mapOf(
+                "errorType" to throwable.javaClass.simpleName,
+                "errorMessage" to throwable.message?.take(MAX_DEVICE_LOG_ERROR_MESSAGE_CHARS),
+            ),
+        )
+    }
+
+    private fun sha256Hex(value: String): String {
+        val bytes = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString(separator = "") { byte -> "%02x".format(byte) }
+    }
+
+    private fun countSnapshotArray(snapshotJson: String, key: String): Int {
+        return runCatching {
+            JsonParser.parseString(snapshotJson)
+                .asJsonObject
+                .getAsJsonArray(key)
+                ?.size()
+                ?: 0
+        }.getOrDefault(0)
+    }
+
+    private data class ManagedAppApplyAttempt(
+        val attemptId: String,
+        val resumed: Boolean,
+    )
+
+    private fun beginManagedAppsApplyAttempt(policyVersion: Long): ManagedAppApplyAttempt {
+        val prefs = getSharedPreferences(LAUNCHER_RUNTIME_PREFS, MODE_PRIVATE)
+        val inFlightPolicy = if (prefs.contains(KEY_MANAGED_APPS_APPLY_POLICY_VERSION)) {
+            prefs.getLong(KEY_MANAGED_APPS_APPLY_POLICY_VERSION, Long.MIN_VALUE)
+        } else {
+            null
         }
+        val existingAttemptId = prefs.getString(KEY_MANAGED_APPS_APPLY_ATTEMPT_ID, null)
+        val resumed = inFlightPolicy == policyVersion && !existingAttemptId.isNullOrBlank()
+        val attemptId = existingAttemptId.takeIf { resumed } ?: UUID.randomUUID().toString()
+        prefs.edit()
+            .putLong(KEY_MANAGED_APPS_APPLY_POLICY_VERSION, policyVersion)
+            .putString(KEY_MANAGED_APPS_APPLY_ATTEMPT_ID, attemptId)
+            .apply()
+        return ManagedAppApplyAttempt(attemptId = attemptId, resumed = resumed)
+    }
+
+    private fun finishManagedAppsApplyAttempt(policyVersion: Long, attemptId: String) {
+        val prefs = getSharedPreferences(LAUNCHER_RUNTIME_PREFS, MODE_PRIVATE)
+        val inFlightPolicy = if (prefs.contains(KEY_MANAGED_APPS_APPLY_POLICY_VERSION)) {
+            prefs.getLong(KEY_MANAGED_APPS_APPLY_POLICY_VERSION, Long.MIN_VALUE)
+        } else {
+            null
+        }
+        val existingAttemptId = prefs.getString(KEY_MANAGED_APPS_APPLY_ATTEMPT_ID, null)
+        if (inFlightPolicy == policyVersion && existingAttemptId == attemptId) {
+            prefs.edit()
+                .remove(KEY_MANAGED_APPS_APPLY_POLICY_VERSION)
+                .remove(KEY_MANAGED_APPS_APPLY_ATTEMPT_ID)
+                .apply()
+        }
+    }
+
+    private fun kioskLaunchLogPayload(
+        state: AgentState,
+        policyVersion: Long,
+        reason: String,
+    ): Map<String, Any?> {
+        val snapshotJson = state.policyCache?.snapshotJson
+        val packageName = snapshotJson?.let { findKioskPackageName(it) }
+        return buildMap {
+            put("policyVersion", policyVersion)
+            put("reason", reason)
+            packageName?.let { put("packageName", it) }
+        }
+    }
+
+    private fun kioskLaunchPrecheckReason(state: AgentState): String? {
+        val policyCache = state.policyCache ?: return "policy_cache_missing"
+        if (!kioskPolicyEnabled(policyCache.snapshotJson)) {
+            return "kiosk_policy_disabled"
+        }
+        if (!isPolicyContentReady(state, policyCache.version)) {
+            return "policy_content_not_ready"
+        }
+        val packageName = findKioskPackageName(policyCache.snapshotJson)
+        if (packageName.isNullOrBlank()) {
+            return "kiosk_package_not_configured"
+        }
+        return try {
+            packageManager.getPackageInfo(packageName, 0)
+            if (packageManager.getLaunchIntentForPackage(packageName) == null) {
+                "launch_intent_missing"
+            } else {
+                null
+            }
+        } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+            "package_not_installed"
+        } catch (_: Throwable) {
+            "package_check_failed"
+        }
+    }
+
+    private fun kioskPolicyEnabled(snapshotJson: String): Boolean {
+        return runCatching {
+            JsonParser.parseString(snapshotJson)
+                .asJsonObject
+                .getAsJsonObject("policy")
+                ?.get("kioskMode")
+                ?.takeIf { !it.isJsonNull }
+                ?.asBoolean
+                ?: false
+        }.getOrDefault(false)
+    }
+
+    private fun findKioskPackageName(snapshotJson: String): String? {
+        return runCatching {
+            JsonParser.parseString(snapshotJson)
+                .asJsonObject
+                .getAsJsonObject("policy")
+                ?.get("kioskAppPackage")
+                ?.takeIf { !it.isJsonNull }
+                ?.asString
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     private suspend fun recordDeviceLogSafely(
@@ -1770,6 +2168,59 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private suspend fun recordConfigChangedIfNeeded(
+        previousPolicyVersion: Long?,
+        cached: com.xmdm.launcher.state.PolicyCacheState,
+    ) {
+        val currentRevision = cached.version
+        var previousConfigRevisionForPayload: Long? = null
+
+        val shouldLog = configChangedLogMutex.withLock {
+            val lastLoggedRevision = lastConfigChangedLogVersion()
+            if (lastLoggedRevision == currentRevision) {
+                false
+            } else {
+                previousConfigRevisionForPayload = previousPolicyVersion
+                    ?.takeIf { it != currentRevision }
+                    ?: lastLoggedRevision?.takeIf { it != currentRevision }
+                saveLastConfigChangedLogVersion(currentRevision)
+                true
+            }
+        }
+        if (!shouldLog) {
+            return
+        }
+
+        recordDeviceLogSafely(
+            source = "config",
+            level = "info",
+            message = "config changed",
+            payload = mapOf(
+                "previousConfigRevision" to previousConfigRevisionForPayload,
+                "configRevision" to currentRevision,
+                "snapshotHash" to sha256Hex(cached.snapshotJson),
+                "appCount" to countSnapshotArray(cached.snapshotJson, "apps"),
+                "fileCount" to countSnapshotArray(cached.snapshotJson, "files"),
+                "certificateCount" to countSnapshotArray(cached.snapshotJson, "certificates"),
+            ),
+        )
+    }
+
+    private fun lastConfigChangedLogVersion(): Long? {
+        val prefs = getSharedPreferences(LAUNCHER_RUNTIME_PREFS, MODE_PRIVATE)
+        if (!prefs.contains(KEY_LAST_CONFIG_CHANGED_LOG_VERSION)) {
+            return null
+        }
+        return prefs.getLong(KEY_LAST_CONFIG_CHANGED_LOG_VERSION, 0L)
+    }
+
+    private fun saveLastConfigChangedLogVersion(version: Long) {
+        getSharedPreferences(LAUNCHER_RUNTIME_PREFS, MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_LAST_CONFIG_CHANGED_LOG_VERSION, version)
+            .apply()
+    }
+
     private suspend fun recordDeviceLogNow(
         source: String,
         level: String,
@@ -1784,79 +2235,6 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun requestDeviceLogUpload(
-        bootstrap: com.xmdm.launcher.state.BootstrapState,
-        identity: com.xmdm.launcher.state.DeviceIdentityState,
-    ) {
-        val targetKey = "${bootstrap.serverUrl}|${bootstrap.secondaryServerUrl}|${identity.deviceId}|${identity.deviceSecret}"
-        val jobToCancel = synchronized(deviceLogUploadRequestLock) {
-            if (deviceLogUploadRequestJob != null && deviceLogUploadRequestTargetKey == targetKey) {
-                deviceLogUploadRequestPending = true
-                return
-            }
-            val currentJob = deviceLogUploadRequestJob
-            deviceLogUploadRequestJob = null
-            deviceLogUploadRequestTargetKey = targetKey
-            deviceLogUploadRequestPending = false
-            currentJob
-        }
-        jobToCancel?.cancel()
-        val job = lifecycleScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
-            delay(DEVICE_LOG_UPLOAD_REQUEST_DEBOUNCE_MS)
-            while (isActive) {
-                try {
-                    val uploaded = deviceLogCoordinator.upload(bootstrap, identity)
-                    if (uploaded > 0) {
-                        Log.w(TAG, "device logs uploaded count=$uploaded instance=$instanceId")
-                    }
-                } catch (t: Throwable) {
-                    if (t is kotlinx.coroutines.CancellationException) {
-                        throw t
-                    }
-                    Log.w(TAG, "device logs upload failed", t)
-                }
-                val shouldRepeat = synchronized(deviceLogUploadRequestLock) {
-                    if (deviceLogUploadRequestTargetKey != targetKey) {
-                        false
-                    } else if (!deviceLogUploadRequestPending) {
-                        false
-                    } else {
-                        deviceLogUploadRequestPending = false
-                        true
-                    }
-                }
-                if (!shouldRepeat) {
-                    break
-                }
-                delay(DEVICE_LOG_UPLOAD_REQUEST_DEBOUNCE_MS)
-            }
-        }
-        job.invokeOnCompletion {
-            synchronized(deviceLogUploadRequestLock) {
-                if (deviceLogUploadRequestJob === job) {
-                    deviceLogUploadRequestJob = null
-                    deviceLogUploadRequestTargetKey = null
-                    deviceLogUploadRequestPending = false
-                }
-            }
-        }
-        synchronized(deviceLogUploadRequestLock) {
-            deviceLogUploadRequestJob = job
-        }
-        job.start()
-    }
-
-    private fun cancelDeviceLogUploadRequests() {
-        val jobToCancel = synchronized(deviceLogUploadRequestLock) {
-            val currentJob = deviceLogUploadRequestJob
-            deviceLogUploadRequestJob = null
-            deviceLogUploadRequestTargetKey = null
-            deviceLogUploadRequestPending = false
-            currentJob
-        }
-        jobToCancel?.cancel()
-    }
-
     private fun requestDeviceInfoUpload() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -1869,6 +2247,11 @@ class MainActivity : AppCompatActivity() {
                     throw t
                 }
                 Log.w(TAG, "device info upload failed", t)
+                recordFailureLog(
+                    source = "device_info",
+                    message = "device info upload failed",
+                    throwable = t,
+                )
             }
         }
     }
@@ -1878,11 +2261,15 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_OPEN_KIOSK_ADMIN_MENU = "com.xmdm.launcher.EXTRA_OPEN_KIOSK_ADMIN_MENU"
         const val BOOTSTRAP_DATA_PREFIX = "base64url:"
         private const val TAG = "XmdmLauncher"
-        private const val DEVICE_LOG_UPLOAD_INITIAL_DELAY_MS = 5_000L
-        private const val DEVICE_LOG_UPLOAD_INTERVAL_MS = 30_000L
-        private const val DEVICE_LOG_UPLOAD_REQUEST_DEBOUNCE_MS = 1_000L
         private const val DEFAULT_COMMAND_POLL_INTERVAL_MS = 30_000L
         private const val DEFAULT_CONFIG_SYNC_INTERVAL_MS = 15 * 60 * 1000L
+        private const val LAUNCHER_RUNTIME_PREFS = "launcher_runtime"
+        private const val KEY_LAST_VERSION_CODE = "last_version_code"
+        private const val KEY_LAST_VERSION_NAME = "last_version_name"
+        private const val KEY_LAST_CONFIG_CHANGED_LOG_VERSION = "last_config_changed_log_version"
+        private const val KEY_MANAGED_APPS_APPLY_POLICY_VERSION = "managed_apps_apply_policy_version"
+        private const val KEY_MANAGED_APPS_APPLY_ATTEMPT_ID = "managed_apps_apply_attempt_id"
+        private const val MAX_DEVICE_LOG_ERROR_MESSAGE_CHARS = 200
         private val SAVED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
 
         fun intent(context: android.content.Context): android.content.Intent {
